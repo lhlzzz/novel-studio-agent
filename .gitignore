@@ -1,0 +1,39 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# local DB / caches
+postgres-data/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# agent tooling noise
+.playwright-mcp/
+.chrome-readonly/
+.understand-anything/
+.plan-enforcer/
+.agentmemory/
+.rtk/
+.gitnexus/
+.codegraph/
+.mimocode/
+.mimocode-project-id
+node_modules/
+
+# media binaries / local models
+*.mp4
+*.mov
+*.webm
+*.tflite
+*.sqlite
+*.db
+
+# nested line noise
+xiaoping/videos/
+xiaoping/.chrome-readonly/
+xiaoshuo/deliverables

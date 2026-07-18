@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-06-01 02:11:23",
+  "production_ready": false,
+  "runtime_recheck_mode": "local_fallback_after_profile_dispatch_failed",
+  "dispatch_blocker": "Hermes profiles missing; dispatch logs show: Profile <name> does not exist.",
+  "dispatch_logs_dir": "logs/runtime-reality-recheck",
+  "status": "PASS_LOCAL_CHECKS_AGENT_PROFILE_BLOCKED",
+  "workspace": "xiaoping",
+  "runtime_boundary": "internal video prototype only; no publish/private message/payment",
+  "checks": {
+    "codegraph": "synced and up to date",
+    "remotion_versions": "PASS all Remotion packages 4.0.469, zod pinned 4.3.6",
+    "remotion_compositions": "PASS 6 compositions listed",
+    "ffmpeg_ffprobe": "PASS version smoke"
+  },
+  "evidence_paths": [
+    "workspaces/xiaoping/videos/low-pressure-start/index.ts"
+  ]
+}

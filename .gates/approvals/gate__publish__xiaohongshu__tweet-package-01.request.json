@@ -1,0 +1,27 @@
+{
+  "gate_key": "gate:publish:xiaohongshu:tweet-package-01",
+  "action": "publish",
+  "platform": "xiaohongshu",
+  "package_key": "tweet-package-01-ai-efficiency-profit",
+  "status": "requested",
+  "requested_by": "agent",
+  "approved_by": null,
+  "rationale": "request external action; awaiting boss approval",
+  "checks": {
+    "ai_feel": "pass",
+    "all_pass": true,
+    "failures": [],
+    "labeling": "pass",
+    "package_path": "packages/tweet-package-01-ai-efficiency-profit.md",
+    "copyright_risk": "pass",
+    "marketing_risk": "pass",
+    "conversion_pressure": "pass"
+  },
+  "evidence": {
+    "package": "packages/tweet-package-01-ai-efficiency-profit.md",
+    "package_key": "tweet-package-01-ai-efficiency-profit"
+  },
+  "decided_at": null,
+  "created_at": "2026-07-18T06:46:41.358650",
+  "instruction": "Boss: review checks, then `python scripts/publish_gate.py approve --gate-key ... --by boss`"
+}

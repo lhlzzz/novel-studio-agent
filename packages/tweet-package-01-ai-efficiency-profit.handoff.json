@@ -1,0 +1,62 @@
+{
+  "protocol_version": "2026-07-18",
+  "package_key": "tweet-package-01-ai-efficiency-profit",
+  "package_path": "meiti/xiaoping/reports/tweet-package-01-ai-efficiency-profit.md",
+  "meiti_index_path": "meiti/packages/tweet-package-01-ai-efficiency-profit.md",
+  "sku": "XP-DIGI-AI-TPL-01",
+  "product_name": "小商家 AI 效率模板包 v0.1",
+  "product_type": "digital",
+  "includes": [
+    "高频问题回复草稿表",
+    "信息整理表",
+    "7天内容日历结构"
+  ],
+  "excludes": [
+    "自动回复机器人",
+    "代运营",
+    "效果承诺",
+    "一对一陪跑",
+    "实物"
+  ],
+  "cost_floor": "NEED_EVIDENCE",
+  "list_price_sim": {
+    "currency": "CNY",
+    "trail": 12.9,
+    "standard": 29,
+    "tag": "SIMULATED"
+  },
+  "list_price_official": "NOT_ALLOWED_YET",
+  "fulfillment": "NEED_EVIDENCE",
+  "category": "NEED_EVIDENCE",
+  "platforms_content": [
+    "xiaohongshu",
+    "shipinhao",
+    "douyin",
+    "gongzhonghao",
+    "xianyu",
+    "x",
+    "tiktok",
+    "instagram",
+    "youtube_shorts"
+  ],
+  "platforms_commerce": [],
+  "compliance_notes": [
+    "INTERNAL_ONLY",
+    "no guarantee language",
+    "no real publish/list/pay without boss gate"
+  ],
+  "gate_status": "locked",
+  "evidence_paths": [
+    "meiti/evidence/tweet-package-01/",
+    "meiti/xiaoping/reports/tweet-package-01-ai-efficiency-profit.md",
+    "xiaodian/sku_digital_xp_tpl_01.md"
+  ],
+  "meiti_one_liner": "请按协议补交付通道与正式 SKU 元数据；内容主稿与多平台文案已在 package_path。",
+  "xiaodian_next": [
+    "定交付通道与正式 SKU 编码规则",
+    "闲鱼类目与违禁词自检表",
+    "老板批准前不上架、不收款"
+  ],
+  "created_at": "2026-07-18",
+  "status": "INTERNAL_ONLY"
+}

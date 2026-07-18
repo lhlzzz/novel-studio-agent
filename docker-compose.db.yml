@@ -1,0 +1,21 @@
+# meiti unified PostgreSQL + pgvector
+# Port 5445 avoids clash with:
+#   xiaogu 5432, xiaomei 5433, xiaoshuo 5443, xiaoping 5444
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: meiti-db
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: meiti
+      POSTGRES_USER: meiti
+      POSTGRES_PASSWORD: meiti
+    ports:
+      - "5445:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meiti -d meiti"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

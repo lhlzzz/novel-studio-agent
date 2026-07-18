@@ -1,0 +1,88 @@
+schema_version: 1
+recovery_id: compact_20260529_015425
+timestamp: 2026-05-29T01:54:25.802340+08:00
+source: PreCompact
+cwd: /root/hermes/company-ai-system/workspaces/xiaoshuo
+active_project: xiaoshuo
+workspace_generation: 1
+
+active_task:
+  - 当前主项目：xiaoshuo
+  - 当前阶段：新书方向B / 《我欠三百万，修bug续命》第001-010章发布前返修
+  - 当前作品：《我欠三百万，修bug续命》
+current_step:
+  - 下一步 1：只读 `写作手法/00_新书最终写作标准_全量全息版.md` 和 `我欠三百万，修bug续命/正文/第003章 她怀孕六周，我丢了三个月.md`，按总标准重写/深返修第003章。
+  - 下一步 2：第003章重点承接第002章：苏念通讯录只剩“苏”、怀孕短信、孩子父亲字段、50万作为查旧账工具、王海查无此人；必须把苏念写成有主动判断和痛感的活人，不写成线索工具。
+  - 下一步 3：第003章完成后硬扫描并自审；第001-010章全部完成总标准 pass 后，才恢复第011章及后续白昼旧接口单元。
+next_action:
+  - 下一步 1：只读 `写作手法/00_新书最终写作标准_全量全息版.md` 和 `我欠三百万，修bug续命/正文/第003章 她怀孕六周，我丢了三个月.md`，按总标准重写/深返修第003章。
+blockers:
+  - STATE.md: 阻塞：
+  - HANDOFF.md: 风险：
+  - SESSION.md: Blockers:
+important_decisions:
+  - Codex 已在 2026-05-21 测试确认可通过 Playwright MCP 访问公开网页和番茄小说公开首页，因此本 workspace 不再默认要求 Claude 作为唯一浏览器资料网关。
+  - 执行规则：
+  - 1. 需要番茄小说、榜单、热门书、评论区、竞品页面或其它公开网页资料时，Codex 可优先使用 Playwright MCP。
+  - 2. Chrome DevTools MCP 可作为补充；如 Chrome DevTools MCP 不稳定，优先使用 Playwright MCP。
+  - 3. Codex 浏览器调研后必须写入 `RESEARCH.md`，不能只在聊天里口头总结。
+  - 4. `RESEARCH.md` 必须包含：查询目标、观察页面/来源、关键结论、对当前章节改造的影响、仍不确定的问题。
+  - 5. Codex 不得凭空假设网页、评论、留存率或榜单内容；只能基于浏览器 MCP 实际可见内容、已有资料包或用户/Claude 明确提供的信息。
+rejected_paths:
+  - TASK.md: 用户最新流程要求：全部标准归到一个总标准文件，日常写作/返修/审稿/发布准备只强制读取 `写作手法/00_新书最终写作标准_全量全息版.md`，不要再把多个台账和复核文件作为前置必读入口。
+  - TOOLING.md: - 不要把模型、Python 依赖或外部 repo 装进本 workspace。
+  - CLAUDE.md: - 代码结构、符号、调用链、文件定位优先用 CodeGraph；索引过期或为空时在本 workspace 运行 `codegraph sync`，不要重装工具。
+  - CLAUDE.md: - 跨会话偏好、项目事实和非代码经验用 AgentMemory/现有记忆系统；不要把代码或 git 可推导信息写入长期记忆。
+open_files:
+  - TASK.md
+  - NEXT_ACTION.md
+  - RULES.md
+  - /chapter-001.md
+  - chapter-061.md
+  - ../../../README.md
+  - ../../.hermes_memory_context.md
+  - ../../AGENTS.md
+hot_artifacts:
+  - TASK.md
+  - NEXT_ACTION.md
+  - RULES.md
+  - /chapter-001.md
+  - chapter-061.md
+artifact_index:
+  - TASK.md
+  - NEXT_ACTION.md
+  - RULES.md
+  - /chapter-001.md
+  - chapter-061.md
+  - ../../../README.md
+  - ../../.hermes_memory_context.md
+  - ../../AGENTS.md
+  - ../../BOOTSTRAP.md
+  - ../../CLAUDE.md
+  - ../../COMPANY_TASK_STATE_MACHINE.md
+  - ../../CONTEXT.md
+project_context:
+  - TASK.md: 用户最新要求：本书需要冲 2026 番茄网文神启计划，并与巅峰榜前三《我不是戏神》《十日终焉》《游戏入侵》对标；写作标准需合并“都市脑洞底盘 / 悬疑脑洞推进 / 都市高武化外显升级”的冲榜定位，不能改成纯都市高武，也不能写成游戏副本/属性面板文。
+  - TASK.md: 用户新增读者反馈：前两章主线不清，看了半天不知道在看什么；无关紧要环境描写太多；表层真人化仍有 AI 味；必须有简介介绍主线。所有此类修正必须先进入总写作标准，再改正文，避免后续偏移。
+  - TASK.md: 用户最新流程要求：全部标准归到一个总标准文件，日常写作/返修/审稿/发布准备只强制读取 `写作手法/00_新书最终写作标准_全量全息版.md`，不要再把多个台账和复核文件作为前置必读入口。
+  - TASK.md: - `workspaces/xiaoshuo/写作手法/00_新书最终写作标准_全量全息版.md`
+  - NEXT_ACTION.md: 下一步 1：只读 `写作手法/00_新书最终写作标准_全量全息版.md` 和 `我欠三百万，修bug续命/正文/第003章 她怀孕六周，我丢了三个月.md`，按总标准重写/深返修第003章。
+  - RULES.md: 1. `enterprise-doctor/正文/chapter-001.md` 到 `chapter-061.md` 全部进入优化范围。
+  - RULES.md: 3. 必须遵守 `enterprise-doctor/最高写作指南.md`。
+  - RULES.md: 1. 写或改《我欠三百万，修bug续命》前，只强制先读 `写作手法/00_新书最终写作标准_全量全息版.md`。
+state_warnings:
+  - none
+recovery_order:
+  - detect workspace
+  - load .claude/runtime/runtime_state.json
+  - load .claude/compact/latest.yaml
+  - validate workspace_generation
+  - load TASK.md STATE.md SESSION.md NEXT_ACTION.md HANDOFF.md DECISIONS.md RULES.md TOOLING.md TODO.md PLAN.md CLAUDE.md README.md_if_present
+  - load hot_artifacts only when needed for NEXT_ACTION
+  - continue NEXT_ACTION
+recovery_rules:
+  - project source-of-truth files override this checkpoint
+  - this checkpoint overrides compact summary
+  - rejected_paths must not be revived
+  - if checkpoint generation is older than runtime_state generation, treat checkpoint as stale
+  - do not switch workspace unless the user explicitly asks

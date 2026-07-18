@@ -1,0 +1,112 @@
+{
+  "generated_at": "2026-05-15",
+  "project_root": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor",
+  "scope": "正文/chapter-031.md to chapter-037.md, plus chapter-038 related context",
+  "rule": "补验收完成前，不允许宣称31-37章已发布级 PASS",
+  "status_rows": [
+    {
+      "chapter": 31,
+      "title": "第三十一章 烟火气也要办暂住证",
+      "正文已存在": "是",
+      "发布候选已验收": "是",
+      "草稿补验收中": "是",
+      "状态": "KEEP_IN_正文",
+      "字数": 4928,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_031_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-031_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 32,
+      "title": "第三十二章 清白不能靠嗓门烤熟",
+      "正文已存在": "是",
+      "发布候选已验收": "是",
+      "草稿补验收中": "是",
+      "状态": "KEEP_IN_正文",
+      "字数": 4923,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_032_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-032_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 33,
+      "title": "第三十三章 同批次，最怕不同命",
+      "正文已存在": "是",
+      "发布候选已验收": "是",
+      "草稿补验收中": "是",
+      "状态": "NEED_LIGHT_FIX",
+      "字数": 4958,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_033_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-033_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 34,
+      "title": "第三十四章 票据会跑，账不会",
+      "正文已存在": "是",
+      "发布候选已验收": "否",
+      "草稿补验收中": "是",
+      "状态": "KEEP_IN_正文",
+      "字数": 4895,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_034_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-034_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 35,
+      "title": "第35章 兄弟合伙，最怕只讲义气",
+      "正文已存在": "是",
+      "发布候选已验收": "否",
+      "草稿补验收中": "是",
+      "状态": "KEEP_IN_正文",
+      "字数": 4128,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_035_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-035_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 36,
+      "title": "第36章 烤师走了，火候不能跟着走",
+      "正文已存在": "是",
+      "发布候选已验收": "否",
+      "草稿补验收中": "是",
+      "状态": "NEED_LIGHT_FIX",
+      "字数": 4228,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_036_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-036_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    },
+    {
+      "chapter": 37,
+      "title": "第37章 探店不是审判，剪辑才是刀",
+      "正文已存在": "是",
+      "发布候选已验收": "否",
+      "草稿补验收中": "是",
+      "状态": "NEED_LIGHT_FIX",
+      "字数": 3793,
+      "gate": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_037_quick_maintext_acceptance.md",
+      "release_snapshot": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-037_正文快照_补验收用.md",
+      "备注": "补验收完成前不得称发布级PASS"
+    }
+  ],
+  "gate_files": [
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_031_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_032_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_033_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_034_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_035_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_036_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_037_quick_maintext_acceptance.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/quality_gates/chapter_038_related_context_check.md"
+  ],
+  "release_snapshots": [
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-031_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-032_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-033_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-034_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-035_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-036_正文快照_补验收用.md",
+    "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/release/chapter-037_正文快照_补验收用.md"
+  ],
+  "status_report": "/root/hermes/company-ai-system/workspaces/xiaoshuo/enterprise-doctor/草稿/reports/chapter_031_037_quick_maintext_acceptance_status_2026-05-15.md"
+}

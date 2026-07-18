@@ -1,0 +1,91 @@
+schema_version: 1
+recovery_id: checkpoint_20260529_022143_558597
+timestamp: 2026-05-29T02:21:43.558597+08:00
+source: UserPromptSubmit
+cwd: /root/hermes/company-ai-system/workspaces/xiaoping
+active_project: xiaoping
+workspace_generation: 1
+
+active_task:
+  - 当前主项目：xiaoping
+  - 当前方向：视频号增长变现 / 低成本内容现金流
+  - 当前 active task：用户明确反馈居家生活账号/题材已实验失败；当前任务已切换为全网寻找直接变现题材。P0 方向确定为 `AI 工具 / 效率模板 / 小商家自动化`，下一步做内部样片 `用 AI 生成一条视频号脚本，只需要 3 行提示词`，仍不做发布、编辑、私信、回复、报价、收款、上架、商品/订单或真实账号自动化。
+current_step:
+  - 1. 停止默认推进居家生活内容；下一条内部样片改做 P0 方向：`用 AI 生成一条视频号脚本，只需要 3 行提示词`。
+  - 2. 为 P0 方向补一版数字产品雏形：`《小商家短视频脚本提示词包》`，至少包含账号定位提示词、选题生成提示词、60 秒脚本提示词、标题改写提示词、风险自查提示词。
+  - 3. 用 Remotion 或屏录方式生成内部样片；当前只做内部审核，不发布、不挂商品、不私信、不报价、不收款、不操作真实账号。
+next_action:
+  - 1. 停止默认推进居家生活内容；下一条内部样片改做 P0 方向：`用 AI 生成一条视频号脚本，只需要 3 行提示词`。
+blockers:
+  - STATE.md: 阻塞：
+  - HANDOFF.md: 风险：
+  - HANDOFF.md: - 财经/投资/健康强承诺方向合规风险高，暂避。
+  - SESSION.md: Blockers:
+important_decisions:
+  - - xiaoping 聚焦视频号/短视频/商业化，不做财务审计。
+  - - 第一轮只做内部准备：可发内容、低价文档产品雏形、承接链路、验证动作。
+  - - 不再推进“卫生间防霉除味”“厨房死角清洁”两个失败方向，除非老板明确重启。
+  - - 2026-05-29 用户明确反馈居家生活账号/居家生活题材已实验失败；后续 xiaoping 不再默认做居家生活，转向直接变现题材筛选。
+  - - 登录、发布、私信、报价、收款、真实账号自动化、对外承诺前，必须先取得老板明确批准。
+  - - Codex 可按根目录 `AGENTS.md` 进入 `workspaces/xiaoping` 推进。
+  - 1. xiaoping 只负责视频号/短视频/商业化增长变现。
+rejected_paths:
+  - HANDOFF.md: - 不再继续默认做居家生活，不要再从收纳、玄关、清洁、居家避坑类题材出发，除非用户明确重启。
+  - RULES.md: 6. 用户已明确反馈居家生活账号/居家生活题材实验失败；后续不要默认回到居家生活，优先找直接变现题材。
+  - TOOLING.md: - 不要把 `node_modules`、Python venv 或外部 repo 装进本 workspace。
+  - SESSION.md: - 禁止发布、编辑、私信、回复、报价、收款、上架、操作商品/订单或任何修改。
+  - CLAUDE.md: - 代码结构、符号、调用链、文件定位优先用 CodeGraph；索引过期时在本 workspace 运行 `codegraph sync`，不要重装工具。
+  - CLAUDE.md: - 跨会话偏好、项目事实和非代码经验用 AgentMemory/现有记忆系统；不要把代码或 git 可推导信息写入长期记忆。
+open_files:
+  - TASK.md
+  - videos/output/low-pressure-start-prototype-fixed.mp4
+  - videos/output/pixelle-static-smoke.mp4
+  - videos/output/seven-day-experiment-remotion.mp4
+  - STATE.md
+  - NEXT_ACTION.md
+  - RULES.md
+  - TOOLING.md
+hot_artifacts:
+  - TASK.md
+  - videos/output/low-pressure-start-prototype-fixed.mp4
+  - videos/output/pixelle-static-smoke.mp4
+  - videos/output/seven-day-experiment-remotion.mp4
+  - STATE.md
+artifact_index:
+  - TASK.md
+  - videos/output/low-pressure-start-prototype-fixed.mp4
+  - videos/output/pixelle-static-smoke.mp4
+  - videos/output/seven-day-experiment-remotion.mp4
+  - STATE.md
+  - NEXT_ACTION.md
+  - RULES.md
+  - TOOLING.md
+  - /root/hermes/company-ai-system/tools/external/TOOLING.md
+  - ../../../README.md
+  - ../../.hermes_memory_context.md
+  - ../../AGENTS.md
+project_context:
+  - TASK.md: - 已生成第一条内部 Remotion 视频原型：`videos/output/low-pressure-start-prototype-fixed.mp4`。
+  - TASK.md: - 已整理外部网页 AI 视频提示词：`videos/external-video-prompts.txt`，并验证 Google Vids/Vider/LoreMotion/Creen/Upsampler-Wan 的可用性边界。
+  - TASK.md: - 已克隆并验证 Pixelle-Video：`tools/external/repos/Pixelle-Video`。
+  - TASK.md: - 已用 Pixelle-Video 静态模板 + 固定脚本 + Edge TTS 生成第二条内部样片：`videos/output/pixelle-static-smoke.mp4`，并复制到 Windows `视频生成` 目录。
+  - TASK.md: - 已用 Remotion 动效模板生成脚本 2 内部样片：`videos/output/seven-day-experiment-remotion.mp4`，并复制到 Windows `视频生成` 目录。
+  - STATE.md: - 先前已完成 04 Remotion 原创样片：`D:\hermes\company-ai-system\workspaces\xiaoping\视频生成\04-Remotion原创样片-家里总乱的临时区.mp4`，但该方向现在只作为已完成样片留档，不再作为默认主线。
+  - NEXT_ACTION.md: 3. 用 Remotion 或屏录方式生成内部样片；当前只做内部审核，不发布、不挂商品、不私信、不报价、不收款、不操作真实账号。
+  - RULES.md: 1. 外部工具使用以本 workspace 的 `TOOLING.md` 和 `/root/hermes/company-ai-system/tools/external/TOOLING.md` 为准；Remotion 仅用于程序化短视频、批量模板、字幕/图文动画和脚本到视频原型。
+state_warnings:
+  - none
+recovery_order:
+  - detect workspace
+  - load .claude/runtime/runtime_state.json
+  - load .claude/compact/latest.yaml
+  - validate workspace_generation
+  - load TASK.md STATE.md SESSION.md NEXT_ACTION.md HANDOFF.md DECISIONS.md RULES.md TOOLING.md TODO.md PLAN.md CLAUDE.md README.md_if_present
+  - load hot_artifacts only when needed for NEXT_ACTION
+  - continue NEXT_ACTION
+recovery_rules:
+  - project source-of-truth files override this checkpoint
+  - this checkpoint overrides compact summary
+  - rejected_paths must not be revived
+  - if checkpoint generation is older than runtime_state generation, treat checkpoint as stale
+  - do not switch workspace unless the user explicitly asks
