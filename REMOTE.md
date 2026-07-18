@@ -1,9 +1,9 @@
 # Remote
 
 - Domain: 媒体
-- GitHub: https://github.com/lhlzzz/hermes-meiti (private)
+- GitHub: https://github.com/lhlzzz/novel-studio-agent
 - Branch: main
 - Local: `hermes-workspaces/meiti/`
-- PostgreSQL port: 5445 (see portfolio-control/docs/DB_OWNERSHIP.md)
+- PostgreSQL port: 5445
 
-Portfolio control plane: https://github.com/lhlzzz/hermes-portfolio
+**Do not create hermes-* repos.** This project maps to the existing GitHub repo above.
