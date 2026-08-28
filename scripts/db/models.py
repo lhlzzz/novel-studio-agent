@@ -308,7 +308,7 @@ class ContentRelation(Base):
 
 
 class PublishGate(Base):
-    """Persistent publish/external-action gate record (approval required)."""
+    """Persistent gate for a DistributionJob and registered Integration."""
 
     __tablename__ = "publish_gates"
 
@@ -316,8 +316,8 @@ class PublishGate(Base):
     gate_key = Column(String(255), nullable=False)
     action = Column(String(80), nullable=False, default="publish")
     # publish | login | dm | list | quote | collect | ads | automation
-    platform = Column(String(80))
-    package_key = Column(String(255))
+    integration_id = Column(String(255), index=True)
+    distribution_job_id = Column(String(255), index=True)
     status = Column(String(40), nullable=False, default="locked")
     # locked | requested | approved | denied | expired | executed
     requested_by = Column(String(120), nullable=False, default="agent")
@@ -339,5 +339,5 @@ class PublishGate(Base):
         UniqueConstraint("gate_key", name="uq_meiti_publish_gates_key"),
         Index("idx_meiti_publish_gates_status", "status"),
         Index("idx_meiti_publish_gates_action", "action"),
-        Index("idx_meiti_publish_gates_package", "package_key"),
+        Index("idx_meiti_publish_gates_job", "distribution_job_id"),
     )

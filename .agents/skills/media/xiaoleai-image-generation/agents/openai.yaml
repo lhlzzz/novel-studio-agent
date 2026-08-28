@@ -1,0 +1,4 @@
+interface:
+  display_name: "XiaoleAI Image Generation"
+  short_description: "通过 XiaoleAI 中转站生成并保存图片"
+  default_prompt: "Use $xiaoleai-image-generation to generate an image through the XiaoleAI image API and save the decoded result."

@@ -104,6 +104,15 @@ def init_db() -> None:
     try:
         _enable_pgvector()
         Base.metadata.create_all(bind=engine)
+        # create_all does not add columns to an existing gate table.
+        with engine.begin() as conn:
+            for column in ("integration_id", "distribution_job_id"):
+                conn.execute(text(
+                    f"ALTER TABLE publish_gates ADD COLUMN IF NOT EXISTS {column} VARCHAR(255)"
+                ))
+            conn.execute(text("DROP INDEX IF EXISTS idx_meiti_publish_gates_package"))
+            conn.execute(text("ALTER TABLE publish_gates DROP COLUMN IF EXISTS platform"))
+            conn.execute(text("ALTER TABLE publish_gates DROP COLUMN IF EXISTS package_key"))
         with engine.connect() as conn:
             ext = conn.execute(
                 text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
@@ -251,10 +260,10 @@ def seed() -> None:
                 ContentEntity,
                 "entity_key",
                 f"{SEED_PREFIX}-entity-platform",
-                entity_type="platform",
-                name="xiaohongshu",
-                description="Bootstrap platform node",
-                source_line="xiaoping",
+                entity_type="integration",
+                name="bootstrap-integration",
+                description="Bootstrap integration node",
+                source_line="shared",
                 properties={"demo": True},
             )
             _upsert_model(
@@ -274,8 +283,8 @@ def seed() -> None:
                 "gate_key",
                 f"{SEED_PREFIX}-gate",
                 action="publish",
-                platform="xiaohongshu",
-                package_key=f"{SEED_PREFIX}-package",
+                integration_id="bootstrap-integration",
+                distribution_job_id=f"{SEED_PREFIX}-job",
                 status="locked",
                 requested_by="bootstrap",
                 rationale="Default locked; external publish requires boss approval.",
@@ -285,7 +294,7 @@ def seed() -> None:
             session.commit()
     except SQLAlchemyError as exc:
         _die_db_error("seed", exc)
-    print(f"Seed data ready for {PROJECT_NAME} (agent + embeddings + KG + gates).")
+    print(f"Seed data ready for {PROJECT_NAME} (agents + embeddings + KG + gates).")
 
 
 def verify() -> None:

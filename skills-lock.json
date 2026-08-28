@@ -1,11 +1,35 @@
 {
   "version": 1,
   "skills": {
+    "ad-library-teardown": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ad-library-teardown/SKILL.md",
+      "computedHash": "1f9ecc59fd94ea78dbc6d73ce89410b36ccf341f7d75092ae6e568e3bfc3693f"
+    },
+    "audience-research": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/audience-research/SKILL.md",
+      "computedHash": "208db958f2f42bfdfffb6d8b35e4a8438c6d8e49d6959f7d5233fd8679a6b02d"
+    },
     "caption-writer-sms": {
       "source": "blacktwist/social-media-skills",
       "sourceType": "github",
       "skillPath": "skills/caption-writer-sms/SKILL.md",
       "computedHash": "07e871f6e157475df3849bcbff336fabee83a5093469cb165ddc7fb765f4a467"
+    },
+    "comment-mining": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/comment-mining/SKILL.md",
+      "computedHash": "0c91de55510904aca412f85b85d06a2b270eab3609135004435913c474ad7631"
+    },
+    "competitor-social-research": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/competitor-social-research/SKILL.md",
+      "computedHash": "639c2996ce779630a935d1fba6b3486bd8254beddebe36c9ab206e29514791ba"
     },
     "content-calendar-sms": {
       "source": "blacktwist/social-media-skills",
@@ -19,6 +43,12 @@
       "skillPath": "skills/content-repurposer-sms/SKILL.md",
       "computedHash": "1c03fd0244b7bbab1658f1f98d7ccfce2bc67fa2ad8155bac871e7cbad7cc1d5"
     },
+    "content-repurposing": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/content-repurposing/SKILL.md",
+      "computedHash": "bf942e3997eb3fdbbac289ddd1d92e39b4e0862db1651996eed632410485c93d"
+    },
     "content-strategy-sms": {
       "source": "blacktwist/social-media-skills",
       "sourceType": "github",
@@ -30,6 +60,12 @@
       "sourceType": "github",
       "skillPath": "skills/copywriting/SKILL.md",
       "computedHash": "c8d63b1f77be04fd54981720de65697988810bd28331097dbe0aaf3e166d638a"
+    },
+    "creator-profile-teardown": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/creator-profile-teardown/SKILL.md",
+      "computedHash": "7ec49b5355d9ec6a94d9d171dbb25048d5da479e4928326eb5e4c935ddfe79ab"
     },
     "hook-writer-sms": {
       "source": "blacktwist/social-media-skills",
@@ -43,11 +79,23 @@
       "skillPath": ".agents/skills/impeccable/SKILL.md",
       "computedHash": "a4676a11727addf402057d985ab49dc4df3a5cf82641655dfe40c9bdeeffc73e"
     },
+    "influencer-prospecting": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/influencer-prospecting/SKILL.md",
+      "computedHash": "3574ed3dce7ff1d05a08ea374971cc80aaae950844108d877d764af3747f57d1"
+    },
     "offers": {
       "source": "coreyhaines31/marketingskills",
       "sourceType": "github",
       "skillPath": "skills/offers/SKILL.md",
       "computedHash": "4e49425fc003bfc113cee7757ffa57de0859b1903dec89973cc599c42fca8942"
+    },
+    "outlier-post-finder": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/outlier-post-finder/SKILL.md",
+      "computedHash": "be109d43f29ef36f5e155aecfd700718b08c11c197acec9ff8e4a2e9010c9c3c"
     },
     "platform-strategy-sms": {
       "source": "blacktwist/social-media-skills",
@@ -61,17 +109,41 @@
       "skillPath": "skills/post-writer-sms/SKILL.md",
       "computedHash": "33e7e04f23d2e3e31bd8d10a42c508d6260db7218ab51fc3965bc03fff5d9582"
     },
+    "postiz": {
+      "source": "gitroomhq/postiz-agent",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "660f448f1910526239b63329ae6ac6314f809be39ecac4fe31307ba92cd1974d"
+    },
+    "product-demand-research": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/product-demand-research/SKILL.md",
+      "computedHash": "e0f47b5b9cd8e02638a504e72112c7b70b4791ccebe06a7b59c2a535ff3044ce"
+    },
     "product-marketing": {
       "source": "coreyhaines31/marketingskills",
       "sourceType": "github",
       "skillPath": "skills/product-marketing/SKILL.md",
       "computedHash": "b8a9cd747705923a7a29cda12e478594e3a5062d8f7c7bfbf19d7fc0b24cee76"
     },
+    "scrapecreators-api": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrapecreators-api/SKILL.md",
+      "computedHash": "53b3f03866951c84f791720b9c4381c9238ff4d67f6c588710870d476604b6d0"
+    },
     "social": {
       "source": "coreyhaines31/marketingskills",
       "sourceType": "github",
       "skillPath": "skills/social/SKILL.md",
       "computedHash": "906a0529e4ee506c3e2ae81d6dab72d98d2933ec3dac0f332d6b8a2e67acf6a0"
+    },
+    "social-listening-brief": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/social-listening-brief/SKILL.md",
+      "computedHash": "eebeb4157c04844a6fefcea178e510b8f271b65ded99af259a81b037883be609"
     },
     "social-media-context-sms": {
       "source": "blacktwist/social-media-skills",
@@ -84,6 +156,18 @@
       "sourceType": "github",
       "skillPath": "skills/thread-writer-sms/SKILL.md",
       "computedHash": "9ca7045fba6bee6b98e95b56c5a70aa0e97196bdf98580f1129b0d27366106fa"
+    },
+    "transcript-intelligence": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/transcript-intelligence/SKILL.md",
+      "computedHash": "df51dbcd37c57fda737e1577a376e52cb1a8e203ba9094a467960c7cba50ed6b"
+    },
+    "trend-discovery": {
+      "source": "ScrapeCreators/social-media-research-skills",
+      "sourceType": "github",
+      "skillPath": "skills/trend-discovery/SKILL.md",
+      "computedHash": "d41e316db471e7f54a5f775ea613a12ac067f340b83479e94a71a9f3daade473"
     }
   }
 }

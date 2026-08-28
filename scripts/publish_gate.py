@@ -56,8 +56,8 @@ def _upsert_gate(
     *,
     gate_key: str,
     action: str,
-    platform: str | None,
-    package_key: str | None,
+    integration_id: str,
+    distribution_job_id: str,
     status: str,
     requested_by: str,
     approved_by: str | None = None,
@@ -71,8 +71,8 @@ def _upsert_gate(
         ).scalar_one_or_none()
         fields = dict(
             action=action,
-            platform=platform,
-            package_key=package_key,
+            integration_id=integration_id,
+            distribution_job_id=distribution_job_id,
             status=status,
             requested_by=requested_by,
             approved_by=approved_by,
@@ -99,8 +99,8 @@ def _gate_to_dict(row: PublishGate) -> dict[str, Any]:
     return {
         "gate_key": row.gate_key,
         "action": row.action,
-        "platform": row.platform,
-        "package_key": row.package_key,
+        "integration_id": row.integration_id,
+        "distribution_job_id": row.distribution_job_id,
         "status": row.status,
         "requested_by": row.requested_by,
         "approved_by": row.approved_by,
@@ -166,17 +166,19 @@ def cmd_request(args: argparse.Namespace) -> int:
         raise SystemExit(f"action must be one of {EXTERNAL_ACTIONS}")
     package_path = Path(args.package) if args.package else None
     checks = run_five_checks(package_path)
-    gate_key = args.gate_key or f"gate:{args.action}:{args.platform or 'any'}:{args.package_key or 'none'}"
+    integration_id = args.integration_id
+    distribution_job_id = args.distribution_job_id
+    gate_key = args.gate_key or f"gate:{args.action}:{integration_id}:{distribution_job_id}"
     row = _upsert_gate(
         gate_key=gate_key,
         action=args.action,
-        platform=args.platform,
-        package_key=args.package_key,
+        integration_id=integration_id,
+        distribution_job_id=distribution_job_id,
         status="requested" if checks.get("all_pass") else "locked",
         requested_by=args.by or "agent",
         rationale=args.rationale or "request external action; awaiting boss approval",
         checks=checks,
-        evidence={"package": args.package, "package_key": args.package_key},
+        evidence={"package": args.package},
     )
     APPROVALS_DIR.mkdir(parents=True, exist_ok=True)
     stub = APPROVALS_DIR / f"{gate_key.replace(':', '__')}.request.json"
@@ -248,16 +250,16 @@ def cmd_deny(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    """Exit 0 only if gate is approved for the action/package/platform."""
+    """Exit 0 only if a matching DistributionJob gate is approved."""
     with SessionLocal() as session:
         q = select(PublishGate).where(PublishGate.action == args.action)
         if args.gate_key:
             q = select(PublishGate).where(PublishGate.gate_key == args.gate_key)
         else:
-            if args.package_key:
-                q = q.where(PublishGate.package_key == args.package_key)
-            if args.platform:
-                q = q.where(PublishGate.platform == args.platform)
+            if args.integration_id:
+                q = q.where(PublishGate.integration_id == args.integration_id)
+            if args.distribution_job_id:
+                q = q.where(PublishGate.distribution_job_id == args.distribution_job_id)
         row = session.execute(q.order_by(PublishGate.id.desc())).scalars().first()
         allowed = bool(row and row.status == "approved")
         payload = {
@@ -270,42 +272,92 @@ def cmd_check(args: argparse.Namespace) -> int:
         return 0 if allowed else 1
 
 
+def cmd_prepare(args: argparse.Namespace) -> int:
+    """Describe a connector job without uploading or publishing anything."""
+    print(
+        json.dumps(
+            {
+                "operation": "prepare",
+                "integration_id": args.integration_id,
+                "distribution_job_id": args.distribution_job_id,
+                "hard_boundary": "prepared only; no external request issued",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_external_action_unavailable(args: argparse.Namespace) -> int:
+    """Fail closed until a separately approved integration connector exists."""
+    print(
+        json.dumps(
+            {
+                "operation": args.command,
+                "allowed": False,
+                "reason": "integration connector is not implemented",
+                "hard_boundary": "use prepare, request, and check only",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 2
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     GATES_DIR.mkdir(parents=True, exist_ok=True)
     # create a locked gate and verify check denies
-    key = "gate:selftest:publish:xiaohongshu:pkg-selftest"
+    key = "gate:selftest:publish:integration:pkg-selftest-job"
     _upsert_gate(
         gate_key=key,
         action="publish",
-        platform="xiaohongshu",
-        package_key="pkg-selftest",
+        integration_id="integration-selftest",
+        distribution_job_id="pkg-selftest-job",
         status="locked",
         requested_by="selftest",
         rationale="selftest locked",
         checks={"all_pass": False},
     )
     rc_deny = cmd_check(
-        argparse.Namespace(action="publish", gate_key=key, package_key=None, platform=None)
+        argparse.Namespace(action="publish", gate_key=key,
+                           integration_id=None, distribution_job_id=None)
     )
     # simulate boss approve with force (checks failed)
     rc_approve = cmd_approve(
         argparse.Namespace(gate_key=key, by="boss", rationale="selftest force", force=True)
     )
     rc_allow = cmd_check(
-        argparse.Namespace(action="publish", gate_key=key, package_key=None, platform=None)
+        argparse.Namespace(action="publish", gate_key=key,
+                           integration_id=None, distribution_job_id=None)
     )
+    rc_prepare = cmd_prepare(
+        argparse.Namespace(integration_id="integration-selftest", distribution_job_id="pkg-selftest-job")
+    )
+    rc_upload = cmd_external_action_unavailable(
+        argparse.Namespace(command="upload-draft")
+    )
+    rc_publish = cmd_external_action_unavailable(argparse.Namespace(command="publish"))
     # lock again after selftest
     _upsert_gate(
         gate_key=key,
         action="publish",
-        platform="xiaohongshu",
-        package_key="pkg-selftest",
+        integration_id="integration-selftest",
+        distribution_job_id="pkg-selftest-job",
         status="locked",
         requested_by="selftest",
         rationale="re-lock after selftest",
         checks={"all_pass": False},
     )
-    ok = rc_deny == 1 and rc_approve == 0 and rc_allow == 0
+    ok = (
+        rc_deny == 1
+        and rc_approve == 0
+        and rc_allow == 0
+        and rc_prepare == 0
+        and rc_upload == 2
+        and rc_publish == 2
+    )
     print(json.dumps({"selftest": "ok" if ok else "fail", "gate_key": key}, ensure_ascii=False))
     return 0 if ok else 1
 
@@ -321,8 +373,8 @@ def main() -> int:
 
     p = sub.add_parser("request")
     p.add_argument("--action", required=True, choices=EXTERNAL_ACTIONS)
-    p.add_argument("--platform", default=None)
-    p.add_argument("--package-key", default=None)
+    p.add_argument("--integration-id", required=True)
+    p.add_argument("--distribution-job-id", required=True)
     p.add_argument("--package", default=None, help="path to package markdown for 5 checks")
     p.add_argument("--gate-key", default=None)
     p.add_argument("--by", default="agent")
@@ -345,9 +397,18 @@ def main() -> int:
     p = sub.add_parser("check")
     p.add_argument("--action", default="publish")
     p.add_argument("--gate-key", default=None)
-    p.add_argument("--package-key", default=None)
-    p.add_argument("--platform", default=None)
+    p.add_argument("--integration-id", default=None)
+    p.add_argument("--distribution-job-id", default=None)
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("prepare")
+    p.add_argument("--integration-id", required=True)
+    p.add_argument("--distribution-job-id", required=True)
+    p.set_defaults(func=cmd_prepare)
+
+    for command in ("upload-draft", "publish"):
+        p = sub.add_parser(command)
+        p.set_defaults(func=cmd_external_action_unavailable)
 
     p = sub.add_parser("selftest")
     p.set_defaults(func=cmd_selftest)

@@ -1,7 +1,0 @@
-# DECISIONS
-
-## Product
-
-## Architecture
-
-## Runtime

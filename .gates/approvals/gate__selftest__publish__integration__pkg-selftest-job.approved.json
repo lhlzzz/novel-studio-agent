@@ -1,0 +1,16 @@
+{
+  "gate_key": "gate:selftest:publish:integration:pkg-selftest-job",
+  "action": "publish",
+  "integration_id": "integration-selftest",
+  "distribution_job_id": "pkg-selftest-job",
+  "status": "approved",
+  "requested_by": "selftest",
+  "approved_by": "boss",
+  "rationale": "selftest force",
+  "checks": {
+    "all_pass": false
+  },
+  "evidence": {},
+  "decided_at": "2026-08-26T11:28:29.474312",
+  "created_at": "2026-08-26T11:21:48.011070"
+}

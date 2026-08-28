@@ -1,0 +1,19 @@
+# Meiti-owned mapping of Postiz integration IDs to target platforms.
+# IDs are populated only after an operator completes OAuth in Postiz.
+provider: postiz
+accounts:
+  - platform: x
+    integration_id:
+    status: pending
+  - platform: linkedin
+    integration_id:
+    status: pending
+  - platform: instagram
+    integration_id:
+    status: pending
+  - platform: youtube
+    integration_id:
+    status: pending
+  - platform: tiktok
+    integration_id:
+    status: pending

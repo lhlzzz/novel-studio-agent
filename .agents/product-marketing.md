@@ -1,87 +1,75 @@
 # Product Marketing Context — meiti
 
-Document version: 1.0.0  
-last_updated: 2026-07-18  
-Owner: meiti (MediaCore)  
-Status: INTERNAL — not a public brand kit
+**Document version:** v2.1
+**Last updated:** 2026-08-15
+**Owner:** meiti 内容获客；xiaodian 商品与履约事实
+**Status:** INTERNAL_ONLY / product evidence incomplete
+
+## Product Overview
+
+**One-liner:** 以视频号蓝 V 为主阵地，面向银发家庭、养老机构和渠道商提供远程看护、环境安全、健康食品及健康检测设备的资料透明内容与合规商品承接。
+**Product category:** 居家养老/远程看护 IoT、环境安全传感、健康检测设备及耗材。
+**Product type:** 以 B2B 项目采购和经销合作为主的实物设备目录；零售单品仅在资料、资质和履约齐全后开放。
+**Business model:** 视频号蓝 V 的银发生活与资料透明内容建立信任 -> 合规平台询盘或获批私域资格确认 -> xiaodian 匹配型号、报价、交付与售后。
+
+## Target Audience
+
+**Primary:** 养老机构、居家养老服务商、社区养老项目、智能硬件集成商。
+**Secondary:** 区域渠道商、具备医疗器械合规经营能力的合作方。
+**Retail, later:** 需要为家中长者配置远程看护设备的成年子女。
+**Jobs to be done:**
+
+- 为特定照护/环境安全场景选择适合的联网设备。
+- 在采购前确认型号、安装、网络、资料、售后与数据处理边界。
+- 为项目采购或渠道合作拿到一致、可核验的产品资料。
+
+## Product Evidence Rules
+
+- `商品列表/` 图片仅是目录来源，不能替代正式规格书、注册/备案、认证、价格、库存、交期或售后证据。
+- 医疗器械、健康测量、报警、跌倒/睡眠/生命体征类产品未完成合规核验前，不写诊断、疗效、安全保证、精确度或风险预防承诺。
+- 上市公司属性只在官方主体、品牌/产品归属或授权链路已核验时作为事实描述，不能充当产品功效、品质或安全保证。
+- AI 场景图只用于非品牌化场景解释，发布时标识“AI 生成示意图”；产品、包装、认证、数据和使用结果使用真实可核验材料。
+- xiaodian 是 SKU、价格、资质、库存、履约、报价与收款的唯一 owner。
+- 未取得老板 gate，不发布、不私信、不建群、不加企微、不上架、不报价、不收款。
+
+## Core Product Groups
+
+| Product group | Content-safe angle before evidence completion | Evidence needed before promotion |
+|---|---|---|
+| 远程看护终端 | 通话、联网、佩戴、安装、谁接收提醒 | 型号规格、网络/数据、实际功能、售后 |
+| 环境安全感知 | 安装位置、供电、联网、测试和维护流程 | 检测报告、适用环境、认证、报警链路 |
+| 健康检测设备/耗材 | 采购资料如何核验、正确使用边界 | 注册/备案、说明书、经营与平台资质 |
+| 消费级穿戴 | 充电、佩戴、通话/定位授权、使用习惯 | 实际功能、隐私、零售价、售后 |
+| 保健食品/普通食品 | 标签、配料、适宜人群、保存和选购资料 | F0 主体关系、F1 标签事实、F2 特殊食品/广告资料、F3 履约 |
+
+## Problems And Differentiation
+
+**Core problem:** 采购方通常只拿到杂乱参数图，无法判断设备是否适配现场、是否有完整资料、谁负责安装和售后。
+**Why alternatives fall short:** 参数堆砌、功能夸张、没有把联网、告警接收、隐私、安装与维护说清。
+**Differentiation:** 用“场景 -> 选型问题 -> 资料核验 -> 合规承接”的方式表达；不把不确定的目录功能包装成结果保证。
+
+## Objections
+
+| Objection | Response |
+|---|---|
+| “这设备到底适不适合我们的场景？” | 先确认场地、网络、使用人群、安装与处置流程，再由 xiaodian 给出可核验型号资料。 |
+| “健康指标靠谱吗？” | 不以目录宣传代替注册/说明书；医疗相关型号先提供合规资料和适用范围。 |
+| “价格、通信和售后怎么算？” | 未核实前不答复；以正式 SKU、服务边界和报价流程为准。 |
+
+## Brand Voice
+
+具体、克制、银发生活先于产品、证据先于结论。
+避免：医疗级、治愈、精准诊断、防走失、零风险、全自动、最低价、保证。
+
+## Goals
+
+**Primary business goal:** 通过视频号蓝 V 获得可验证的机构采购、经销合作和合规商品需求线索。
+**Secondary goal:** 为资料齐全的标准化 SKU 和经审核的保健食品建立合规的平台成交能力。
+**Conversion action:** 平台内询盘或获批的企业资料/客服入口。
+**Current metrics:** 未开始外部发布；不得编造曝光、咨询或成交数据。
 
 ## Changelog
 
-- 2026-07-18：首版。从 meiti/xiaoping 推文包与 RULES 自动起草，供 marketing / sms skills 共用。
-
-## 1. Product Overview
-
-- **One-liner**：帮小商家把「重复客户回复 + 信息整理 + 内容日历」收成可改的效率模板包。  
-- **What it does**：提供可编辑的结构文档（FAQ 回复草稿表、信息整理表、7 天内容日历），降低重复打字与乱报价；配套多平台内容核用于获客实验。  
-- **Category**：小商家效率模板 / 数字资料包（非 SaaS 自动客服）。  
-- **Type**：Digital product (+ optional future physical bundle via xiaodian).  
-- **Business model**：低客单数字包；内容广撒网 → 模拟转化；正式收款走 xiaodian 履约。
-
-## 2. Target Audience
-
-- **Company type**：个体户、微商、本地服务（装修/家政/维修/培训/零售前台）、1–10 人小团队。  
-- **Decision-makers**：老板本人 / 前台运营。  
-- **Primary use case**：同一句客户回复打到烦；想做内容又没结构。  
-- **Jobs to be done**：  
-  1. 减少重复回复时间  
-  2. 报价前问清需求  
-  3. 把经验改成多平台内容  
-
-## 3. Personas
-
-偏 B2C/小B，无复杂采购链。Champion = 老板本人。
-
-## 4. Problems & Pain Points
-
-- 未读爆炸、重复打字。  
-- 没问清需求就报口，改价尴尬。  
-- 想做短内容不知道今天发啥。  
-- 恐惧：被当成「自动回复骗子」或效果骗局。
-
-## 5. Competitive Landscape
-
-- **Direct**：各类「话术包/引流课」。  
-- **Secondary**：完整 CRM / 自动私域工具。  
-- **Indirect**：继续手工复制粘贴。  
-- **Gap we own**：先结构、后工具；明确 **不做** 自动成交承诺。
-
-## 6. Differentiation
-
-- 三步土方法：草稿 → 整理表 → 内容日历。  
-- 真人感、弱保证、强边界（INTERNAL 标注）。  
-- 与 xiaodian 商品履约拆分，内容不编造底价。
-
-## 7. Objections & Anti-Personas
-
-- 「这不就是网盘资料？」→ 卖的是可改结构 + 多平台内容核，不是玄学课。  
-- 「能不能自动回复成交？」→ 不做；风险大。  
-- Anti：要保证月入、要灰产话术、要未授权搬运素材者。
-
-## 8. Switching Dynamics
-
-- **Push**：重复劳动与报价踩坑。  
-- **Pull**：一张表就能改进行业词。  
-- **Habit**：仍用手打。  
-- **Anxiety**：怕资料垃圾 / 怕违规。
-
-## 9. Messaging
-
-- **Primary**：小商家别再一条条回客户了。  
-- **Proof style**：结构演示 + 对比（乱 vs 分类），不做假案例。  
-- **CTA（模拟）**：收藏结构、按行业改词；真实私信/购买需 gate。
-
-## 10. Pricing (simulated only)
-
-- Trail ¥12.9 / Standard ¥29 数字包 — **SIMULATED**，非正式标价。  
-- Official price / fulfillment：xiaodian + boss gate.
-
-## 11. Brand voice
-
-- 口语、具体、少形容词堆砌。  
-- 禁止：稳赚、包回本、保证成交、绝对化。  
-- 真人感 > AI 海报感。
-
-## 12. Platforms priority (content)
-
-P0 内容测钩子：小红书 → 闲鱼 listing 草稿 → X/TikTok 出海润色。  
-全部默认 INTERNAL_ONLY。
+- v2.1 (2026-08-15) — Added Video Account Blue V as the primary channel; introduced a separate evidence gate for health-food and listed-company product content, plus AI scene-image boundaries.
+- v2 (2026-08-15) — Replaced the misaligned digital-template positioning with the actual eldercare, safety, and health-device catalog; added evidence and compliance ownership.
+- v1 (2026-07-18) — Initial small-business AI-template context.

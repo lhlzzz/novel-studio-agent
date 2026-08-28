@@ -1,0 +1,72 @@
+providers:
+  postiz:
+    id: postiz
+    region: global
+    adapter: postiz
+    distribution: postiz
+    capabilities: {publish: true, schedule: true, analytics: true, media: true, media_upload: true}
+    # Provider metadata is present; enable only after runtime/API verification.
+    enabled: false
+  x:
+    id: x
+    region: global
+    adapter: postiz
+    distribution: postiz
+    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    enabled: false
+  instagram:
+    id: instagram
+    region: global
+    adapter: postiz
+    distribution: postiz
+    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    enabled: false
+  youtube:
+    id: youtube
+    region: global
+    adapter: postiz
+    distribution: postiz
+    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    enabled: false
+  tiktok:
+    id: tiktok
+    region: global
+    adapter: postiz
+    distribution: postiz
+    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    enabled: false
+  xiaohongshu:
+    id: xiaohongshu
+    region: cn
+    adapter: xiaohongshu
+    distribution: custom
+    capabilities: {}
+    enabled: false
+  douyin:
+    id: douyin
+    region: cn
+    adapter: douyin
+    distribution: custom
+    capabilities: {}
+    enabled: false
+  kuaishou:
+    id: kuaishou
+    region: cn
+    adapter: kuaishou
+    distribution: custom
+    capabilities: {}
+    enabled: false
+  shipinghao:
+    id: shipinghao
+    region: cn
+    adapter: shipinghao
+    distribution: custom
+    capabilities: {}
+    enabled: false
+  xianyu:
+    id: xianyu
+    region: cn
+    adapter: xianyu
+    distribution: custom
+    capabilities: {}
+    enabled: false

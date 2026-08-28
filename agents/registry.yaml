@@ -1,0 +1,10 @@
+agents:
+  meiti-orchestrator: {owner: coordination, status: active}
+  research-agent: {owner: intelligence, status: active}
+  strategy-agent: {owner: strategy, status: active}
+  content-agent: {owner: content, status: active}
+  media-agent: {owner: media, status: active}
+  analytics-agent: {owner: analytics, status: active}
+  memory-agent: {owner: memory, status: active}
+  commerce-agent: {owner: commerce, status: active}
+  distribution-agent: {owner: distribution, status: active}

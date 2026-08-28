@@ -180,15 +180,18 @@ def seed_package_graph(package_key: str) -> dict[str, Any]:
         source_line="xiaoping",
         properties={"package_key": package_key, "hard_sell": False},
     )
-    platforms = []
-    for p in ("xiaohongshu", "shipinhao", "douyin", "xianyu", "x", "tiktok"):
-        platforms.append(
+    from integrations.registry.loader import load_registry
+
+    registry = load_registry()
+    integrations = []
+    for p, integration in registry.items():
+        integrations.append(
             upsert_entity(
-                entity_key=f"{package_key}:platform:{p}",
-                entity_type="platform",
+                entity_key=f"{package_key}:integration:{p}",
+                entity_type="integration",
                 name=p,
-                source_line="xiaoping",
-                properties={"package_key": package_key},
+                source_line="shared",
+                properties={"package_key": package_key, "enabled": integration.enabled},
             )
         )
     package = upsert_entity(
@@ -225,10 +228,10 @@ def seed_package_graph(package_key: str) -> dict[str, Any]:
             to_entity_key=f"{package_key}:cta",
         ),
     ]
-    for p in platforms:
+    for p in integrations:
         rels.append(
             upsert_relation(
-                relation_key=f"{package_key}:adapts:{p['name']}",
+                relation_key=f"{package_key}:routes:{p['name']}",
                 relation_type="adapts_to",
                 from_entity_key=package_key,
                 to_entity_key=p["entity_key"],

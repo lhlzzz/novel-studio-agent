@@ -1,0 +1,1 @@
+"""Meiti content domain."""

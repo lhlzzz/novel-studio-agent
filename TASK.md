@@ -1,8 +1,20 @@
-# meiti TASK
+# Meiti V3 Task
 
-当前 active task：meiti 合并完成 + P0 skills 已装。
+**GOAL:** Operate Meiti as one AI Creator / Media Operating System with
+capability agents, registry-driven integrations, governed distribution, and
+shared PostgreSQL + pgvector memory.
 
-1. 顶层 `meiti/`；两边并行子目录迁入完成。
-2. 根 README / portfolio / scripts 已改路径。
-3. 已装 marketingskills + social-media-skills 子集 + impeccable。
-4. 不改 CDP/DB 端口。
+**VERIFY:** No legacy workspace topology or platform agent launcher remains.
+Registry, contracts, gate, analytics, memory, commerce, Postiz, and research
+skill surfaces pass tests and available runtime checks.
+
+## Current boundary
+
+- Enabled distribution: only integrations with verified connectors.
+- Postiz: external distribution infrastructure with an isolated database.
+- ScrapeCreators: read-only research skill source until live credentials and
+  workflow verification are available.
+- Domestic providers: registered as disabled custom adapters until verified.
+- Postiz V3.1 provider: client, adapter, account mapping, MCP contract, and
+  distribution-agent orchestration are present; runtime activation remains
+  blocked until Postiz and OAuth/API credentials are verified.
