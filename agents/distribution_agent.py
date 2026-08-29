@@ -1,73 +1,106 @@
-"""Meiti-owned distribution orchestration through a verified provider."""
+"""Distribution agent owns gated external actions through ProviderResolver."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from content.models import ContentPackage
 from analytics.normalizers.metrics import NormalizedMetrics, normalize_metrics
 from analytics.persistence import persist_metrics
+from content.models import ContentPackage
+from content.variants import build_variant
 from governance.distribution_gate import check_distribution_job
-from integrations.contracts.distribution import DistributionJob, Integration
+from governance.observability import new_request_id
+from integrations.contracts.distribution import (
+    DistributionJob,
+    Integration,
+    IntegrationAccount,
+    transition_job,
+    make_idempotency_key,
+)
 from integrations.distribution_service import DistributionService
-from integrations.providers.postiz.adapter import PostizAdapter
+from integrations.persistence import InMemoryStore, JobStore
+from integrations.providers.resolver import resolve_adapter, resolve_capability, resolve_provider
 from integrations.registry.loader import load_registry
-
-
-@dataclass(frozen=True)
-class ProviderAccount:
-    platform: str
-    integration_id: str
-    status: str
 
 
 class DistributionAgent:
     """Select providers, create jobs, and delegate gated execution."""
 
+    name = "distribution-agent"
+    owner = "distribution"
+    capabilities = (
+        "list_accounts",
+        "list_integrations",
+        "get_capabilities",
+        "create_job",
+        "dry_run",
+        "validate",
+        "execute",
+        "schedule",
+        "status",
+        "cancel",
+        "reconcile",
+        "sync_analytics",
+    )
+
     def __init__(
         self,
         *,
-        adapter: PostizAdapter | None = None,
+        adapter: Any | None = None,
         registry: dict[str, Integration] | None = None,
         accounts_path: Path | None = None,
+        store: JobStore | None = None,
+        provider_name: str = "postiz",
     ) -> None:
-        self.adapter = adapter or PostizAdapter()
         self.registry = registry or load_registry()
+        self.provider_name = provider_name
+        self.adapter = adapter or resolve_adapter("postiz", registry=self.registry)
         self.accounts_path = accounts_path or Path(__file__).resolve().parents[1] / "config/postiz/integrations.yaml"
+        self.store = store or InMemoryStore()
+        self.service = DistributionService(self.adapter, store=self.store)
 
-    def list_accounts(self) -> list[ProviderAccount]:
-        """Return only configured, non-empty account mappings."""
-
+    def list_accounts(self) -> list[IntegrationAccount]:
         try:
             import yaml
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("PyYAML is required to load Postiz accounts") from exc
+            raise RuntimeError("PyYAML is required to load provider accounts") from exc
         raw = yaml.safe_load(self.accounts_path.read_text(encoding="utf-8")) or {}
-        if raw.get("provider") != "postiz":
-            raise ValueError("Postiz account config has an unexpected provider")
+        provider = str(raw.get("provider") or self.provider_name)
         accounts = []
         for item in raw.get("accounts") or []:
             integration_id = str(item.get("integration_id") or "").strip()
             if integration_id:
                 accounts.append(
-                    ProviderAccount(
+                    IntegrationAccount(
                         platform=str(item.get("platform") or ""),
                         integration_id=integration_id,
                         status=str(item.get("status") or "pending"),
+                        provider=provider,
+                        account_name=str(item.get("account_name") or ""),
                     )
                 )
         return accounts
 
-    def select_provider(self, platform: str) -> ProviderAccount:
-        provider = self.registry.get("postiz")
+    def list_integrations(self):
+        return self.adapter.list_integrations()
+
+    def get_capabilities(self, integration_id: str):
+        return resolve_capability(integration_id, "publish", adapter=self.adapter)
+
+    def select_provider(self, platform: str) -> IntegrationAccount:
+        handle = resolve_provider(self.provider_name, adapter=self.adapter)
+        provider = self.registry.get(self.provider_name) or handle.integration
         if provider is None or not provider.enabled:
-            raise RuntimeError("Postiz provider is not runtime verified")
+            raise RuntimeError("provider is not runtime verified")
         for account in self.list_accounts():
             if account.platform == platform and account.status == "active":
                 return account
-        raise RuntimeError(f"no active verified Postiz account for platform={platform}")
+        raise RuntimeError(f"no active verified account for platform={platform}")
+
+    def _variant(self, package: ContentPackage, integration_id: str, platform: str):
+        return build_variant(package, integration_id=integration_id, platform=platform)
 
     def create_job(
         self,
@@ -76,27 +109,31 @@ class DistributionAgent:
         platform: str,
         job_id: str,
         scheduled_at: str | None = None,
+        request_id: str | None = None,
     ) -> DistributionJob:
         account = self.select_provider(platform)
-        return DistributionJob(
+        action = "schedule" if scheduled_at else "publish"
+        job = DistributionJob(
             job_id=job_id,
             content_package_id=package.package_id,
             integration_id=account.integration_id,
-            variant=self._variant(package, account.integration_id),
-            action="schedule" if scheduled_at else "publish",
+            variant=self._variant(package, account.integration_id, platform),
+            action=action,
             scheduled_at=scheduled_at,
+            status="DRAFT",
+            idempotency_key=make_idempotency_key(package.package_id, account.integration_id, action, scheduled_at),
+            brand_id=package.brand_id,
+            creator_id=package.creator_id,
+            campaign_id=package.campaign_id,
+            request_id=request_id or new_request_id(),
         )
+        return self.store.save_job(job)
 
-    @staticmethod
-    def _variant(package: ContentPackage, integration_id: str):
-        from integrations.contracts.distribution import ContentVariant
+    def validate(self, job: DistributionJob) -> list[str]:
+        return self.adapter.validate_payload(job)
 
-        return ContentVariant(
-            integration_id=integration_id,
-            body=package.body,
-            media=tuple(package.metadata.get("media", ())),
-            metadata=package.metadata,
-        )
+    def dry_run(self, job: DistributionJob) -> dict[str, Any]:
+        return self.service.dry_run(job)
 
     def execute(
         self,
@@ -107,8 +144,19 @@ class DistributionAgent:
         account_valid: bool,
         media_valid: bool,
         approval_valid: bool,
+        provider_verified: bool = False,
+        integration_verified: bool = False,
+        capability_verified: bool = False,
+        idempotency_valid: bool = False,
+        media_uploaded: bool = False,
+        payload_valid: bool = False,
     ):
         integration = self.adapter.get_integration(job.integration_id)
+        capability = resolve_capability(
+            job.integration_id,
+            "schedule" if job.action == "schedule" else "publish",
+            adapter=self.adapter,
+        )
 
         def gate_check(candidate: DistributionJob) -> bool:
             return not check_distribution_job(
@@ -119,12 +167,42 @@ class DistributionAgent:
                 account_valid=account_valid,
                 media_valid=media_valid,
                 approval_valid=approval_valid,
+                provider_verified=provider_verified or bool(integration.enabled),
+                integration_verified=integration_verified or integration.state in {"VERIFIED", "ENABLED"},
+                capability_verified=capability_verified or capability.allowed,
+                idempotency_valid=idempotency_valid or bool(candidate.idempotency_key),
+                media_uploaded=media_uploaded or not candidate.variant.media or bool((candidate.variant.metadata or {}).get("uploaded_media")),
+                payload_valid=payload_valid or not self.adapter.validate_payload(candidate),
             )
 
-        return DistributionService(self.adapter).execute(job, gate_check=gate_check)
+        return self.service.execute(job, gate_check=gate_check)
+
+    def schedule(self, job: DistributionJob, **gate: bool):
+        scheduled = replace(job, action="schedule") if job.action != "schedule" else job
+        return self.execute(scheduled, **gate)
 
     def status(self, job_id: str) -> dict[str, Any]:
-        return self.adapter.get_status(job_id)
+        publication = self.store.get_publication(job_id)
+        if publication is None:
+            return {"id": job_id, "status": "UNKNOWN"}
+        return self.adapter.get_status(publication.resolved_provider_post_id())
+
+    def cancel(self, job_id: str) -> DistributionJob:
+        job = self.store.get_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        cancelled = transition_job(job, "CANCELLED")
+        publication = self.store.get_publication(job_id)
+        if publication is not None:
+            cancel = getattr(self.adapter, "cancel", None) or getattr(self.adapter, "delete", None)
+            if callable(cancel):
+                cancel(publication.resolved_provider_post_id())
+        return self.store.save_job(cancelled)
+
+    def reconcile(self, job_id: str) -> dict[str, Any]:
+        from services.reconciliation.service import reconcile_distribution_job
+
+        return reconcile_distribution_job(job_id, adapter=self.adapter, store=self.store)
 
     def sync_analytics(
         self,
@@ -133,8 +211,6 @@ class DistributionAgent:
         post_id: str,
         platform: str,
     ) -> NormalizedMetrics:
-        """Pull provider metrics and persist the normalized Meiti record."""
-
         raw = self.adapter.get_analytics(post_id)
         metrics = normalize_metrics(
             publication_id,

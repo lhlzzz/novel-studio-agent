@@ -1,10 +1,37 @@
 agents:
-  meiti-orchestrator: {owner: coordination, status: active}
-  research-agent: {owner: intelligence, status: active}
-  strategy-agent: {owner: strategy, status: active}
-  content-agent: {owner: content, status: active}
-  media-agent: {owner: media, status: active}
-  analytics-agent: {owner: analytics, status: active}
-  memory-agent: {owner: memory, status: active}
-  commerce-agent: {owner: commerce, status: active}
-  distribution-agent: {owner: distribution, status: active}
+  meiti-orchestrator:
+    owner: coordination
+    status: active
+    implementation: agents.orchestrator.runtime:OrchestratorAgent
+  research-agent:
+    owner: intelligence
+    status: active
+    implementation: agents.research.runtime:ResearchAgent
+  strategy-agent:
+    owner: strategy
+    status: active
+    implementation: agents.strategy.runtime:StrategyAgent
+  content-agent:
+    owner: content
+    status: active
+    implementation: agents.content.runtime:ContentAgent
+  media-agent:
+    owner: media
+    status: active
+    implementation: agents.media.runtime:MediaAgent
+  analytics-agent:
+    owner: analytics
+    status: active
+    implementation: agents.analytics.runtime:AnalyticsAgent
+  memory-agent:
+    owner: memory
+    status: active
+    implementation: agents.memory.runtime:MemoryAgent
+  commerce-agent:
+    owner: commerce
+    status: active
+    implementation: agents.commerce.runtime:CommerceAgent
+  distribution-agent:
+    owner: distribution
+    status: active
+    implementation: agents.distribution.runtime:DistributionAgent

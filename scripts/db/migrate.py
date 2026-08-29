@@ -29,6 +29,7 @@ from scripts.db.models import (
 )
 
 PROJECT_NAME = "meiti"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 TABLE_NAMES = sorted(Base.metadata.tables)
 SEED_PREFIX = f"{PROJECT_NAME}-demo"
 VERIFY_RECORD_KEY = f"{PROJECT_NAME}-verify-record"
@@ -99,11 +100,71 @@ def _enable_pgvector() -> None:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
+def _ensure_schema_migrations() -> None:
+    with engine.begin() as conn:
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version VARCHAR(64) PRIMARY KEY,
+                applied_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        ))
+
+
+def _applied_versions() -> list[str]:
+    _ensure_schema_migrations()
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT version FROM schema_migrations ORDER BY version")).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _stamp(version: str) -> None:
+    _ensure_schema_migrations()
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO schema_migrations (version) VALUES (:v) ON CONFLICT (version) DO NOTHING"),
+            {"v": version},
+        )
+
+
+def upgrade() -> None:
+    """Apply versioned schema changes. Does not write demo rows."""
+    init_db()
+    applied = set(_applied_versions())
+    files = sorted(MIGRATIONS_DIR.glob("*.sql")) if MIGRATIONS_DIR.exists() else []
+    for path in files:
+        version = path.stem
+        if version in applied:
+            continue
+        sql = path.read_text(encoding="utf-8")
+        if sql.strip() and not sql.strip().startswith("-- baseline"):
+            with engine.begin() as conn:
+                conn.execute(text(sql))
+        _stamp(version)
+        print(f"applied {version}")
+    if "0001_baseline" not in set(_applied_versions()):
+        _stamp("0001_baseline")
+        print("applied 0001_baseline")
+    print("schema version:", ", ".join(_applied_versions()) or "none")
+
+
+def history() -> None:
+    versions = _applied_versions()
+    print("schema_migrations:")
+    if not versions:
+        print("  (empty)")
+        return
+    for version in versions:
+        print(f"  - {version}")
+
+
 def init_db() -> None:
-    """Enable pgvector and create all ORM-managed tables."""
+    """Enable pgvector and create all ORM-managed tables. No demo rows."""
     try:
         _enable_pgvector()
         Base.metadata.create_all(bind=engine)
+        _ensure_schema_migrations()
         # create_all does not add columns to an existing gate table.
         with engine.begin() as conn:
             for column in ("integration_id", "distribution_job_id"):
@@ -314,29 +375,6 @@ def verify() -> None:
             raise SystemExit(f"Missing tables: {', '.join(missing)}")
 
         with SessionLocal() as session:
-            run = session.execute(
-                select(AgentRun).where(AgentRun.run_key == f"{SEED_PREFIX}-run")
-            ).scalar_one_or_none()
-            emb = session.execute(
-                select(ContentEmbedding).where(
-                    ContentEmbedding.embedding_key == f"{SEED_PREFIX}-embedding"
-                )
-            ).scalar_one_or_none()
-            ent = session.execute(
-                select(ContentEntity).where(
-                    ContentEntity.entity_key == f"{SEED_PREFIX}-entity-topic"
-                )
-            ).scalar_one_or_none()
-            gate = session.execute(
-                select(PublishGate).where(PublishGate.gate_key == f"{SEED_PREFIX}-gate")
-            ).scalar_one_or_none()
-            if run is None or emb is None or ent is None or gate is None:
-                raise SystemExit(
-                    "Seed data missing; run 'python scripts/db/migrate.py seed' first."
-                )
-            if gate.status != "locked":
-                raise SystemExit(f"Demo gate must be locked, got {gate.status}")
-
             verify_record, _ = _upsert_model(
                 session,
                 AgentRecord,
@@ -374,21 +412,7 @@ def verify() -> None:
             session.delete(verify_emb)
             session.commit()
 
-        with engine.connect() as conn:
-            dist = conn.execute(
-                text(
-                    """
-                    SELECT embedding <=> CAST(:q AS vector) AS dist
-                    FROM content_embeddings
-                    WHERE embedding_key = :k
-                    """
-                ),
-                {
-                    "k": f"{SEED_PREFIX}-embedding",
-                    "q": "[" + ",".join(["0"] * DEFAULT_EMBEDDING_DIM) + "]",
-                },
-            ).scalar_one()
-        print(f"vector distance smoke (demo vs zero): {dist}")
+        print("vector extension smoke: skipped demo rows")
     except SQLAlchemyError as exc:
         _die_db_error("verify", exc)
     except SystemExit:
@@ -402,10 +426,8 @@ def verify() -> None:
     _print_table_names("Verified tables:", TABLE_NAMES)
     print("pgvector: OK")
     print("content KG tables: OK")
-    print("publish_gates default locked: OK")
-    print(f"Demo run key: {SEED_PREFIX}-run")
-    print(f"Demo embedding key: {SEED_PREFIX}-embedding")
     print("CRUD smoke: passed")
+    print("demo rows: not required")
 
 
 def report() -> None:
@@ -459,9 +481,8 @@ def report() -> None:
 
 
 def bootstrap() -> None:
-    """Create tables, seed demo data, and verify the result."""
-    init_db()
-    seed()
+    """Create/upgrade schema and verify. Demo seed is opt-in and not production."""
+    upgrade()
     verify()
 
 
@@ -469,7 +490,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=f"{PROJECT_NAME} database utilities (pgvector)")
     parser.add_argument(
         "command",
-        choices=["init", "status", "seed", "verify", "report", "bootstrap"],
+        choices=["init", "status", "seed", "verify", "report", "bootstrap", "upgrade", "history"],
         help="database command to run",
     )
     args = parser.parse_args()
@@ -486,6 +507,10 @@ def main() -> None:
         report()
     elif args.command == "bootstrap":
         bootstrap()
+    elif args.command == "upgrade":
+        upgrade()
+    elif args.command == "history":
+        history()
 
 
 if __name__ == "__main__":

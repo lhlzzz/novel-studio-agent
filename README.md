@@ -1,47 +1,52 @@
-# Meiti V3
+# Meiti V3.3
 
-Meiti is an AI Creator / Media Operating System.
+Meiti is an AI Creator Operating System.
 
 ```text
-Research → Strategy → Create → Distribute → Measure → Learn → Improve
+Research → Intelligence → Strategy → Content → Media → Memory
+→ ContentPackage → Distribution → Publish Gate → Provider Resolver
+→ Provider Adapter → External Platform → Publication
+→ Reconciliation → Analytics → Insight → Memory → Strategy
 ```
 
-Core domains: Intelligence, Strategy, Content, Media, Memory, Analytics,
-Commerce, Governance, Distribution, and Integrations.
+Commerce is independent:
 
-Capability agents are orchestrator, research, strategy, content, media,
+```text
+Content → Audience → Commerce Attribution → Product / Offer → Conversion
+```
+
+Capability agents: orchestrator, research, strategy, content, media,
 analytics, memory, commerce, and distribution.
 
 ## Distribution
 
-Postiz is global distribution infrastructure. It owns verified channel
-connections, OAuth, uploads, scheduling, publishing, and distribution status.
-Meiti owns the business and intelligence layer.
+Postiz is the first external distribution provider. Meiti owns content, jobs,
+gates, publications, analytics, and memory. Routing goes through
+ProviderResolver to a verified adapter. Publish Gate is fail-closed.
+Domestic connectors remain registered and disabled until a real adapter exists.
 
-Custom adapters are used for integrations not verified by Postiz. A provider
-may be registered without being enabled; `enabled: true` requires a real
-connector and runtime verification.
-
-The Postiz provider lives under `integrations/providers/postiz/`. Its public
-API client, adapter contract, account mapping, and MCP contract are kept
-separate from Meiti's business database. See its README for the operational
-boundary and required environment variables.
+```text
+Campaign → ContentPackage → ContentVariant → DistributionJob
+→ Publish Gate → ProviderResolver → Adapter → Publication
+→ Reconciliation → Analytics → Memory → Strategy
+```
 
 ## Shared infrastructure
 
 - PostgreSQL + pgvector: Meiti production data
 - Content KG: content entities and relations
-- Obsidian: operational knowledge graph
+- Control Plane: agents, integrations, jobs, workers, database
+- Obsidian: operational knowledge
 - `packages/`: content packages
 - `evidence/`: evidence and media assets
 - `.gates/`: approval records
 
 ```bash
 python -m pytest
-python scripts/db/migrate.py bootstrap
+python scripts/db/migrate.py upgrade
 python scripts/db/migrate.py verify
-python scripts/embeddings.py selftest
-python scripts/publish_gate.py selftest
+python scripts/meiti_doctor.py
+python scripts/runtime_check.py
 ```
 
 `Platform = Integration`; `Platform != Workspace`; `Platform != Agent`.

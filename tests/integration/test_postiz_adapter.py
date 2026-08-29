@@ -15,18 +15,21 @@ def test_unverified_adapter_is_explicitly_unsupported():
 
 
 def test_postiz_adapter_exposes_required_distribution_operations():
-    from integrations.adapters.postiz.adapter import PostizDistributionAdapter
+    from integrations.providers.postiz.adapter import PostizDistributionAdapter
 
     adapter = PostizDistributionAdapter(base_url="http://127.0.0.1:9")
-    for operation in ("list_integrations", "get_integration", "get_settings",
-                      "upload", "schedule", "publish", "get_status", "delete",
-                      "analytics_platform", "analytics_post"):
+    for operation in ("authenticate", "health", "list_integrations", "get_capabilities",
+                      "upload_media", "publish", "schedule", "get_status", "cancel",
+                      "get_analytics"):
         assert callable(getattr(adapter, operation))
 
 
 class FakePostizClient:
     def __init__(self):
         self.created = None
+
+    def is_connected(self):
+        return True
 
     def list_integrations(self, group=None):
         return {"data": [{"id": "x-123", "identifier": "x", "name": "test"}]}
@@ -64,6 +67,7 @@ def test_postiz_adapter_maps_contract_to_single_client():
     client = FakePostizClient()
     adapter = PostizAdapter(client=client)
     job = DistributionJob("job-1", "pkg-1", "x-123", ContentVariant("x-123", "hello"))
+    adapter.verify_capabilities("x-123")
 
     assert adapter.get_integration("x-123").capabilities.media_upload is True
     assert adapter.validate_payload(job) == []

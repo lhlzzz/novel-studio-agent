@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Machine-readable runtime check for Meiti V3.3."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from scripts.meiti_doctor import as_payload, run
+
+
+def main() -> int:
+    payload = as_payload(run())
+    print(json.dumps({"ready": payload["ready"], "checks": payload["checks"]}, default=str))
+    return 0 if payload["ready"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

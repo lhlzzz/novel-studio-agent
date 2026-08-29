@@ -8,19 +8,43 @@ Governance, and Integrations.
 
 Logical agents are `meiti-orchestrator`, `research-agent`, `strategy-agent`,
 `content-agent`, `media-agent`, `analytics-agent`, `memory-agent`,
-`commerce-agent`, and `distribution-agent`.
+`commerce-agent`, and `distribution-agent`. Resolve them with
+`agents.registry.resolve_agent`. YAML is inventory; an importable
+implementation is required before status can be `active`.
 
 All production data is owned by Meiti. PostgreSQL + pgvector, Content KG, and
 Obsidian are shared memory infrastructure. There is one Meiti business
 database and one distribution database owned by Postiz.
 
 All external actions go through `distribution-agent` and publish gate. Postiz
-is distribution infrastructure, not the Meiti business brain.
+is the first distribution provider, not the Meiti business brain.
 
 Postiz integration rules: `PostizClient` is the sole HTTP owner; provider
 account IDs must come from a verified Postiz runtime; MCP is an execution
 surface behind the same Meiti distribution boundary, never a replacement for
 the ContentPackage, DistributionJob, or Publish Gate flow.
+
+## Distribution Contract
+
+ProviderResolver is the only provider routing mechanism.
+
+DistributionAgent must never import a concrete provider adapter directly.
+
+All provider capabilities require runtime verification.
+
+Media must be uploaded before publish if provider requires uploaded media.
+
+Every successful external action must create/update Publication.
+
+Every publish must be idempotent.
+
+Every scheduled/published job is reconciled.
+
+Analytics must flow back into Meiti.
+
+YAML and registry files may register a provider. They must not set
+`enabled: true`. Enabled means runtime-verified. Job IDs, provider post IDs,
+and platform object IDs stay separate.
 
 ## Change Rules
 
@@ -37,6 +61,8 @@ the ContentPackage, DistributionJob, or Publish Gate flow.
 ```bash
 python -m pytest
 python scripts/db/migrate.py verify
+python scripts/meiti_doctor.py
+python scripts/runtime_check.py
 ```
 
 The authoritative topology is the code under `agents/`, domain directories,

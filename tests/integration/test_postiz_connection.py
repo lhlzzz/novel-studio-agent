@@ -1,4 +1,4 @@
-from integrations.adapters.postiz.adapter import PostizDistributionAdapter
+from integrations.providers.postiz.adapter import PostizDistributionAdapter
 from integrations.providers.postiz.client import PostizClient
 
 

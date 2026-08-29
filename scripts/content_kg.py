@@ -18,6 +18,17 @@ sys.path.insert(0, str(ROOT))
 from scripts.db.engine import SessionLocal  # noqa: E402
 from scripts.db.models import ContentEntity, ContentRelation  # noqa: E402
 
+ENTITY_TYPES = (
+    "Content", "Campaign", "Topic", "Hook", "Audience", "Platform",
+    "Creator", "Experiment", "Product", "Metric", "Insight",
+)
+RELATION_TYPES = (
+    "CONTENT_ABOUT", "CONTENT_VARIANT_OF", "PUBLISHED_TO", "PERFORMED_ON",
+    "TARGETS_AUDIENCE", "USES_HOOK", "PART_OF_EXPERIMENT", "PROMOTES_PRODUCT",
+    "GENERATED_INSIGHT",
+)
+
+
 
 def upsert_entity(
     *,
