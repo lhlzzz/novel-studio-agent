@@ -13,24 +13,10 @@ from scripts.db.models import AgentRecord
 
 
 def persist_publication(publication: Publication) -> None:
-    with SessionLocal() as session:
-        row = session.query(AgentRecord).filter_by(
-            record_key=f"publication:{publication.distribution_job_id}"
-        ).one_or_none()
-        payload = asdict(publication)
-        payload["external_id"] = publication.external_id
-        payload["provider_post_id"] = publication.resolved_provider_post_id()
-        payload["platform_object_id"] = publication.resolved_platform_object_id()
-        if row is None:
-            session.add(AgentRecord(
-                record_key=f"publication:{publication.distribution_job_id}",
-                record_type="publication",
-                payload=payload,
-                source="distribution-agent",
-            ))
-        else:
-            row.payload = payload
-        session.commit()
+    """Persist the provider-neutral publication without inventing IDs."""
+    from integrations.persistence import DatabaseStore
+
+    DatabaseStore().save_publication(publication)
 
 
 def persist_metrics(metrics: NormalizedMetrics) -> None:
@@ -63,6 +49,16 @@ SNAPSHOTS: list[dict[str, Any]] = []
 def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "postiz") -> list[dict[str, Any]]:
     observed_at = datetime.now(timezone.utc).isoformat()
     created: list[dict[str, Any]] = []
+    durable_publication = False
+    try:
+        from scripts.db.models import PublicationRecord
+
+        with SessionLocal() as session:
+            durable_publication = session.query(PublicationRecord).filter_by(
+                distribution_job_id=metrics.publication_id
+            ).first() is not None
+    except Exception:
+        durable_publication = False
     for name in ("views", "likes", "comments", "shares", "saves", "clicks", "followers_delta"):
         value = metrics.values.get(name)
         snapshot = {
@@ -74,16 +70,25 @@ def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "postiz
         }
         SNAPSHOTS.append(snapshot)
         created.append(snapshot)
-        key = f"analytics-snapshot:{metrics.publication_id}:{name}:{observed_at}"
+        key = f"analytics-snapshot:{metrics.publication_id}:{name}:{observed_at}:{source}"
+        if not durable_publication:
+            continue
         try:
             with SessionLocal() as session:
-                session.add(AgentRecord(
-                    record_key=key,
-                    record_type="metric_snapshot",
-                    payload=snapshot,
-                    source="analytics-agent",
+                from scripts.db.models import MetricSnapshotRecord
+
+                session.add(MetricSnapshotRecord(
+                    publication_id=metrics.publication_id,
+                    metric_name=name,
+                    value=value,
+                    observed_at=datetime.fromisoformat(observed_at.replace("Z", "+00:00")).replace(tzinfo=None),
+                    source=source,
                 ))
                 session.commit()
-        except Exception:
-            continue
+        except Exception as exc:
+            # Keep the append-only in-process result useful, but surface DB
+            # failure instead of silently claiming durable analytics.
+            if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
+                continue
+            raise
     return created

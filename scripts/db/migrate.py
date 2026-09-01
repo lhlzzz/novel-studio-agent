@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -22,16 +24,24 @@ from scripts.db.models import (
     AgentRecord,
     AgentRun,
     AgentTask,
+    CampaignRecord,
+    ContentPackageRecord,
+    ContentVariantRecord,
     ContentEmbedding,
     ContentEntity,
     ContentRelation,
+    DistributionAttemptRecord,
+    DistributionJobRecord,
+    IntegrationRecord,
+    MediaUploadRecord,
+    MetricSnapshotRecord,
+    PublicationRecord,
     PublishGate,
 )
 
 PROJECT_NAME = "meiti"
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 TABLE_NAMES = sorted(Base.metadata.tables)
-SEED_PREFIX = f"{PROJECT_NAME}-demo"
 VERIFY_RECORD_KEY = f"{PROJECT_NAME}-verify-record"
 VERIFY_EMBEDDING_KEY = f"{PROJECT_NAME}-verify-embedding"
 BASE_TABLE_MODELS = (
@@ -45,18 +55,15 @@ BASE_TABLE_MODELS = (
     ("content_entities", ContentEntity),
     ("content_relations", ContentRelation),
     ("publish_gates", PublishGate),
-)
-DEMO_KEY_CHECKS = (
-    ("run", AgentRun, AgentRun.run_key, f"{SEED_PREFIX}-run"),
-    ("task", AgentTask, AgentTask.task_key, f"{SEED_PREFIX}-task"),
-    ("decision", AgentDecision, AgentDecision.decision_key, f"{SEED_PREFIX}-decision"),
-    ("artifact", AgentArtifact, AgentArtifact.artifact_key, f"{SEED_PREFIX}-artifact"),
-    ("metric", AgentMetric, AgentMetric.metric_key, f"{SEED_PREFIX}-metric"),
-    ("record", AgentRecord, AgentRecord.record_key, f"{SEED_PREFIX}-record"),
-    ("embedding", ContentEmbedding, ContentEmbedding.embedding_key, f"{SEED_PREFIX}-embedding"),
-    ("entity", ContentEntity, ContentEntity.entity_key, f"{SEED_PREFIX}-entity-topic"),
-    ("relation", ContentRelation, ContentRelation.relation_key, f"{SEED_PREFIX}-rel-topic-platform"),
-    ("gate", PublishGate, PublishGate.gate_key, f"{SEED_PREFIX}-gate"),
+    ("campaigns", CampaignRecord),
+    ("content_packages", ContentPackageRecord),
+    ("content_variants", ContentVariantRecord),
+    ("integrations", IntegrationRecord),
+    ("distribution_jobs", DistributionJobRecord),
+    ("distribution_attempts", DistributionAttemptRecord),
+    ("publications", PublicationRecord),
+    ("media_uploads", MediaUploadRecord),
+    ("metric_snapshots", MetricSnapshotRecord),
 )
 
 
@@ -100,80 +107,45 @@ def _enable_pgvector() -> None:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
-def _ensure_schema_migrations() -> None:
-    with engine.begin() as conn:
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version VARCHAR(64) PRIMARY KEY,
-                applied_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-            )
-            """
-        ))
+def _alembic_config() -> Config:
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+    return config
 
 
-def _applied_versions() -> list[str]:
-    _ensure_schema_migrations()
+def _adopt_legacy_baseline() -> None:
+    """Stamp the pre-Alembic schema exactly once before upgrading it."""
     with engine.connect() as conn:
-        rows = conn.execute(text("SELECT version FROM schema_migrations ORDER BY version")).fetchall()
-    return [str(row[0]) for row in rows]
-
-
-def _stamp(version: str) -> None:
-    _ensure_schema_migrations()
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO schema_migrations (version) VALUES (:v) ON CONFLICT (version) DO NOTHING"),
-            {"v": version},
-        )
+        has_alembic = "alembic_version" in inspect(conn).get_table_names()
+        has_baseline = "schema_migrations" in inspect(conn).get_table_names()
+        baseline = conn.execute(
+            text("SELECT 1 FROM schema_migrations WHERE version = '0001_baseline' LIMIT 1")
+        ).scalar_one_or_none() if has_baseline else None
+    if not has_alembic and baseline:
+        command.stamp(_alembic_config(), "0001_baseline")
 
 
 def upgrade() -> None:
-    """Apply versioned schema changes. Does not write demo rows."""
-    init_db()
-    applied = set(_applied_versions())
-    files = sorted(MIGRATIONS_DIR.glob("*.sql")) if MIGRATIONS_DIR.exists() else []
-    for path in files:
-        version = path.stem
-        if version in applied:
-            continue
-        sql = path.read_text(encoding="utf-8")
-        if sql.strip() and not sql.strip().startswith("-- baseline"):
-            with engine.begin() as conn:
-                conn.execute(text(sql))
-        _stamp(version)
-        print(f"applied {version}")
-    if "0001_baseline" not in set(_applied_versions()):
-        _stamp("0001_baseline")
-        print("applied 0001_baseline")
-    print("schema version:", ", ".join(_applied_versions()) or "none")
+    """Apply the Alembic revision chain without writing application data."""
+    _adopt_legacy_baseline()
+    command.upgrade(_alembic_config(), "head")
+    current()
 
 
 def history() -> None:
-    versions = _applied_versions()
-    print("schema_migrations:")
-    if not versions:
-        print("  (empty)")
-        return
-    for version in versions:
-        print(f"  - {version}")
+    command.history(_alembic_config())
+
+
+def current() -> None:
+    command.current(_alembic_config(), verbose=False)
 
 
 def init_db() -> None:
-    """Enable pgvector and create all ORM-managed tables. No demo rows."""
+    """Upgrade the versioned schema and verify the pgvector extension."""
     try:
         _enable_pgvector()
-        Base.metadata.create_all(bind=engine)
-        _ensure_schema_migrations()
-        # create_all does not add columns to an existing gate table.
-        with engine.begin() as conn:
-            for column in ("integration_id", "distribution_job_id"):
-                conn.execute(text(
-                    f"ALTER TABLE publish_gates ADD COLUMN IF NOT EXISTS {column} VARCHAR(255)"
-                ))
-            conn.execute(text("DROP INDEX IF EXISTS idx_meiti_publish_gates_package"))
-            conn.execute(text("ALTER TABLE publish_gates DROP COLUMN IF EXISTS platform"))
-            conn.execute(text("ALTER TABLE publish_gates DROP COLUMN IF EXISTS package_key"))
+        upgrade()
         with engine.connect() as conn:
             ext = conn.execute(
                 text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
@@ -204,158 +176,6 @@ def status() -> None:
         _print_table_names("Visible tables:", tables)
     else:
         print("Visible tables: none")
-
-
-def seed() -> None:
-    """Insert or refresh minimal demo data including vector + KG + gate."""
-    zero_vec = [0.0] * DEFAULT_EMBEDDING_DIM
-    try:
-        with SessionLocal() as session:
-            run, _ = _upsert_model(
-                session,
-                AgentRun,
-                "run_key",
-                f"{SEED_PREFIX}-run",
-                run_type="bootstrap",
-                status="completed",
-                model="bootstrap",
-                prompt_summary=f"{PROJECT_NAME} bootstrap demo run",
-                inputs={"project": PROJECT_NAME, "mode": "bootstrap"},
-                outputs={"status": "ok", "kind": "demo"},
-                source=PROJECT_NAME,
-            )
-            task, _ = _upsert_model(
-                session,
-                AgentTask,
-                "task_key",
-                f"{SEED_PREFIX}-task",
-                run_id=run.id,
-                title=f"Bootstrap {PROJECT_NAME} agent + vector + content KG",
-                status="completed",
-                priority="normal",
-                owner_model="bootstrap",
-                payload={"project": PROJECT_NAME, "source": "seed"},
-            )
-            _upsert_model(
-                session,
-                AgentDecision,
-                "decision_key",
-                f"{SEED_PREFIX}-decision",
-                run_id=run.id,
-                task_id=task.id,
-                decision_type="bootstrap",
-                summary=f"Initialized {PROJECT_NAME} PostgreSQL + pgvector + content KG",
-                rationale="Unified media content vectors, relations, gates, agent audit.",
-                alternatives=["Keep only sub-line DBs 5443/5444"],
-                source=PROJECT_NAME,
-            )
-            _upsert_model(
-                session,
-                AgentArtifact,
-                "artifact_key",
-                f"{SEED_PREFIX}-artifact",
-                run_id=run.id,
-                task_id=task.id,
-                artifact_type="documentation",
-                path="README.md",
-                uri=None,
-                checksum=None,
-                metadata_json={"project": PROJECT_NAME, "kind": "demo-artifact"},
-            )
-            _upsert_model(
-                session,
-                AgentMetric,
-                "metric_key",
-                f"{SEED_PREFIX}-metric",
-                run_id=run.id,
-                metric_name="bootstrap_table_count",
-                metric_value=len(TABLE_NAMES),
-                unit="tables",
-                dimensions={"project": PROJECT_NAME},
-            )
-            _upsert_model(
-                session,
-                AgentRecord,
-                "record_key",
-                f"{SEED_PREFIX}-record",
-                record_type="bootstrap",
-                payload={
-                    "project": PROJECT_NAME,
-                    "tables": TABLE_NAMES,
-                    "pgvector": True,
-                    "port": 5445,
-                },
-                source=PROJECT_NAME,
-            )
-            _upsert_model(
-                session,
-                ContentEmbedding,
-                "embedding_key",
-                f"{SEED_PREFIX}-embedding",
-                content_type="demo",
-                source_line="shared",
-                title="meiti bootstrap embedding",
-                body="Demo zero vector for pgvector smoke test.",
-                uri=None,
-                path=None,
-                platform=None,
-                language="zh",
-                model="zero-vector",
-                dim=DEFAULT_EMBEDDING_DIM,
-                embedding=zero_vec,
-                metadata_json={"project": PROJECT_NAME, "kind": "demo"},
-            )
-            topic, _ = _upsert_model(
-                session,
-                ContentEntity,
-                "entity_key",
-                f"{SEED_PREFIX}-entity-topic",
-                entity_type="topic",
-                name="AI efficiency templates for small business",
-                description="Bootstrap topic node",
-                source_line="shared",
-                properties={"demo": True},
-            )
-            platform, _ = _upsert_model(
-                session,
-                ContentEntity,
-                "entity_key",
-                f"{SEED_PREFIX}-entity-platform",
-                entity_type="integration",
-                name="bootstrap-integration",
-                description="Bootstrap integration node",
-                source_line="shared",
-                properties={"demo": True},
-            )
-            _upsert_model(
-                session,
-                ContentRelation,
-                "relation_key",
-                f"{SEED_PREFIX}-rel-topic-platform",
-                relation_type="adapts_to",
-                from_entity_id=topic.id,
-                to_entity_id=platform.id,
-                weight=1.0,
-                properties={"demo": True},
-            )
-            _upsert_model(
-                session,
-                PublishGate,
-                "gate_key",
-                f"{SEED_PREFIX}-gate",
-                action="publish",
-                integration_id="bootstrap-integration",
-                distribution_job_id=f"{SEED_PREFIX}-job",
-                status="locked",
-                requested_by="bootstrap",
-                rationale="Default locked; external publish requires boss approval.",
-                checks={"ai_feel": "pending", "marketing_risk": "pending"},
-                evidence={},
-            )
-            session.commit()
-    except SQLAlchemyError as exc:
-        _die_db_error("seed", exc)
-    print(f"Seed data ready for {PROJECT_NAME} (agents + embeddings + KG + gates).")
 
 
 def verify() -> None:
@@ -412,7 +232,7 @@ def verify() -> None:
             session.delete(verify_emb)
             session.commit()
 
-        print("vector extension smoke: skipped demo rows")
+        print("vector extension smoke: passed without application seed rows")
     except SQLAlchemyError as exc:
         _die_db_error("verify", exc)
     except SystemExit:
@@ -427,7 +247,7 @@ def verify() -> None:
     print("pgvector: OK")
     print("content KG tables: OK")
     print("CRUD smoke: passed")
-    print("demo rows: not required")
+    print("application seed rows: not written")
 
 
 def report() -> None:
@@ -450,13 +270,6 @@ def report() -> None:
                 count = session.execute(select(func.count()).select_from(orm_model)).scalar_one()
                 row_counts.append((table_name, count))
 
-            found_demo_keys = []
-            for label, orm_model, column, expected_key in DEMO_KEY_CHECKS:
-                if (
-                    session.execute(select(orm_model.id).where(column == expected_key)).scalar_one_or_none()
-                    is not None
-                ):
-                    found_demo_keys.append((label, expected_key))
     except SQLAlchemyError as exc:
         _die_db_error("report", exc)
 
@@ -472,25 +285,11 @@ def report() -> None:
     for table_name, count in row_counts:
         print(f"  - {table_name}: {count}")
 
-    if found_demo_keys:
-        print("Demo/bootstrap keys:")
-        for label, key in found_demo_keys:
-            print(f"  - {label}: {key}")
-    else:
-        print("Demo/bootstrap keys: missing (run seed)")
-
-
-def bootstrap() -> None:
-    """Create/upgrade schema and verify. Demo seed is opt-in and not production."""
-    upgrade()
-    verify()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=f"{PROJECT_NAME} database utilities (pgvector)")
     parser.add_argument(
         "command",
-        choices=["init", "status", "seed", "verify", "report", "bootstrap", "upgrade", "history"],
+        choices=["init", "status", "verify", "report", "upgrade", "current", "history"],
         help="database command to run",
     )
     args = parser.parse_args()
@@ -499,16 +298,14 @@ def main() -> None:
         init_db()
     elif args.command == "status":
         status()
-    elif args.command == "seed":
-        seed()
     elif args.command == "verify":
         verify()
     elif args.command == "report":
         report()
-    elif args.command == "bootstrap":
-        bootstrap()
     elif args.command == "upgrade":
         upgrade()
+    elif args.command == "current":
+        current()
     elif args.command == "history":
         history()
 

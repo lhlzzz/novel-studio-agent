@@ -1,20 +1,19 @@
-# Meiti V3.3 Task
+# Meiti V4 Task
 
-**GOAL:** Operate Meiti as one AI Creator Operating System with
-capability agents, registry-driven integrations, governed distribution, and
-shared PostgreSQL + pgvector memory.
+**GOAL:** Operate Meiti as one AI Creator Operating System with research,
+strategy, creative workflows, judged generation, governed distribution, and
+shared memory.
 
-**VERIFY:** No legacy workspace topology or platform-specific launcher remains.
-Registry, contracts, gate, analytics, memory, commerce, Postiz, and research
-skill surfaces pass tests and available runtime checks.
+**VERIFY:** Creative templates resolve, mock workflow runtime produces a
+ContentPackage, distribution still fail-closes, and doctor reports honest
+BLOCKED for missing live credentials.
 
 ## Current boundary
 
-- Enabled distribution: only integrations with verified connectors.
-- Postiz: first external distribution provider with an isolated database.
-- ScrapeCreators: read-only research skill source until live credentials and
-  workflow verification are available.
-- Domestic providers: registered as disabled custom adapters until verified.
-- Mock E2E is CI-safe. Real publication is opt-in after Postiz auth, account
-  discovery, and capability verification.
-- Demo rows live in `tests/fixtures/` and are never applied by `upgrade`.
+- Research remains read-only intelligence and is unavailable without credentials.
+- Creative live generation: BLOCKED until Lechuang API contract + key.
+- Distribution live publish: BLOCKED until Postiz auth + verified account.
+- Mock creative and mock distribution are CI-safe.
+- Domestic social networks remain registered and disabled.
+- Automatic DM/comment/like/follow is out of scope.
+- Content first. Product is optional and only when Strategy sets commerce intent.

@@ -3,24 +3,44 @@
 from __future__ import annotations
 
 
-class PostizClientError(RuntimeError):
+class PostizError(RuntimeError):
     retryable = False
     reauthenticate = False
 
 
-class NetworkError(PostizClientError):
+class PostizClientError(PostizError):
+    """Client-side Postiz boundary error."""
+
+
+class PostizNetworkError(PostizClientError):
     retryable = True
 
 
-class AuthenticationError(PostizClientError):
+class NetworkError(PostizNetworkError):
+    """Short name retained for existing callers."""
+
+
+class PostizTimeoutError(PostizNetworkError):
+    """Network timeout; safe to retry within the bounded policy."""
+
+
+class PostizAuthenticationError(PostizClientError):
     reauthenticate = True
 
 
-class AuthorizationError(PostizClientError):
+class AuthenticationError(PostizAuthenticationError):
+    """Short name retained for existing callers."""
+
+
+class PostizAuthorizationError(PostizClientError):
     reauthenticate = True
 
 
-class RateLimitError(PostizClientError):
+class AuthorizationError(PostizAuthorizationError):
+    """Short name retained for existing callers."""
+
+
+class PostizRateLimitError(PostizClientError):
     retryable = True
 
     def __init__(self, message: str, retry_after: float | None = None) -> None:
@@ -28,24 +48,44 @@ class RateLimitError(PostizClientError):
         self.retry_after = retry_after
 
 
-class ValidationError(PostizClientError):
-    retryable = False
+class RateLimitError(PostizRateLimitError):
+    """Short name retained for existing callers."""
 
 
-class ProviderError(PostizClientError):
-    retryable = False
+class PostizValidationError(PostizClientError):
+    """Request rejected by Postiz validation."""
 
 
-class NotFoundError(PostizClientError):
-    retryable = False
+class ValidationError(PostizValidationError):
+    """Short name retained for existing callers."""
 
 
-class ServerError(PostizClientError):
+class PostizProviderError(PostizClientError):
+    """Downstream provider rejected the operation."""
+
+
+class ProviderError(PostizProviderError):
+    """Short name retained for existing callers."""
+
+
+class PostizNotFoundError(PostizClientError):
+    """Requested Postiz object does not exist."""
+
+
+class NotFoundError(PostizNotFoundError):
+    """Short name retained for existing callers."""
+
+
+class PostizServerError(PostizClientError):
     retryable = True
 
 
+class ServerError(PostizServerError):
+    """Short name retained for existing callers."""
+
+
 class UnknownPostizError(PostizClientError):
-    retryable = False
+    """Unclassified non-retryable Postiz response."""
 
 
 def classify_http_error(status: int, detail: str, retry_after: float | None = None) -> PostizClientError:

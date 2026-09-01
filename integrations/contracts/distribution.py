@@ -11,9 +11,12 @@ INTEGRATION_STATES = (
     "REGISTERED",
     "AUTHENTICATING",
     "AUTHENTICATED",
+    "CONNECTED",
     "VERIFYING",
     "VERIFIED",
     "ENABLED",
+    "DEGRADED",
+    "BLOCKED",
     "FAILED",
 )
 
@@ -121,6 +124,7 @@ class Integration:
     state: str = "REGISTERED"
     verified_at: str | None = None
     account_name: str = ""
+    platform: str = ""
 
 
 @dataclass(frozen=True)
@@ -180,6 +184,16 @@ class DistributionAttempt:
     provider_request_id: str | None = None
     response_summary: dict[str, Any] | None = None
     request_id: str = ""
+    attempt_id: str = ""
+    distribution_job_id: str = ""
+    provider: str = ""
+    integration_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.attempt_id:
+            object.__setattr__(self, "attempt_id", f"{self.job_id}:{self.attempt_no}")
+        if not self.distribution_job_id:
+            object.__setattr__(self, "distribution_job_id", self.job_id)
 
 
 @dataclass(frozen=True)
@@ -194,6 +208,15 @@ class Publication:
     external_url: str | None = None
     content_package_id: str = ""
     request_id: str = ""
+    publication_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.publication_id:
+            object.__setattr__(self, "publication_id", f"publication:{self.distribution_job_id}")
+
+    @property
+    def id(self) -> str:
+        return self.publication_id
 
     def resolved_provider_post_id(self) -> str:
         return self.provider_post_id
@@ -213,6 +236,14 @@ class MediaUploadResult:
     remote_path: str
     uploaded_at: str
     status: str = "uploaded"
+
+    @property
+    def remote_media_id(self) -> str:
+        return self.remote_id
+
+    @property
+    def remote_media_path(self) -> str:
+        return self.remote_path
 
 
 @dataclass(frozen=True)
@@ -284,6 +315,5 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
     if job.action in {"publish", "schedule"} and not integration.capabilities.verified(capability_name):
         errors.append(f"{job.action} capability is unverified or unsupported")
     if not integration.enabled or integration.state not in {"ENABLED", "VERIFIED"}:
-        if not integration.enabled:
-            errors.append("integration is not enabled")
+        errors.append("integration is not enabled")
     return errors

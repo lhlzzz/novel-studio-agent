@@ -1,19 +1,18 @@
-# Meiti V3.3 Handoff
+# Meiti V4 Handoff
 
-Branch `main`. Legacy workspace topology is gone.
+Branch `main`. Creative Workflow Engine is in `creative/`.
 
 Production path:
 
 ```text
-resolve_agent → Campaign → ContentPackage → ContentVariant → DistributionJob
-→ Publish Gate → ProviderResolver → Adapter → Publication
-→ reconciliation worker → analytics snapshots → memory write-back
+resolve_agent -> Strategy.creative_requirement -> MediaAgent
+-> WorkflowResolver -> CreativeWorkflowEngine -> ProviderResolver
+-> Lechuang (live BLOCKED) or mock -> Judge -> MediaAsset
+-> ContentPackage -> DistributionJob -> Publish Gate
+-> ProviderResolver -> Postiz -> Publication
+-> analytics snapshots -> workflow performance -> memory
 ```
 
-Mock E2E is in `tests/e2e/`. Real Postiz publish is blocked until an operator
-supplies `POSTIZ_API_KEY`, a running Postiz process, and one verified overseas
-account.
-
 Doctor: `python scripts/meiti_doctor.py`
+Creative doctor: `python scripts/creative_doctor.py`
 Runtime JSON: `python scripts/runtime_check.py`
-Control Plane: `services.control_plane.snapshot()`

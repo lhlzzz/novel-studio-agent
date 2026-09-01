@@ -1,22 +1,19 @@
-# Meiti V3.3 State
+# Meiti V4 State
 
-- Legacy workspace and platform-specific backend/topology remain deleted.
-- Agent runtime registry resolves executable implementations.
-- ProviderResolver is the only adapter routing mechanism.
-- Integration YAML cannot enable a provider; enabled requires runtime verification.
-- ContentPackage, Campaign, StrategyPlan, DistributionAttempt, and Publication
-  are first-class objects.
-- PostizClient owns health, typed errors, retry/backoff, and HTTP.
-- Media is hashed and uploaded before create_post; identity is SHA256.
-- DistributionJob has a legal state machine, idempotency_key, attempts, and dead-letter.
-- Publications persist job id, provider post id, and platform object id separately.
-- Reconciliation and analytics workers exist; snapshots are append-only.
-- Control Plane and Doctor report PASS/WARN/BLOCKED plus JSON `{ready, checks}`.
-- Production migrations do not write demo rows.
-- Research skills stay read-only and unavailable without credentials.
-- Mock E2E covers dry-run, publish, reconciliation, analytics, and memory.
-- Real Postiz runtime is not authenticated in this environment unless an operator
-  supplies POSTIZ_API_KEY, a running Postiz stack, and one verified overseas account.
+- Creative Workflow Engine is the media production owner.
+- MediaAgent selects workflows and does not import LechuangAdapter.
+- Lechuang is a generation provider with a typed contract. Live calls are
+  BLOCKED until the official API schema is extracted and authenticated.
+- Mock creative path: Brief -> Workflow -> Fake Lechuang -> Image/Judge ->
+  Video/Judge -> MediaAsset -> ContentPackage.
+- Assets are immutable and keyed by sha256.
+- Async generation is polled by `services.workers.creative_worker`, not agents.
+- Postiz remains the distribution provider behind ProviderResolver and Gate.
+- DistributionAgent does not import PostizAdapter.
+- Mock E2E covers creative packaging and Postiz dry-run/publish loops.
+- Real Lechuang generation is BLOCKED without a verified contract and key.
+- Real Postiz publish is BLOCKED without POSTIZ_API_KEY, a running Postiz
+  process, and one verified overseas account.
 
-Run `python -m pytest`, `python scripts/meiti_doctor.py`, and
-`python scripts/runtime_check.py` after changes.
+MEITI V4 Architecture Ready. Creative live execution = BLOCKED.
+Distribution live execution = BLOCKED.

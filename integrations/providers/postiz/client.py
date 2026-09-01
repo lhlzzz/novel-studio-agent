@@ -7,16 +7,19 @@ import mimetypes
 import os
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import ProxyHandler, Request, build_opener, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 from integrations.contracts.distribution import ProviderHealth
 from integrations.providers.postiz.errors import (
     NetworkError,
     PostizClientError,
+    PostizTimeoutError,
     RateLimitError,
     classify_http_error,
 )
@@ -46,6 +49,15 @@ class PostizClient:
         self._sleep = sleeper or time.sleep
         # Postiz is operator-owned local infrastructure. Never send it through HTTP_PROXY.
         self._opener = opener or build_opener(ProxyHandler({})).open
+        self._request_context_id: ContextVar[str] = ContextVar("postiz_request_id", default="")
+
+    @contextmanager
+    def request_context(self, request_id: str):
+        token = self._request_context_id.set(request_id or "")
+        try:
+            yield
+        finally:
+            self._request_context_id.reset(token)
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -67,7 +79,7 @@ class PostizClient:
 
     def _classify(self, exc: Exception, method: str, path: str) -> PostizClientError:
         if isinstance(exc, TimeoutError):
-            return NetworkError(f"Postiz {method} {path} failed (timeout): {exc}")
+            return PostizTimeoutError(f"Postiz {method} {path} failed (timeout): {exc}")
         if isinstance(exc, HTTPError):
             body = ""
             try:
@@ -109,6 +121,7 @@ class PostizClient:
         payload: dict[str, Any] | None = None,
         query: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        request_id: str | None = None,
     ) -> Any:
         url = f"{self.base_url}{path}"
         if query:
@@ -116,6 +129,7 @@ class PostizClient:
             if values:
                 url = f"{url}?{urlencode(values)}"
         request_headers = self._headers({"Content-Type": "application/json"})
+        request_headers["X-Request-ID"] = request_id or self._request_context_id.get() or uuid.uuid4().hex
         request_headers.update(headers or {})
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         request = Request(url, data=data, headers=request_headers, method=method)
@@ -154,8 +168,8 @@ class PostizClient:
                 rate_limit_state="error",
             )
 
-    def is_connected(self) -> bool:
-        raw = self._request("/public/v1/is-connected")
+    def is_connected(self, *, request_id: str | None = None) -> bool:
+        raw = self._request("/public/v1/is-connected", request_id=request_id)
         if isinstance(raw, bool):
             return raw
         if isinstance(raw, dict):
@@ -166,30 +180,35 @@ class PostizClient:
             return bool(raw)
         return bool(raw)
 
-    def list_integrations(self, group: str | None = None) -> Any:
-        return self._request("/public/v1/integrations", query={"group": group})
+    def list_integrations(self, group: str | None = None, *, request_id: str | None = None) -> Any:
+        return self._request("/public/v1/integrations", query={"group": group}, request_id=request_id)
 
-    def get_integration_settings(self, integration_id: str) -> Any:
-        return self._request(f"/public/v1/integration-settings/{integration_id}")
+    def get_integration_settings(self, integration_id: str, *, request_id: str | None = None) -> Any:
+        return self._request(f"/public/v1/integration-settings/{integration_id}", request_id=request_id)
 
-    def create_post(self, payload: dict[str, Any]) -> Any:
-        return self._request("/public/v1/posts", method="POST", payload=payload)
+    def get_settings(self, integration_id: str, *, request_id: str | None = None) -> Any:
+        return self.get_integration_settings(integration_id, request_id=request_id)
+
+    def create_post(self, payload: dict[str, Any], *, request_id: str | None = None) -> Any:
+        return self._request("/public/v1/posts", method="POST", payload=payload, request_id=request_id)
 
     def list_posts(
         self,
         *,
         start_date: str | None = None,
         end_date: str | None = None,
+        request_id: str | None = None,
     ) -> Any:
         return self._request(
             "/public/v1/posts",
             query={"startDate": start_date, "endDate": end_date},
+            request_id=request_id,
         )
 
-    def delete_post(self, post_id: str) -> Any:
-        return self._request(f"/public/v1/posts/{post_id}", method="DELETE")
+    def delete_post(self, post_id: str, *, request_id: str | None = None) -> Any:
+        return self._request(f"/public/v1/posts/{post_id}", method="DELETE", request_id=request_id)
 
-    def upload_media(self, file_path: str | Path) -> Any:
+    def upload_media(self, file_path: str | Path, *, request_id: str | None = None) -> Any:
         path = Path(file_path)
         if not path.is_file():
             raise PostizClientError(f"media file does not exist: {path}")
@@ -205,6 +224,7 @@ class PostizClient:
         headers = self._headers({
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "Content-Length": str(len(body)),
+            "X-Request-ID": request_id or self._request_context_id.get() or uuid.uuid4().hex,
         })
         request = Request(
             f"{self.base_url}/public/v1/upload",
@@ -214,14 +234,14 @@ class PostizClient:
         )
         return self._send(request, method="POST", path="/public/v1/upload", timeout=max(self.timeout, 60.0))
 
-    def get_post_analytics(self, post_id: str, days: int = 7) -> Any:
+    def get_post_analytics(self, post_id: str, days: int = 7, *, request_id: str | None = None) -> Any:
         return self._request(
-            f"/public/v1/analytics/post/{post_id}", query={"date": days}
+            f"/public/v1/analytics/post/{post_id}", query={"date": days}, request_id=request_id
         )
 
-    def get_integration_analytics(self, integration_id: str, days: int = 30) -> Any:
+    def get_integration_analytics(self, integration_id: str, days: int = 30, *, request_id: str | None = None) -> Any:
         return self._request(
-            f"/public/v1/analytics/{integration_id}", query={"date": days}
+            f"/public/v1/analytics/{integration_id}", query={"date": days}, request_id=request_id
         )
 
     def trigger_integration_tool(
@@ -229,9 +249,25 @@ class PostizClient:
         integration_id: str,
         method_name: str,
         data: dict[str, Any] | None = None,
+        request_id: str | None = None,
     ) -> Any:
         return self._request(
             f"/public/v1/integration-trigger/{integration_id}",
             method="POST",
             payload={"methodName": method_name, "data": data or {}},
+            request_id=request_id,
         )
+
+    def get_status(self, provider_post_id: str, *, request_id: str | None = None) -> Any:
+        posts = self.list_posts(request_id=request_id)
+        if isinstance(posts, dict) and isinstance(posts.get("data"), list):
+            posts = posts["data"]
+        if isinstance(posts, list):
+            return next((post for post in posts if str(post.get("id")) == str(provider_post_id)), {
+                "id": provider_post_id,
+                "status": "UNKNOWN",
+            })
+        return {"id": provider_post_id, "status": "UNKNOWN"}
+
+    def trigger_tool(self, integration_id: str, method_name: str, data: dict[str, Any] | None = None, *, request_id: str | None = None) -> Any:
+        return self.trigger_integration_tool(integration_id, method_name, data, request_id=request_id)

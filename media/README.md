@@ -1,3 +1,1 @@
-# Media
-
-Generated and supplied media assets, covers, video materials, and metadata.
+Media Agent owns workflow selection. Generated artifacts are immutable MediaAssets under media/assets, keyed by sha256.

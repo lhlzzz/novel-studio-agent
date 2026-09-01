@@ -59,4 +59,19 @@ class ContentAgent:
             build_variant(package, integration_id=str(task.get("integration_id") or platform), platform=platform)
             for platform in platforms
         ]
-        return {"agent": self.name, "package": package, "campaign": campaign, "variants": variants}
+        strategy = task.get("strategy") or {}
+        creative_brief = dict(task.get("creative_brief") or {})
+        if not creative_brief:
+            requirement = strategy.get("creative_requirement") if isinstance(strategy, dict) else None
+            if requirement:
+                creative_brief = dict(requirement)
+        creative_brief.setdefault("brief", package.body or package.title)
+        creative_brief.setdefault("aspect_ratio", (package.metadata or {}).get("aspect_ratio") or "9:16")
+        creative_brief.setdefault("duration_seconds", (package.metadata or {}).get("duration_seconds") or 15)
+        return {
+            "agent": self.name,
+            "package": package,
+            "campaign": campaign,
+            "variants": variants,
+            "creative_brief": creative_brief,
+        }

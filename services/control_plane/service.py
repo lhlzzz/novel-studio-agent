@@ -34,6 +34,7 @@ def snapshot() -> dict[str, Any]:
         "scheduler": "services.workers.scheduler",
         "reconciliation": "services.workers.reconciliation_worker",
         "analytics": "services.workers.analytics_worker",
+        "creative": "services.workers.creative_worker",
         "queue": "services.queue",
     }
     research = credential_state()

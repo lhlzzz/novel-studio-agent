@@ -23,6 +23,14 @@ class OrchestratorAgent:
         memory = resolve_agent("memory-agent").implementation.retrieve(payload)
         strategy = resolve_agent("strategy-agent").implementation.run({**payload, "research": research, "memory": memory})
         content = resolve_agent("content-agent").implementation.run({**payload, "strategy": strategy, "memory": memory})
+        media = {}
+        if kind in {"create_video", "creative"} or payload.get("brief"):
+            media_task = {
+                **payload,
+                "creative_brief": content.get("creative_brief") or strategy.get("creative_requirement") or {},
+                "allow_mock": bool(payload.get("allow_mock")),
+            }
+            media = resolve_agent("media-agent").implementation.run(media_task)
         log_event(agent=self.name, action=kind, status="ok", request_id=request_id)
         return {
             "agent": self.name,
@@ -30,5 +38,6 @@ class OrchestratorAgent:
             "research": research,
             "strategy": strategy,
             "content": content,
+            "media": media,
             "memory": memory,
         }

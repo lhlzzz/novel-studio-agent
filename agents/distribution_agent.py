@@ -56,7 +56,7 @@ class DistributionAgent:
     ) -> None:
         self.registry = registry or load_registry()
         self.provider_name = provider_name
-        self.adapter = adapter or resolve_adapter("postiz", registry=self.registry)
+        self.adapter = adapter or resolve_adapter(self.provider_name, adapter=resolve_provider(self.provider_name).implementation)
         self.accounts_path = accounts_path or Path(__file__).resolve().parents[1] / "config/postiz/integrations.yaml"
         self.store = store or InMemoryStore()
         self.service = DistributionService(self.adapter, store=self.store)
@@ -70,12 +70,12 @@ class DistributionAgent:
         provider = str(raw.get("provider") or self.provider_name)
         accounts = []
         for item in raw.get("accounts") or []:
-            integration_id = str(item.get("integration_id") or "").strip()
-            if integration_id:
+            platform = str(item.get("platform") or "").strip()
+            if platform:
                 accounts.append(
                     IntegrationAccount(
-                        platform=str(item.get("platform") or ""),
-                        integration_id=integration_id,
+                        platform=platform,
+                        integration_id=str(item.get("integration_id") or "").strip(),
                         status=str(item.get("status") or "pending"),
                         provider=provider,
                         account_name=str(item.get("account_name") or ""),
@@ -90,13 +90,35 @@ class DistributionAgent:
         return resolve_capability(integration_id, "publish", adapter=self.adapter)
 
     def select_provider(self, platform: str) -> IntegrationAccount:
-        handle = resolve_provider(self.provider_name, adapter=self.adapter)
-        provider = self.registry.get(self.provider_name) or handle.integration
-        if provider is None or not provider.enabled:
+        configured = next((item for item in self.list_accounts() if item.platform == platform), None)
+        if configured is None or configured.status != "active":
+            raise RuntimeError(f"provider is not runtime verified: no active verified account for platform={platform}")
+        authenticate = getattr(self.adapter, "authenticate", None)
+        if not callable(authenticate) or not authenticate():
             raise RuntimeError("provider is not runtime verified")
-        for account in self.list_accounts():
-            if account.platform == platform and account.status == "active":
-                return account
+        list_integrations = getattr(self.adapter, "list_integrations", None)
+        if not callable(list_integrations):
+            raise RuntimeError("provider is not runtime verified: account discovery unavailable")
+        for integration in list_integrations():
+            integration_platform = getattr(integration, "platform", "") or getattr(integration, "provider", "")
+            if integration_platform != platform:
+                continue
+            if configured.integration_id and configured.integration_id != integration.id:
+                continue
+            verify = getattr(self.adapter, "verify_capabilities", None)
+            capabilities = verify(integration.id) if callable(verify) else self.adapter.get_capabilities(integration.id)
+            record = (getattr(capabilities, "records", {}) or {}).get("publish")
+            if record is None or not record.allowed:
+                continue
+            runtime = replace(integration, enabled=True, state="ENABLED", capabilities=capabilities)
+            self.store.save_integration(runtime)
+            return IntegrationAccount(
+                platform=platform,
+                integration_id=runtime.id,
+                status="active",
+                provider=runtime.provider,
+                account_name=runtime.account_name,
+            )
         raise RuntimeError(f"no active verified account for platform={platform}")
 
     def _variant(self, package: ContentPackage, integration_id: str, platform: str):
@@ -127,6 +149,9 @@ class DistributionAgent:
             campaign_id=package.campaign_id,
             request_id=request_id or new_request_id(),
         )
+        self.store.save_content_package(package)
+        integration = self.adapter.get_integration(account.integration_id)
+        self.store.save_integration(replace(integration, enabled=True, state="ENABLED"))
         return self.store.save_job(job)
 
     def validate(self, job: DistributionJob) -> list[str]:

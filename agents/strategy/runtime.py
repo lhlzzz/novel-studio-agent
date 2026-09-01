@@ -43,17 +43,30 @@ class StrategyAgent:
             cadence=str(task.get("cadence") or "3x weekly"),
             platform_variants=tuple(task.get("platforms") or ("x", "linkedin")),
             experiment_plan={
-                "kinds": ("hook", "title", "posting_time"),
+                "kinds": ("hook", "title", "posting_time", "workflow", "model", "character", "camera", "motion", "duration", "aspect_ratio"),
                 "observation_window": str(task.get("observation_window") or "7d"),
                 "sample_size": int(task.get("sample_size") or 30),
                 "primary_metric": str(task.get("primary_metric") or "views"),
             },
             success_metrics=tuple(task.get("success_metrics") or ("views", "replies")),
         )
+        creative_requirement = {
+            "brief": str(task.get("brief") or task.get("objective") or plan.objective),
+            "duration_seconds": int(task.get("duration_seconds") or 15),
+            "aspect_ratio": str(task.get("aspect_ratio") or "9:16"),
+            "style": str(task.get("style") or "natural lifestyle"),
+            "face_visible": bool(task.get("face_visible", False)),
+            "audience": plan.audience,
+            "commerce_intent": str(task.get("commerce_intent") or "none"),
+            "character_id": task.get("character_id"),
+            "motion": str(task.get("motion") or "handheld"),
+            "camera": str(task.get("camera") or "static"),
+        }
         return {
             "agent": self.name,
             "memory": memory,
             "next_change": next_change,
             "research": research,
             "plan": plan,
+            "creative_requirement": creative_requirement,
         }

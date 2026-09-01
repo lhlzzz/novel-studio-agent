@@ -24,6 +24,10 @@ class ExternalActionBlocked(RuntimeError):
     """Raised when a distribution job cannot safely leave Meiti."""
 
 
+class PublicationPersistenceError(ExternalActionBlocked):
+    """Raised when a provider succeeded but Meiti could not persist it."""
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -149,7 +153,30 @@ class DistributionService:
             content_package_id=job.content_package_id,
             request_id=job.request_id,
         )
-        self.store.save_publication(publication)
+        try:
+            self.store.save_publication(publication)
+        except Exception as exc:
+            failed = replace(
+                job,
+                status="UNKNOWN",
+                error_code="publication_persistence_failed",
+                error_message=str(exc),
+                provider_response=result,
+            )
+            self.store.save_job(failed)
+            log_event(
+                agent="distribution-agent",
+                action="publication_persistence",
+                job_id=job.job_id,
+                provider=integration.provider,
+                integration_id=integration.id,
+                status="INCONSISTENT",
+                error_code="publication_persistence_failed",
+                request_id=job.request_id,
+            )
+            raise PublicationPersistenceError(
+                "provider action succeeded but Publication persistence failed"
+            ) from exc
         self._record_attempt(job, attempt_no, started, "success", None, None, {"id": post_id, "status": publication.status})
         log_event(
             agent="distribution-agent",
@@ -187,5 +214,7 @@ class DistributionService:
                 provider_request_id=(job.provider_response or {}).get("id") if isinstance(job.provider_response, dict) else None,
                 response_summary=response_summary,
                 request_id=job.request_id,
+                provider=str(getattr(self.adapter, "provider", "")),
+                integration_id=job.integration_id,
             )
         )

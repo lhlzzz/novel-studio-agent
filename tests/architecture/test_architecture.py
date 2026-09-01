@@ -14,7 +14,7 @@ def test_legacy_workspace_and_launchers_are_absent():
 
 def test_capability_topology_exists():
     for name in ("agents", "intelligence", "strategy", "content", "media",
-                 "analytics", "memory", "commerce", "governance",
+                 "creative", "analytics", "memory", "commerce", "governance",
                  "workflows", "integrations", "infrastructure"):
         assert (ROOT / name).is_dir(), name
 
@@ -32,3 +32,16 @@ def test_distribution_agent_does_not_import_postiz_adapter_directly():
     source = (ROOT / "agents/distribution_agent.py").read_text(encoding="utf-8")
     assert "PostizAdapter" not in source
     assert "providers.postiz.adapter" not in source
+
+
+def test_media_agent_does_not_import_lechuang_adapter():
+    source = (ROOT / "agents/media/runtime.py").read_text(encoding="utf-8")
+    assert "LechuangAdapter" not in source
+    assert "providers.lechuang" not in source
+
+
+def test_creative_does_not_import_postiz():
+    forbidden = ("PostizAdapter", "providers.postiz")
+    for path in (ROOT / "creative").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert all(token not in text for token in forbidden), path

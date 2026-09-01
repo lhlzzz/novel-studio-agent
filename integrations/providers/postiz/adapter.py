@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,7 +96,7 @@ class PostizAdapter:
             state = "AUTHENTICATED"
         return Integration(
             id=integration_id,
-            provider=identifier,
+            provider=self.provider,
             account_id=str(item.get("account_id") or item.get("name") or ""),
             region=str(item.get("region") or "global"),
             capabilities=capabilities,
@@ -104,7 +105,17 @@ class PostizAdapter:
             enabled=enabled,
             state="ENABLED" if enabled else state,
             account_name=str(item.get("name") or ""),
+            platform=identifier,
         )
+
+    @contextmanager
+    def _request_context(self, request_id: str | None):
+        context = getattr(self.client, "request_context", None)
+        if callable(context):
+            with context(request_id or ""):
+                yield
+        else:
+            yield
 
     def list_integrations(self) -> list[Integration]:
         raw = unwrap_data(self.client.list_integrations())
@@ -264,7 +275,8 @@ class PostizAdapter:
             for item in uploaded
         ]
         settings = dict(job.variant.metadata.get("settings") or {})
-        settings.setdefault("__type", self.get_integration(job.integration_id).provider)
+        integration = self.get_integration(job.integration_id)
+        settings.setdefault("__type", integration.platform or integration.provider)
         if job.variant.title:
             settings.setdefault("title", job.variant.title)
         body = job.variant.body
@@ -306,18 +318,25 @@ class PostizAdapter:
         return result
 
     def publish(self, job: DistributionJob) -> dict[str, Any]:
-        return self._post_response(self.client.create_post(self._payload(job, post_type="now")))
+        with self._request_context(job.request_id):
+            return self._post_response(self.client.create_post(self._payload(job, post_type="now")))
 
     def schedule(self, job: DistributionJob) -> dict[str, Any]:
-        return self._post_response(self.client.create_post(self._payload(job, post_type="schedule")))
+        with self._request_context(job.request_id):
+            return self._post_response(self.client.create_post(self._payload(job, post_type="schedule")))
 
     def get_status(self, provider_post_id: str) -> dict[str, Any]:
-        raw = unwrap_data(self.client.list_posts())
-        posts = raw if isinstance(raw, list) else []
-        return next(
-            (post for post in posts if str(post.get("id")) == str(provider_post_id)),
-            {"id": provider_post_id, "status": "UNKNOWN"},
-        )
+        get_status = getattr(self.client, "get_status", None)
+        raw = get_status(provider_post_id) if callable(get_status) else self.client.list_posts()
+        raw = unwrap_data(raw)
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, list):
+            return next((item for item in raw if str(item.get("id")) == str(provider_post_id)), {
+                "id": provider_post_id,
+                "status": "UNKNOWN",
+            })
+        return {"id": provider_post_id, "status": "UNKNOWN"}
 
     def delete(self, provider_post_id: str) -> dict[str, Any]:
         raw = self.client.delete_post(provider_post_id)

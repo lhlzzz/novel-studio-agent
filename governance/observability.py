@@ -21,6 +21,7 @@ SECRET_KEYS = {
     "password",
     "postiz_api_key",
     "scrapecreators_api_key",
+    "lechuang_api_key",
 }
 SECRET_PATTERN = re.compile(
     r"(api[_-]?key|authorization|bearer|refresh[_-]?token|access[_-]?token|cookie|secret)\s*[:=]\s*\S+",

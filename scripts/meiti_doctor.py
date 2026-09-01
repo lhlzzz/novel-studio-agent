@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production doctor for Meiti V3.3. Prints PASS / WARN / BLOCKED and JSON."""
+"""Production doctor for Meiti V4. Prints PASS / WARN / BLOCKED and JSON."""
 
 from __future__ import annotations
 
@@ -181,13 +181,48 @@ def check_research() -> dict:
 
 def check_workers() -> dict:
     from services.workers import analytics_worker, reconciliation_worker, scheduler
+    from services.workers import creative_worker
     from services.queue import WorkQueue
-    ok = all((analytics_worker.run_once, reconciliation_worker.run_once, scheduler.run_once, WorkQueue))
+    ok = all((analytics_worker.run_once, reconciliation_worker.run_once, scheduler.run_once, creative_worker.run_once, WorkQueue))
     return {
         "status": "PASS" if ok else "BLOCKED",
         "analytics_worker": bool(analytics_worker.run_once),
         "reconciliation_worker": bool(reconciliation_worker.run_once),
         "scheduler": bool(scheduler.run_once),
+        "creative_worker": bool(creative_worker.run_once),
+    }
+
+
+def check_creative_engine() -> dict:
+    try:
+        from creative.workflow.registry import list_workflows
+        from creative.workflow.engine import CreativeWorkflowEngine
+        workflows = list_workflows()
+        engine = CreativeWorkflowEngine
+        missing = [name for name in (
+            "creator-video-default-v1", "creator-image-to-video-v1", "creator-lifestyle-v1",
+            "character-consistency-v1", "scene-storyboard-v1", "short-drama-v1",
+            "ugc-style-video-v1", "cinematic-video-v1", "product-optional-content-v1",
+        ) if name not in {item.workflow_id for item in workflows}]
+        return {"status": "BLOCKED" if missing or engine is None else "PASS", "count": len(workflows), "missing": missing}
+    except Exception as exc:
+        return {"status": "BLOCKED", "error": str(exc)}
+
+
+def check_lechuang() -> dict:
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    adapter = LechuangAdapter()
+    ready, reason = adapter.live_ready()
+    auth = adapter.client.auth()
+    return {
+        "status": "PASS" if ready else "BLOCKED",
+        "runtime": "PASS" if ready else "BLOCKED",
+        "auth": "PASS" if auth.api_key_present and ready else "BLOCKED",
+        "image": "PASS" if ready else "BLOCKED",
+        "video": "PASS" if ready else "BLOCKED",
+        "reason": reason,
+        "contract_verified": auth.contract_verified,
+        "api_key_present": auth.api_key_present,
     }
 
 
@@ -213,6 +248,7 @@ def check_control_plane() -> dict:
 def run() -> dict:
     postiz = check_postiz()
     workers = check_workers()
+    lechuang = check_lechuang()
     return {
         "Repository": check_repository(),
         "Database": check_database(),
@@ -228,6 +264,10 @@ def run() -> dict:
         "Research": check_research(),
         "Scheduler": workers,
         "Workers": workers,
+        "Creative Workflow Engine": check_creative_engine(),
+        "Lechuang": lechuang,
+        "Lechuang authentication": {"status": lechuang.get("auth"), "reason": lechuang.get("reason")},
+        "Lechuang capabilities": {"status": "PASS" if lechuang.get("contract_verified") else "BLOCKED"},
         "Analytics": check_analytics(),
         "Memory": check_memory(),
         "Publish Gate": check_gate(),

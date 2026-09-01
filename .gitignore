@@ -25,6 +25,9 @@ __pycache__/
 .mimocode-project-id
 node_modules/
 
+# generated creative artifacts
+media/assets/
+
 # media binaries / local models
 *.mp4
 *.mov

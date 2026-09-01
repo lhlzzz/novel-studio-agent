@@ -1,0 +1,125 @@
+workflow_id: product-optional-content-v1
+name: Product Optional Content
+description: Content first. Product may appear only when strategy sets commerce intent.
+version: 1.0.0
+category: video
+tags:
+- content-first
+- product-optional
+inputs:
+  brief:
+    type: text
+    required: true
+  aspect_ratio:
+    type: string
+    default: '9:16'
+  duration_seconds:
+    type: number
+    default: 15
+  face_visible:
+    type: boolean
+    default: false
+  character_id:
+    type: string
+    required: false
+  variant_count:
+    type: integer
+    default: 4
+  budget:
+    type: number
+    default: 40
+  commerce_intent:
+    type: string
+    default: none
+  camera:
+    type: string
+    default: static
+  motion:
+    type: string
+    default: subtle
+variables: {}
+provider_bindings: {}
+quality_policy:
+  variants: 4
+  max_regenerations: 2
+  pass_score: 70
+outputs:
+  final: media_asset
+nodes:
+- node_id: brief
+  type: input
+- node_id: character
+  type: character
+- node_id: scene
+  type: prompt
+  config:
+    kind: scene
+- node_id: image
+  type: image_generate
+  provider: lechuang
+- node_id: image_qa
+  type: judge
+  config:
+    judge: image
+- node_id: video
+  type: video_generate
+  provider: lechuang
+  config:
+    mode: image_to_video
+- node_id: video_qa
+  type: judge
+  config:
+    judge: video
+- node_id: fit
+  type: judge
+  config:
+    judge: content_fit
+- node_id: post
+  type: render
+- node_id: final
+  type: output
+edges:
+- source_node: brief
+  source_output: output
+  target_node: scene
+  target_input: brief
+- source_node: character
+  source_output: output
+  target_node: scene
+  target_input: character
+- source_node: scene
+  source_output: output
+  target_node: image
+  target_input: prompt
+- source_node: character
+  source_output: references
+  target_node: image
+  target_input: reference
+- source_node: image
+  source_output: output
+  target_node: image_qa
+  target_input: asset
+- source_node: image_qa
+  source_output: output
+  target_node: video
+  target_input: reference
+- source_node: scene
+  source_output: output
+  target_node: video
+  target_input: prompt
+- source_node: video
+  source_output: output
+  target_node: video_qa
+  target_input: asset
+- source_node: video_qa
+  source_output: output
+  target_node: fit
+  target_input: asset
+- source_node: fit
+  source_output: output
+  target_node: post
+  target_input: clip
+- source_node: post
+  source_output: output
+  target_node: final
+  target_input: asset

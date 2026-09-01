@@ -73,6 +73,15 @@ def resolve_provider(provider_name: str, *, adapter: Any | None = None) -> Provi
     )
 
 
+def resolve_integration(integration_id: str, *, adapter: Any | None = None) -> ProviderHandle:
+    """Resolve an account integration to its registered provider adapter."""
+    registry = load_registry()
+    integration = next((item for item in registry.values() if item.id == integration_id), None)
+    if integration is None:
+        raise KeyError(f"unknown integration: {integration_id}")
+    return resolve_provider(integration.provider, adapter=adapter)
+
+
 def resolve_adapter(integration_id: str, *, adapter: Any | None = None, registry: dict[str, Integration] | None = None):
     if adapter is not None:
         return adapter
@@ -80,8 +89,6 @@ def resolve_adapter(integration_id: str, *, adapter: Any | None = None, registry
     for integration in registry.values():
         if integration.id == integration_id:
             return resolve_provider(integration.provider).implementation
-    if "postiz" in registry:
-        return resolve_provider("postiz").implementation
     raise KeyError(f"no adapter registered for integration_id={integration_id}")
 
 

@@ -1,0 +1,22 @@
+contract:
+  verified: false
+  reason: "Official Lechuang request/response schema was not extractable; live calls stay BLOCKED."
+models:
+  lechuang.image.claimed:
+    type: image
+    async: true
+    verified: false
+    capabilities:
+      - text_to_image
+      - image_to_image
+    cost_credits: 1
+  lechuang.video.claimed:
+    type: video
+    async: true
+    verified: false
+    capabilities:
+      - text_to_video
+      - image_to_video
+      - video_extend
+      - video_edit
+    cost_credits: 8

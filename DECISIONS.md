@@ -1,19 +1,16 @@
-# Meiti V3 Decisions
+# Meiti V4 Decisions
 
 - **2026-08-26:** Platform is an integration, not an agent or workspace.
-- **2026-08-26:** Meiti owns business and intelligence data; Postiz owns
-  distribution infrastructure and its own database.
-- **2026-08-26:** Registry entries may be disabled. Enabled means a connector
-  passed runtime verification.
-- **2026-08-26:** Existing PostgreSQL + pgvector, Content KG, evidence, gate,
-  and Obsidian surfaces are reused; no second memory database is introduced.
-- **2026-08-28:** ProviderResolver is the only provider routing mechanism.
-- **2026-08-28:** YAML cannot set enabled=true. Capabilities need runtime
-  verification. Media upload precedes create_post. Publish is idempotent.
-- **2026-08-28:** Job id, provider post id, and platform object id are
-  distinct. Analytics snapshots are append-only. Research stays read-only.
-- **2026-08-29:** Keep `scripts/db/migrate.py` as the single migration owner
-  with `schema_migrations` rather than adding a parallel Alembic tree.
+- **2026-08-26:** Meiti owns business data; Postiz owns distribution infrastructure.
+- **2026-08-28:** ProviderResolver is the only distribution routing mechanism.
 - **2026-08-29:** ContentPackage, Campaign, Publication, MediaUploadResult,
-  and DistributionAttempt are first-class. Postiz field names stay inside
-  `integrations/providers/postiz/`.
+  and DistributionAttempt are first-class.
+- **2026-09-01:** CreativeWorkflow is the canonical media production abstraction.
+  Isolated generation scripts are deleted rather than wrapped.
+- **2026-09-01:** Lechuang is a generation provider. The official HTTP contract
+  was not extractable, so live methods raise ProviderBlocked/UnsupportedCapability.
+  Mock generation is the only CI path.
+- **2026-09-01:** Providers bind per workflow node, never as a workflow-wide field.
+- **2026-09-01:** Default people/lifestyle path is image -> image QA -> image-to-video.
+- **2026-09-01:** Generation assets are immutable and content-addressed by sha256.
+- **2026-09-01:** Judge returns score/decision/reason and never publishes.

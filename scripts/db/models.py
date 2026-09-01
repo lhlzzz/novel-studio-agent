@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -340,4 +341,225 @@ class PublishGate(Base):
         Index("idx_meiti_publish_gates_status", "status"),
         Index("idx_meiti_publish_gates_action", "action"),
         Index("idx_meiti_publish_gates_job", "distribution_job_id"),
+    )
+
+
+class CampaignRecord(Base):
+    """First-class content campaign owned by Meiti."""
+
+    __tablename__ = "campaigns"
+
+    campaign_id = Column(String(255), primary_key=True)
+    brand_id = Column(String(255), nullable=False, default="")
+    creator_id = Column(String(255), nullable=False, default="")
+    objective = Column(Text, nullable=False)
+    audience = Column(Text, nullable=False, default="")
+    strategy_id = Column(String(255))
+    start_at = Column(DateTime)
+    end_at = Column(DateTime)
+    success_metrics = Column(JSONB, nullable=False, default=list)
+    status = Column(String(40), nullable=False, default="draft")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentPackageRecord(Base):
+    """Durable content package; platform variants remain separate records."""
+
+    __tablename__ = "content_packages"
+
+    package_id = Column(String(255), primary_key=True)
+    brand_id = Column(String(255))
+    creator_id = Column(String(255))
+    campaign_id = Column(String(255), ForeignKey("campaigns.campaign_id", ondelete="SET NULL"))
+    topic = Column(Text, nullable=False, default="")
+    content_pillar = Column(String(255), nullable=False, default="")
+    hook = Column(Text, nullable=False, default="")
+    format = Column(String(80), nullable=False, default="post")
+    audience = Column(Text, nullable=False, default="")
+    title = Column(Text, nullable=False)
+    caption = Column(Text, nullable=False, default="")
+    body = Column(Text, nullable=False)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
+    media_assets = Column(JSONB, nullable=False, default=list)
+    commerce_intent = Column(String(120), nullable=False, default="none")
+    variants = Column(JSONB, nullable=False, default=list)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentVariantRecord(Base):
+    """A platform-specific rendering of a provider-neutral content package."""
+
+    __tablename__ = "content_variants"
+
+    variant_id = Column(String(255), primary_key=True)
+    package_id = Column(String(255), ForeignKey("content_packages.package_id", ondelete="CASCADE"), nullable=False)
+    integration_id = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False, default="")
+    title = Column(Text, nullable=False, default="")
+    caption = Column(Text, nullable=False, default="")
+    media = Column(JSONB, nullable=False, default=list)
+    settings = Column(JSONB, nullable=False, default=dict)
+    platform_metadata = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("package_id", "integration_id", name="uq_meiti_content_variant_target"),
+        Index("idx_meiti_content_variants_package", "package_id"),
+    )
+
+
+class IntegrationRecord(Base):
+    """Runtime-verified provider account, distinct from provider registration."""
+
+    __tablename__ = "integrations"
+
+    integration_id = Column(String(255), primary_key=True)
+    provider = Column(String(120), nullable=False)
+    platform = Column(String(120), nullable=False, default="")
+    account_id = Column(String(255), nullable=False, default="")
+    account_name = Column(Text, nullable=False, default="")
+    region = Column(String(80), nullable=False, default="global")
+    state = Column(String(40), nullable=False, default="REGISTERED")
+    enabled = Column(Integer, nullable=False, default=0)
+    capabilities = Column(JSONB, nullable=False, default=dict)
+    verified_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint("enabled IN (0, 1)", name="ck_meiti_integrations_enabled"),
+        Index("idx_meiti_integrations_provider", "provider"),
+        Index("idx_meiti_integrations_state", "state"),
+    )
+
+
+class DistributionJobRecord(Base):
+    """Durable job identity and lifecycle state for external actions."""
+
+    __tablename__ = "distribution_jobs"
+
+    job_id = Column(String(255), primary_key=True)
+    content_package_id = Column(String(255), ForeignKey("content_packages.package_id", ondelete="RESTRICT"), nullable=False)
+    integration_id = Column(String(255), ForeignKey("integrations.integration_id", ondelete="RESTRICT"), nullable=False)
+    action = Column(String(40), nullable=False, default="publish")
+    status = Column(String(40), nullable=False, default="DRAFT")
+    idempotency_key = Column(String(255), nullable=False, unique=True)
+    variant = Column(JSONB, nullable=False, default=dict)
+    scheduled_at = Column(DateTime)
+    last_attempt_at = Column(DateTime)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    error_code = Column(String(120))
+    error_message = Column(Text)
+    provider_response = Column(JSONB)
+    brand_id = Column(String(255))
+    creator_id = Column(String(255))
+    campaign_id = Column(String(255))
+    request_id = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','VALIDATING','BLOCKED','READY','SUBMITTING','SUBMITTED','SCHEDULED','PUBLISHING','PUBLISHED','FAILED','RETRYING','CANCELLED','UNKNOWN','FAILED_PERMANENT')",
+            name="ck_meiti_distribution_job_status",
+        ),
+        Index("idx_meiti_distribution_jobs_status", "status"),
+        Index("idx_meiti_distribution_jobs_schedule", "scheduled_at"),
+    )
+
+
+class DistributionAttemptRecord(Base):
+    """Immutable attempt audit row for each provider submission."""
+
+    __tablename__ = "distribution_attempts"
+
+    attempt_id = Column(String(255), primary_key=True)
+    distribution_job_id = Column(String(255), ForeignKey("distribution_jobs.job_id", ondelete="CASCADE"), nullable=False)
+    attempt_no = Column(Integer, nullable=False)
+    provider = Column(String(120), nullable=False, default="")
+    integration_id = Column(String(255), nullable=False, default="")
+    started_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime)
+    status = Column(String(40), nullable=False)
+    error_code = Column(String(120))
+    error_message = Column(Text)
+    provider_request_id = Column(String(255))
+    response_summary = Column(JSONB)
+    request_id = Column(String(255), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("distribution_job_id", "attempt_no", name="uq_meiti_distribution_attempt_no"),
+        Index("idx_meiti_distribution_attempts_job", "distribution_job_id"),
+    )
+
+
+class PublicationRecord(Base):
+    """Durable mapping between Meiti job and provider/platform identifiers."""
+
+    __tablename__ = "publications"
+
+    publication_id = Column(String(255), primary_key=True)
+    distribution_job_id = Column(String(255), ForeignKey("distribution_jobs.job_id", ondelete="RESTRICT"), nullable=False, unique=True)
+    integration_id = Column(String(255), ForeignKey("integrations.integration_id", ondelete="RESTRICT"), nullable=False)
+    provider = Column(String(120), nullable=False)
+    provider_post_id = Column(String(255), nullable=False)
+    platform_object_id = Column(String(255))
+    external_url = Column(Text)
+    status = Column(String(40), nullable=False, default="UNKNOWN")
+    published_at = Column(DateTime)
+    content_package_id = Column(String(255), nullable=False)
+    request_id = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_post_id", name="uq_meiti_publication_provider_post"),
+        Index("idx_meiti_publications_integration", "integration_id"),
+        Index("idx_meiti_publications_status", "status"),
+    )
+
+
+class MediaUploadRecord(Base):
+    """Provider media upload cache keyed by source SHA-256."""
+
+    __tablename__ = "media_uploads"
+
+    source_hash = Column(String(64), primary_key=True)
+    source_path = Column(Text, nullable=False)
+    mime_type = Column(String(120), nullable=False)
+    size = Column(Integer, nullable=False)
+    provider = Column(String(120), nullable=False)
+    integration_id = Column(String(255), nullable=False, default="")
+    remote_media_id = Column(String(255), nullable=False)
+    remote_media_path = Column(Text, nullable=False)
+    status = Column(String(40), nullable=False, default="uploaded")
+    uploaded_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_media_uploads_provider", "provider"),
+        Index("idx_meiti_media_uploads_status", "status"),
+    )
+
+
+class MetricSnapshotRecord(Base):
+    """Append-only metric observation; collection never overwrites history."""
+
+    __tablename__ = "metric_snapshots"
+
+    snapshot_id = Column(Integer, primary_key=True, autoincrement=True)
+    publication_id = Column(String(255), ForeignKey("publications.publication_id", ondelete="CASCADE"), nullable=False)
+    metric_name = Column(String(120), nullable=False)
+    value = Column(Numeric(18, 6))
+    observed_at = Column(DateTime, nullable=False)
+    source = Column(String(255), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("publication_id", "metric_name", "observed_at", "source", name="uq_meiti_metric_snapshot"),
+        Index("idx_meiti_metric_snapshots_publication", "publication_id"),
+        Index("idx_meiti_metric_snapshots_observed", "observed_at"),
     )

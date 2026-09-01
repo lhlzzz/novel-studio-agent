@@ -65,6 +65,13 @@ SUPPORTED_KINDS = (
     "cta",
     "content_format",
     "format",
+    "workflow",
+    "model",
+    "character",
+    "camera",
+    "motion",
+    "duration",
+    "aspect_ratio",
 )
 
 
