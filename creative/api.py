@@ -9,8 +9,11 @@ from creative.workflow.engine import CreativeWorkflowEngine
 
 
 class CreativeAPI:
-    def __init__(self, engine: CreativeWorkflowEngine | None = None) -> None:
-        self.engine = engine or CreativeWorkflowEngine()
+    def __init__(self, engine: CreativeWorkflowEngine | None = None, *, runtime=None) -> None:
+        if engine is None and runtime is None:
+            from creative.runtime.container import CreativeRuntime
+            runtime = CreativeRuntime.testing() if __import__("creative.store").store.is_test_runtime() else CreativeRuntime.production()
+        self.engine = engine or runtime.engine
 
     def create_run(self, workflow_id: str | None = None, inputs: dict[str, Any] | None = None, **kwargs: Any) -> CreativeRun:
         return self.engine.execute(workflow_id, inputs, **kwargs)

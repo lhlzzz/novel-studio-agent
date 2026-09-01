@@ -124,7 +124,7 @@ def _alembic_config() -> Config:
     return config
 
 
-def _adopt_legacy_baseline() -> None:
+def _stamp_pre_alembic_baseline() -> None:
     """Stamp the pre-Alembic schema exactly once before upgrading it."""
     with engine.connect() as conn:
         has_alembic = "alembic_version" in inspect(conn).get_table_names()
@@ -138,7 +138,7 @@ def _adopt_legacy_baseline() -> None:
 
 def upgrade() -> None:
     """Apply the Alembic revision chain without writing application data."""
-    _adopt_legacy_baseline()
+    _stamp_pre_alembic_baseline()
     command.upgrade(_alembic_config(), "head")
     current()
 

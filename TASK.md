@@ -1,4 +1,4 @@
-# Meiti V4.1 Task
+# Meiti V4.2 Task
 
 **GOAL:** Operate Meiti as one AI Creator Operating System with research,
 strategy, creative workflows, judged generation, governed distribution, and
@@ -12,6 +12,7 @@ BLOCKED for missing live credentials.
 
 - Research remains read-only intelligence and is unavailable without credentials.
 - Creative live generation: BLOCKED until Lechuang API contract + key.
+- AI Judge: BLOCKED until a verified vision provider exists.
 - Distribution live publish: BLOCKED until Postiz auth + verified account.
 - Mock creative and mock distribution are CI-safe.
 - Domestic social networks remain registered and disabled.

@@ -100,6 +100,22 @@ class ProviderRanker:
                 score += 8
             availability = 10 if item.verified else 0
             score += availability
+            success = _history_score(history, item, "success_rate", 50)
+            score += min(success, 100) * 0.1
+            node_type = str(requirement.get("node_type") or "")
+            if node_type and (node_type in item.capabilities or node_type in item.output_types):
+                score += 6
+            workflow = str(requirement.get("workflow") or requirement.get("workflow_id") or "")
+            if workflow and policy.get("workflow") == workflow:
+                score += 4
+            content_type = str(requirement.get("content_type") or "")
+            if content_type and content_type in item.output_types:
+                score += 5
+            health_map = dict(requirement.get("health") or {})
+            if item.provider in health_map:
+                score += 10 if health_map[item.provider] else -20
+            else:
+                score += 10 if item.verified else 0
             scored.append((score, item))
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [item for _, item in scored]
@@ -119,8 +135,10 @@ class GenerationProviderResolver:
         self.ranker = ranker or ProviderRanker()
         if "lechuang" not in self.providers:
             self.providers["lechuang"] = LechuangAdapter()
-        if "mock" not in self.providers:
+        if allow_mock and "mock" not in self.providers:
             self.providers["mock"] = MockGenerationProvider()
+        if not allow_mock and "mock" not in (providers or {}):
+            self.providers.pop("mock", None)
 
     def resolve(self, name: str, *, requirement: dict[str, Any] | None = None):
         if name == "lechuang":

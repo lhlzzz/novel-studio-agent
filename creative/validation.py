@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from creative.errors import WorkflowInvalid
-from creative.schemas import NODE_REGISTRY, NODE_STATUS_BLOCKED, NODE_TYPES, CreativeWorkflow
+from creative.schemas import NODE_REGISTRY, NODE_STATUS_BLOCKED, NODE_TYPES, CreativeWorkflow, canonicalize_node_type
 
 COMPATIBLE = {
     "image": {"image", "video", "reference", "final", "asset", "output", "clip"},
@@ -21,7 +21,9 @@ PRODUCES = {
     "reference": "image",
     "character": "text",
     "image_generate": "image",
+    "image.generate": "image",
     "image_edit": "image",
+    "image.transform": "image",
     "image_analyze": "image",
     "image_crop": "image",
     "image_split": "image",
@@ -29,6 +31,8 @@ PRODUCES = {
     "image_annotate": "image",
     "multi_angle": "image",
     "video_generate": "video",
+    "video.generate": "video",
+    "video.from_image": "video",
     "video_extend": "video",
     "video_edit": "video",
     "subtitle": "subtitle",
@@ -47,7 +51,7 @@ def validate_workflow(workflow: CreativeWorkflow, inputs: dict | None = None) ->
         reasons.append("node id not unique")
     known = set(ids)
     for node in workflow.nodes:
-        if node.type not in NODE_TYPES:
+        if canonicalize_node_type(node.type) not in NODE_TYPES and node.type not in NODE_TYPES:
             reasons.append(f"unknown node: {node.type}")
         spec = NODE_REGISTRY.get(node.type) or {}
         if spec.get("status") == NODE_STATUS_BLOCKED:

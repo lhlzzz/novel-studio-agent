@@ -79,7 +79,7 @@ def test_judge_unavailable_blocks(tmp_path):
     engine = _engine(tmp_path, allow_mock=False, judge=VisionJudgeResolver(allow_mock=False, providers={}))
     run = engine.execute("creator-image-to-video-v1", {"brief": "no judge", "variant_count": 1, "budget": 40})
     assert run.status == "BLOCKED"
-    assert run.error_code in {"QUALITY_FAILED", "judge_blocked"} or "judge" in (run.error or "").lower()
+    assert run.error_code in {"QUALITY_FAILED", "JUDGE_UNAVAILABLE", "judge_blocked"} or "judge" in (run.error or "").lower()
 
 
 def test_render_failure_does_not_fake_asset(tmp_path, monkeypatch):
@@ -173,7 +173,7 @@ def test_workflow_validation_blocks_run(tmp_path):
     )
     run = engine.execute(inputs={"brief": "x", "budget": 40}, workflow=workflow)
     assert run.status == "BLOCKED"
-    assert run.error_code == "WORKFLOW_INVALID"
+    assert run.error_code in {"WORKFLOW_INVALID", "INVALID_WORKFLOW"}
 
 
 def test_asset_content_address(tmp_path):

@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_legacy_workspace_and_launchers_are_absent():
+def test_workspace_tree_and_launchers_are_absent():
     assert not (ROOT / "workspaces").exists()
     launcher = "start_" + "platform" + "_agent.sh"
     validator = "validate_" + "platform" + "_agents.py"

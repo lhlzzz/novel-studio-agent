@@ -1,4 +1,4 @@
-# Meiti V4.1 Rules
+# Meiti V4.2 Rules
 
 Meiti is the single owner of the AI Creator Operating System.
 Platforms are integrations and adapters only; they are never agents,
@@ -32,15 +32,17 @@ workspaces, or independent business databases.
 26. Research never fabricates live data.
 27. Unsupported or unverified APIs return BLOCKED, never a fake PASS.
 28. No compatibility layer for deleted architecture.
+29. Production nodes execute real work or BLOCKED.
+30. PostgreSQL is metadata source of truth; files are bytes; memory is cache.
+31. Runtime never auto-creates schema.
+32. Workers take a database lease before resume.
+33. DAG cycles, missing deps, and unknown nodes fail closed.
+34. Workflow versions are immutable.
+35. Node outputs store references, not copied domain objects.
+36. Technical QA is local; AI Judge requires a vision provider.
+37. ContentFitJudge is not ContentPolicyGate.
+38. Creative code never imports distribution adapters.
 
 Lechuang is a generation provider. Postiz is a distribution provider.
 Meiti owns business intelligence, content, memory, strategy, commerce,
 analytics, gates, and creative workflows.
-
-29. No production passthrough nodes.
-30. No in-memory source of truth.
-31. No fake AI judge.
-32. No fake render.
-33. No guessed provider contract.
-34. No provider fallback in production.
-35. No data loss across process restart.

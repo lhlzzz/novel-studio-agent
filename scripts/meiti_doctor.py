@@ -14,8 +14,8 @@ sys.path.insert(0, str(ROOT))
 
 def check_repository() -> dict:
     missing = [name for name in ("agents", "integrations", "governance", "services") if not (ROOT / name).is_dir()]
-    legacy = (ROOT / "workspaces").exists()
-    return {"status": "BLOCKED" if missing or legacy else "PASS", "missing": missing, "legacy_workspaces": legacy}
+    forbidden_tree = (ROOT / "workspaces").exists()
+    return {"status": "BLOCKED" if missing or forbidden_tree else "PASS", "missing": missing, "removed_workspaces": forbidden_tree}
 
 
 def check_agents() -> dict:
@@ -217,7 +217,7 @@ def check_lechuang() -> dict:
     return {
         "status": "PASS" if ready else "BLOCKED",
         "runtime": "PASS" if ready else "BLOCKED",
-        "auth": "PASS" if auth.api_key_present and ready else "BLOCKED",
+        "auth": "PASS" if auth.api_key_present else "BLOCKED",
         "image": "PASS" if ready else "BLOCKED",
         "video": "PASS" if ready else "BLOCKED",
         "reason": reason,

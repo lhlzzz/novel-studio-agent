@@ -1,6 +1,6 @@
 from creative.assets import MIN_PNG, persist_bytes
 from creative.errors import JudgeBlocked
-from creative.judge import ImageJudge, VideoJudge
+from creative.judges import ImageJudge, VideoJudge
 from creative.providers.judge.mock import MockVisionJudgeProvider
 
 

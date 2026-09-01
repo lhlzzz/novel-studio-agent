@@ -1,14 +1,18 @@
-# Meiti V4.1 State
+# Meiti V4.2 State
 
 Creative Runtime: PASS
 Lechuang: BLOCKED
-Real Judge: BLOCKED
+AI Judge: BLOCKED
 Render: PASS
 Persistence: PASS
+Worker lease: PASS
 Resume: PASS
+Postiz: BLOCKED
+Real Creative E2E: BLOCKED
+Real Distribution E2E: BLOCKED
 
-- CreativeWorkflow is the canonical media production abstraction.
-- PostgreSQL is the creative source of truth; workers resume from durable state.
+- CreativeRuntime is the unique composition root.
+- PostgreSQL is the creative metadata source of truth; workers resume from durable leases.
 - Assets are immutable and keyed by sha256.
 - Render uses ffmpeg and writes a new hashed file.
 - Visual AI Judge requires a verified vision provider; otherwise BLOCKED.

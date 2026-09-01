@@ -2,21 +2,24 @@
 
 ## Single owner
 
-Meiti PostgreSQL + pgvector is the sole business and production data store for
-content, agent runs, embeddings, Content KG, analytics facts, commerce facts,
-memory facts, and publish gates.
+Meiti PostgreSQL + pgvector is the metadata source of truth for content,
+creative runs, embeddings, Content KG, analytics, commerce, memory, and
+publish gates. Filesystem / object storage is the binary source of truth.
+Memory is cache only.
 
 Postiz runs its own PostgreSQL database inside `infrastructure/postiz/`.
 Postiz data is distribution infrastructure and is never mixed with Meiti
 business tables.
 
-## Existing shared surfaces
+Runtime never creates tables. Schema changes go through migration.
 
-- `content_embeddings`: semantic retrieval
-- `content_entities` / `content_relations`: Content KG
-- `publish_gates`: fail-closed approval state
-- `agent_*`: auditable capability-agent runs and artifacts
+## Creative tables
 
-The configured Meiti URL is `MEITI_DATABASE_URL` or `DATABASE_URL`. No provider
-database, provider SQLite file, or provider-specific backend is part of the V3
-architecture.
+- `creative_workflows`: immutable workflow versions
+- `creative_runs`: durable run + lease + blocked reason
+- `creative_tasks`: provider tasks
+- `media_assets`: content-addressed asset metadata
+- `generation_usage`: per-call cost
+- `judge_results`: persisted judge decisions
+
+The configured Meiti URL is `MEITI_DATABASE_URL` or `DATABASE_URL`.

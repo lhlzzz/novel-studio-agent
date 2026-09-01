@@ -2,10 +2,40 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from creative.schemas import CreativeWorkflow
 from creative.workflow.registry import list_workflows, resolve_workflow
+
+
+@dataclass
+class ResolvedWorkflow:
+    workflow: CreativeWorkflow
+    workflow_id: str
+    version: str
+    reason: str
+    requirements: dict[str, Any] = field(default_factory=dict)
+
+
+class WorkflowResolver:
+    def __init__(self, *, store=None) -> None:
+        self.store = store
+
+    def resolve(self, requirement: dict[str, Any], *, version: str | None = None) -> ResolvedWorkflow:
+        history = None
+        if self.store is not None:
+            history = self.store.list_performance()
+        workflow = resolve_from_requirement(requirement, performances=history)
+        if version:
+            workflow = resolve_workflow(workflow.workflow_id, version)
+        return ResolvedWorkflow(
+            workflow=workflow,
+            workflow_id=workflow.workflow_id,
+            version=workflow.version,
+            reason="requirement",
+            requirements=dict(requirement or {}),
+        )
 
 
 def requirement_text(requirement: dict[str, Any]) -> str:
@@ -22,7 +52,7 @@ def requirement_text(requirement: dict[str, Any]) -> str:
 def resolve_from_requirement(requirement: dict[str, Any], *, performances: list[dict[str, Any]] | None = None) -> CreativeWorkflow:
     explicit = requirement.get("workflow_id")
     if explicit:
-        return resolve_workflow(str(explicit))
+        return resolve_workflow(str(explicit), requirement.get("workflow_version") or requirement.get("version"))
     text = requirement_text(requirement)
     if "drama" in text or "短剧" in text:
         return resolve_workflow("short-drama-v1")

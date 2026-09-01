@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from creative.assets import AssetStore, character_from_dict
+from creative.errors import SchemaNotReady
 from creative.schemas import (
     Character,
     CreativeRun,
@@ -42,7 +43,7 @@ CREATIVE_TABLE_NAMES = (
 
 LEASE_SECONDS = 30
 OPEN_TASK_STATES = {"QUEUED", "RUNNING"}
-RECOVERABLE_RUN_STATES = ("WAITING_PROVIDER", "QUEUED", "RUNNING")
+RECOVERABLE_RUN_STATES = ("WAITING_PROVIDER", "QUEUED", "RUNNING", "JUDGING")
 
 
 def _now() -> datetime:
@@ -100,9 +101,22 @@ def production_engine():
     return engine
 
 
-def ensure_creative_schema(engine) -> None:
+def schema_ready(engine) -> tuple[bool, list[str]]:
+    from sqlalchemy import inspect
+
+    existing = set(inspect(engine).get_table_names())
+    missing = [name for name in CREATIVE_TABLE_NAMES if name not in existing]
+    return (not missing, missing)
+
+
+def ensure_creative_schema(engine, *, allow_create: bool = False) -> None:
     from scripts.db.models import Base
 
+    ready, missing = schema_ready(engine)
+    if ready:
+        return
+    if not allow_create:
+        raise SchemaNotReady("creative schema missing: " + ", ".join(missing))
     tables = [Base.metadata.tables[name] for name in CREATIVE_TABLE_NAMES if name in Base.metadata.tables]
     Base.metadata.create_all(engine, tables=tables)
 
@@ -115,7 +129,9 @@ class CreativeStore:
             engine = sqlite_engine() if is_test_runtime() else production_engine()
         self.engine = engine
         self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        ensure_creative_schema(self.engine)
+        dialect = getattr(getattr(self.engine, "dialect", None), "name", "")
+        allow_create = is_test_runtime() or dialect == "sqlite"
+        ensure_creative_schema(self.engine, allow_create=allow_create)
         self.assets._persist_asset = self.save_asset
         self.assets._persist_character = self.save_character
         self.assets._load_character = self.get_character
@@ -123,7 +139,17 @@ class CreativeStore:
 
     @classmethod
     def production(cls, *, assets: AssetStore | None = None) -> "CreativeStore":
-        return cls(assets=assets, engine=production_engine())
+        store = cls.__new__(cls)
+        store.assets = assets or AssetStore()
+        store.lease_seconds = LEASE_SECONDS
+        store.engine = production_engine()
+        store.Session = sessionmaker(autocommit=False, autoflush=False, bind=store.engine)
+        ensure_creative_schema(store.engine, allow_create=False)
+        store.assets._persist_asset = store.save_asset
+        store.assets._persist_character = store.save_character
+        store.assets._load_character = store.get_character
+        store._hydrate_assets()
+        return store
 
     def _session(self):
         return self.Session()
@@ -234,6 +260,11 @@ class CreativeStore:
                 "timestamp": _parse_dt(usage.timestamp) or _now(),
                 "run_id": usage.run_id,
                 "node_id": usage.node_id,
+                "input_units": getattr(usage, "input_units", 0.0) or 0.0,
+                "output_units": getattr(usage, "output_units", 0.0) or 0.0,
+                "duration_ms": getattr(usage, "duration_ms", 0.0) or 0.0,
+                "estimated_cost": getattr(usage, "estimated_cost", None) if getattr(usage, "estimated_cost", 0) else usage.credits_estimated,
+                "actual_cost": getattr(usage, "actual_cost", None) if getattr(usage, "actual_cost", 0) else usage.credits_actual,
             }
             if existing is None:
                 session.add(GenerationUsageRecord(**payload))
@@ -556,7 +587,116 @@ class CreativeStore:
             existing = session.get(CreativeWorkflowRecord, (workflow_id, version))
             if existing is None:
                 session.add(CreativeWorkflowRecord(**payload))
+            else:
+                from creative.errors import WorkflowInvalid
+                current = existing.snapshot or {}
+                if current and current != snapshot:
+                    raise WorkflowInvalid(f"workflow version immutable: {workflow_id}@{version}")
             session.commit()
+
+    def save_workflow_version(self, snapshot: dict[str, Any], *, source: str = "template") -> None:
+        payload = dict(snapshot or {})
+        payload.setdefault("source", source)
+        self.save_workflow_snapshot(payload)
+
+    def get_workflow_version(self, workflow_id: str, version: str) -> dict[str, Any] | None:
+        from scripts.db.models import CreativeWorkflowRecord
+
+        with self._session() as session:
+            row = session.get(CreativeWorkflowRecord, (workflow_id, version))
+            if row is None:
+                return None
+            return dict(row.snapshot or {})
+
+    def list_workflow_versions(self, workflow_id: str | None = None) -> list[dict[str, Any]]:
+        from scripts.db.models import CreativeWorkflowRecord
+
+        with self._session() as session:
+            stmt = select(CreativeWorkflowRecord)
+            if workflow_id:
+                stmt = stmt.where(CreativeWorkflowRecord.workflow_id == workflow_id)
+            rows = []
+            for row in session.execute(stmt).scalars():
+                rows.append({
+                    "workflow_id": row.workflow_id,
+                    "version": row.version,
+                    "name": row.name,
+                    "snapshot": dict(row.snapshot or {}),
+                    "source": str((row.snapshot or {}).get("source") or "template"),
+                })
+            return rows
+
+    def list_workflow_definitions(self) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for item in self.list_workflow_versions():
+            current = grouped.get(item["workflow_id"])
+            if current is None or str(item["version"]) > str(current["latest_version"]):
+                grouped[item["workflow_id"]] = {
+                    "workflow_id": item["workflow_id"],
+                    "name": item["name"],
+                    "latest_version": item["version"],
+                    "source": item["source"],
+                }
+        return list(grouped.values())
+
+
+    def list_asset_references(self, asset_id: str) -> dict[str, list[str]]:
+        from scripts.db.models import CreativeNodeOutputRecord, CreativeRunRecord, MediaAssetRecord, CharacterRecord
+
+        refs: dict[str, list[str]] = {"runs": [], "node_outputs": [], "characters": [], "assets": [], "packages": [], "jobs": [], "memory": []}
+        with self._session() as session:
+            for row in session.execute(select(CreativeRunRecord)).scalars():
+                ids = list(row.asset_ids or [])
+                if asset_id in ids or row.selected_asset_id == asset_id:
+                    refs["runs"].append(row.run_id)
+            for row in session.execute(select(CreativeNodeOutputRecord)).scalars():
+                ids = list(row.assets or [])
+                output = row.output or {}
+                if asset_id in ids or asset_id in list(output.get("asset_ids") or []):
+                    refs["node_outputs"].append(f"{row.run_id}:{row.node_id}")
+            for row in session.execute(select(CharacterRecord)).scalars():
+                if asset_id in list(row.reference_assets or []) or asset_id in list(row.voice_assets or []):
+                    refs["characters"].append(row.character_id)
+            row = session.get(MediaAssetRecord, asset_id)
+            if row is not None:
+                refs["assets"].append(row.asset_id)
+            try:
+                from scripts.db.models import ContentPackageRecord, DistributionJobRecord
+                for row in session.execute(select(ContentPackageRecord)).scalars():
+                    media = list(row.media_assets or [])
+                    meta = dict(row.metadata_json or {})
+                    if asset_id in media or meta.get("selected_asset_id") == asset_id or any(asset_id in str(item) for item in media):
+                        refs["packages"].append(row.package_id)
+                for row in session.execute(select(DistributionJobRecord)).scalars():
+                    variant = dict(row.variant or {})
+                    media = list(variant.get("media") or variant.get("media_assets") or [])
+                    if asset_id in media or any(asset_id in str(item) for item in media):
+                        refs["jobs"].append(row.job_id)
+            except Exception:
+                pass
+        return refs
+
+    def delete_asset(self, asset_id: str, *, force: bool = False) -> bool:
+        from scripts.db.models import MediaAssetRecord
+
+        refs = self.list_asset_references(asset_id)
+        live = [key for key, values in refs.items() if key != "assets" and values]
+        if live and not force:
+            return False
+        asset = self.get_asset(asset_id)
+        with self._session() as session:
+            row = session.get(MediaAssetRecord, asset_id)
+            if row is not None:
+                session.delete(row)
+                session.commit()
+        if asset and getattr(asset, "path", None):
+            from pathlib import Path
+            path = Path(asset.path)
+            # bytes stay if another run still points at the same sha path via remaining refs
+            if not live and path.is_file():
+                path.unlink()
+        self.assets.assets.pop(asset_id, None)
+        return True
 
 
 class CharacterRepository:
@@ -604,6 +744,10 @@ def _run_row(run: CreativeRun) -> dict[str, Any]:
         "request_id": run.request_id or "",
         "started_at": _parse_dt(run.started_at),
         "completed_at": _parse_dt(run.completed_at),
+        "blocked_reason": getattr(run, "blocked_reason", None),
+        "blocked_message": getattr(run, "blocked_message", None),
+        "blocked_at": _parse_dt(getattr(run, "blocked_at", None)),
+        "retryable": bool(getattr(run, "retryable", False)),
         "updated_at": _now(),
     }
 
@@ -639,6 +783,10 @@ def _run_from_row(row) -> CreativeRun:
         request_id=row.request_id or "",
         started_at=_iso(row.started_at),
         completed_at=_iso(row.completed_at),
+        blocked_reason=getattr(row, "blocked_reason", None),
+        blocked_message=getattr(row, "blocked_message", None),
+        blocked_at=_iso(getattr(row, "blocked_at", None)),
+        retryable=bool(getattr(row, "retryable", False)),
     )
 
 

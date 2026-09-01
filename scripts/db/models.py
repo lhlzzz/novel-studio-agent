@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     CheckConstraint,
     DateTime,
@@ -584,7 +585,7 @@ CREATIVE_TABLE_NAMES = (
 
 
 class CreativeWorkflowRecord(Base):
-    """Immutable workflow version snapshot."""
+    """Immutable workflow version snapshot. This is WorkflowVersion."""
 
     __tablename__ = "creative_workflows"
 
@@ -602,6 +603,9 @@ class CreativeWorkflowRecord(Base):
     snapshot = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+WorkflowVersionRecord = CreativeWorkflowRecord
 
 
 class CreativeRunRecord(Base):
@@ -636,6 +640,10 @@ class CreativeRunRecord(Base):
     request_id = Column(String(255), nullable=False, default="")
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
+    blocked_reason = Column(String(80))
+    blocked_message = Column(Text)
+    blocked_at = Column(DateTime)
+    retryable = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -775,6 +783,11 @@ class GenerationUsageRecord(Base):
     timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
     run_id = Column(String(255), nullable=False, default="")
     node_id = Column(String(255), nullable=False, default="")
+    input_units = Column(Numeric(18, 6), nullable=False, default=0)
+    output_units = Column(Numeric(18, 6), nullable=False, default=0)
+    duration_ms = Column(Numeric(18, 6), nullable=False, default=0)
+    estimated_cost = Column(Numeric(18, 6), nullable=False, default=0)
+    actual_cost = Column(Numeric(18, 6), nullable=False, default=0)
 
     __table_args__ = (
         Index("idx_generation_usage_run", "run_id"),

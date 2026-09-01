@@ -1,4 +1,4 @@
-# Meiti V4.1 Agent Operating Contract
+# Meiti V4.2 Agent Operating Contract
 
 Meiti is an AI Creator Operating System. Meiti owns Intelligence, Strategy,
 Content, Media, Creative Workflow, Memory, Analytics, Commerce, Distribution,
@@ -17,8 +17,6 @@ Governance, and Integrations.
 `All generated assets are immutable.`
 
 `Assets are content-addressed by sha256.`
-
-`All async generation is durable.`
 
 `Agent selects workflow; workflow executes nodes.`
 
@@ -47,23 +45,48 @@ Logical agents are `meiti-orchestrator`, `research-agent`, `strategy-agent`,
 implementation is required before status can be `active`.
 
 ```text
-Research -> Strategy -> Creative Direction -> Creative Workflow
--> Asset Generation -> AI Quality Judgment -> MediaAsset
--> ContentPackage -> Distribution -> Analytics -> Memory -> Strategy
+User -> MediaAgent -> CreativeWorkflowResolver -> CreativeRun -> DB
+-> Worker Lease -> Workflow Engine -> Node -> Provider Resolver
+-> Creative Provider -> Provider Task -> MediaAsset
+-> Technical QA -> AI Judge -> Policy Gate -> ContentPackage
+-> DistributionAgent -> DistributionJob -> Distribution Provider
+-> Social Platform -> Analytics -> Experiment -> Memory -> Strategy
 ```
 
 Meiti = Brain + Memory + Workflow + Judgment + Learning
 Lechuang = Generation Provider
 Postiz = Distribution Provider
 
-Media Agent selects and executes workflows. It does not call Lechuang or Postiz
-directly. Generation providers live under `creative/providers/`. Distribution
-providers live under `integrations/providers/` and are reached only through
-ProviderResolver.
+The unique creative composition root is `creative.runtime.container.CreativeRuntime`.
+MediaAgent, Creative API, Creative Worker, Doctor, and CLI obtain runtime
+through that container. They do not construct engines, stores, or resolvers
+ad hoc.
 
-All production data is owned by Meiti. PostgreSQL + pgvector, Content KG, and
-Obsidian are shared memory infrastructure. There is one Meiti business
-database and one distribution database owned by Postiz.
+## Agent constraints
+
+- Agent cannot bypass Workflow
+- Agent cannot bypass Provider Resolver
+- Agent cannot bypass Publish Gate
+- Agent cannot fake PASS
+- Agent cannot write credentials
+- Agent cannot directly publish
+- Agent cannot create duplicate runtime
+- Agent cannot call a third-party provider
+- Creative Provider cannot publish
+- Distribution Provider cannot generate content
+
+Media Agent selects a CreativeWorkflow, fills inputs, and submits a
+CreativeRun. It does not call Lechuang or Postiz. Generation providers live
+under `creative/providers/`. Distribution providers live under
+`integrations/providers/` and are reached only through ProviderResolver.
+
+PostgreSQL is the metadata source of truth. Filesystem / object storage is
+the binary source of truth. Memory is cache only. Schema changes go through
+migration. Runtime never creates tables.
+
+BLOCKED is a structured runtime state (`blocked_reason`, `blocked_message`,
+`blocked_at`, `retryable`). Missing credentials, unverified contracts, or
+missing vision providers are BLOCKED, not PASS.
 
 ## Distribution Contract
 
@@ -104,4 +127,4 @@ python scripts/runtime_check.py
 ```
 
 The authoritative topology is the code under `agents/`, `creative/`, domain
-directories, and `integrations/`. The legacy workspace tree must not exist.
+directories, and `integrations/`.

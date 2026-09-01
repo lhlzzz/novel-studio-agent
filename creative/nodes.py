@@ -9,12 +9,15 @@ from typing import Any
 from uuid import uuid4
 
 from creative.errors import BudgetExceeded, JudgeBlocked, ProviderBlocked, TechnicalMediaError, UnsupportedCapability
-from creative.judge import TechnicalQA, bind_judges, rank_assets
+from creative.idempotency import IdempotencyKey
+from creative.judges import ContentPolicyGate, TechnicalQA, bind_judges, rank_assets
 from creative.prompts import render_scene_prompt
 from creative.schemas import (
     CROP_ASPECTS,
     NODE_REGISTRY,
     NODE_STATUS_BLOCKED,
+    NODES,
+    canonicalize_node_type,
     CameraPlan,
     CreativeTask,
     CreativeWorkflow,
@@ -32,8 +35,12 @@ from creative.schemas import (
 
 GENERATE_TYPES = {
     "image_generate": "generate_image",
+    "image.generate": "generate_image",
     "image_edit": "edit_image",
+    "image.transform": "edit_image",
     "video_generate": "generate_video",
+    "video.generate": "generate_video",
+    "video.from_image": "generate_video",
     "video_extend": "extend_video",
     "video_edit": "edit_video",
     "multi_angle": "generate_image",
@@ -42,10 +49,14 @@ GENERATE_TYPES = {
 # Mock cost only. Production quotes come from provider.estimate().
 MOCK_NODE_COST = {
     "image_generate": 1.0,
+    "image.generate": 1.0,
     "image_edit": 1.0,
+    "image.transform": 1.0,
     "image_resize": 0.1,
     "multi_angle": 1.0,
     "video_generate": 8.0,
+    "video.generate": 8.0,
+    "video.from_image": 8.0,
     "video_extend": 6.0,
     "video_edit": 4.0,
 }
@@ -129,49 +140,50 @@ def _as_asset(value, store):
 
 
 def execute_node(node, *, workflow, run, context, store, resolver, judge_provider=None) -> dict[str, Any]:
-    spec = NODE_REGISTRY.get(node.type) or {}
+    node_type = canonicalize_node_type(node.type)
+    spec = NODES.get(node.type)
     if spec.get("status") == NODE_STATUS_BLOCKED:
         raise ProviderBlocked(node.type, spec.get("reason") or "node blocked")
     data = gather_inputs(node, workflow, context, run.inputs)
     for key in ("asset", "output", "reference", "clip"):
         if key in data:
             data[key] = _as_asset(data[key], store)
-    if node.type in {"input", "text", "reference"}:
+    if node_type in {"input", "text", "reference"}:
         return {"output": data.get("output", run.inputs), **{k: v for k, v in data.items() if k != "output"}, "brief": data.get("brief") or run.inputs.get("brief")}
-    if node.type == "character":
+    if node_type == "character":
         return _character(data, run, store)
-    if node.type == "prompt":
+    if node_type == "prompt":
         return _prompt(data, workflow, run, store)
-    if node.type == "storyboard":
+    if node_type == "storyboard":
         return _storyboard(data, run)
-    if node.type == "motion_annotation":
+    if node_type == "motion_annotation":
         return _motion_annotation(data, run, store)
-    if node.type in GENERATE_TYPES:
+    if node_type in GENERATE_TYPES:
         return _generate(node, workflow=workflow, run=run, data=data, store=store, resolver=resolver)
-    if node.type == "judge":
+    if node_type == "judge":
         return _judge(node, run=run, data=data, context=context, store=store, judge_provider=judge_provider)
-    if node.type == "render":
+    if node_type == "render":
         return _render(data, workflow, run, store)
-    if node.type == "output":
+    if node_type == "output":
         asset = data.get("asset") or data.get("output")
         return {"output": asset, "asset": asset}
-    if node.type == "image_crop":
+    if node_type == "image_crop":
         return _image_crop(data, run, store)
-    if node.type == "image_split":
+    if node_type == "image_split":
         return _image_split(data, run, store)
-    if node.type == "image_resize":
+    if node_type == "image_resize":
         return _image_resize(data, run, store)
-    if node.type == "image_annotate":
+    if node_type == "image_annotate":
         return _image_annotate(data, run, store)
-    if node.type == "subtitle":
+    if node_type == "subtitle":
         return _subtitle(data, run, store)
-    if node.type == "image_analyze":
+    if node_type == "image_analyze":
         return _image_analyze(data, run, judge_provider)
-    if node.type == "audio":
+    if node_type == "audio":
         raise ProviderBlocked("audio", "no verified audio provider")
-    if node.type == "image_upscale":
+    if node_type == "image_upscale":
         raise ProviderBlocked("image_upscale", "super-resolution requires a verified provider capability")
-    raise UnsupportedCapability(node.type, provider=node.provider or "workflow")
+    raise UnsupportedCapability(node_type, provider=node.provider or "workflow")
 
 
 def _character(data, run, store) -> dict[str, Any]:
@@ -254,8 +266,8 @@ def _motion_annotation(data, run, store) -> dict[str, Any]:
 
 
 def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
-    kind = GENERATE_TYPES[node.type]
-    if node.type == "video_generate" and str(data.get("mode") or node.config.get("mode") or "") == "image_to_video":
+    kind = GENERATE_TYPES[canonicalize_node_type(node.type) if node.type not in GENERATE_TYPES else node.type]
+    if canonicalize_node_type(node.type) in {"video_generate"} and (node.type == "video.from_image" or str(data.get("mode") or node.config.get("mode") or "") == "image_to_video"):
         capability = "image_to_video"
     else:
         capability = KIND_CAPABILITY.get(kind, kind)
@@ -286,7 +298,7 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
         camera = run.inputs.get("camera") or "handheld"
     for index in range(variants):
         attempt = int(run.outputs.get("regen_attempt") or 0)
-        execution_key = f"{run.run_id}:{node.node_id}:{index}:{attempt}"
+        execution_key = IdempotencyKey.provider(run.run_id, node.node_id, f"{index}:{attempt}")
         existing = store.get_task_by_execution_key(execution_key)
         if existing is not None:
             if existing.status in {"QUEUED", "RUNNING"}:
@@ -324,7 +336,11 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
             raise BudgetExceeded(run.actual_cost + estimate, float(run.budget))
         from datetime import datetime, timedelta, timezone
         timeout_at = (datetime.now(timezone.utc) + timedelta(seconds=int(data.get("timeout_seconds") or 180))).isoformat()
-        handle = provider.create_task(kind, payload)
+        create = getattr(provider, "create", None)
+        if callable(create):
+            handle = create(kind, payload, idempotency_key=execution_key)
+        else:
+            handle = provider.create_task(kind, {**payload, "idempotency_key": execution_key})
         task = CreativeTask(
             task_id=f"{run.run_id}:{node.node_id}:{index}:{attempt}",
             run_id=run.run_id,
@@ -396,6 +412,11 @@ def _record_usage(store, run, task, provider, node, kind, prompt, payload, refer
         timestamp=utcnow(),
         run_id=run.run_id,
         node_id=node.node_id,
+        input_units=1.0,
+        output_units=1.0 if task.status == "SUCCEEDED" else 0.0,
+        duration_ms=0.0,
+        estimated_cost=estimate,
+        actual_cost=credits,
     ))
 
 
@@ -659,39 +680,58 @@ def _image_analyze(data, run, judge_provider) -> dict[str, Any]:
 
 def quality_gate(run, assets: list[MediaAsset]) -> dict[str, Any]:
     qa = TechnicalQA()
-    visual = "pass"
+    policy_gate = ContentPolicyGate().evaluate(run.inputs, asset=(assets[-1] if assets else None))
+    visual = "blocked"
     identity = "pass"
     technical = "pass"
-    policy = "pass"
+    policy = "pass" if policy_gate.decision == "PASS" else "fail"
     platform = "pass"
-    reasons = []
-    scores = {"technical_score": 80.0, "visual_score": 80.0, "content_score": 80.0, "platform_score": 80.0}
+    reasons = list(policy_gate.reasons)
+    scores = {}
+    visual_seen = False
     for result in run.judge_results:
-        if result.get("decision") == "FAIL":
-            visual = "fail"
-            reasons.extend(result.get("reasons") or [])
+        if result.get("judge_type") in {"image", "video"}:
+            visual_seen = True
+            if result.get("decision") == "PASS":
+                visual = "pass"
+            elif result.get("decision") == "FAIL":
+                visual = "fail"
+                reasons.extend(result.get("reasons") or [])
+            if result.get("score") is not None:
+                scores["visual_score"] = float(result["score"])
         if result.get("judge_type") in {"consistency", "continuity", "identity"} and result.get("decision") == "FAIL":
             identity = "fail"
-        if result.get("judge_type") == "content_fit" and result.get("decision") == "FAIL":
+            reasons.extend(result.get("reasons") or [])
+        if result.get("judge_type") == "content_fit":
+            scores["content_score"] = float(result.get("score") or 0)
+            if result.get("decision") == "FAIL":
+                reasons.extend(result.get("reasons") or [])
+        if result.get("judge_type") == "policy" and result.get("decision") in {"FAIL", "BLOCK"}:
             policy = "fail"
-        if result.get("judge_type") == "platform_fit" and result.get("decision") == "FAIL":
-            platform = "fail"
-        if result.get("score") is not None:
-            if result.get("judge_type") in {"image", "video"}:
-                scores["visual_score"] = float(result["score"])
-            if result.get("judge_type") == "content_fit":
-                scores["content_score"] = float(result["score"])
-            if result.get("judge_type") == "platform_fit":
-                scores["platform_score"] = float(result["score"])
+            reasons.extend(result.get("reasons") or [])
+    if not visual_seen:
+        visual = "blocked"
+        reasons.append("vision judge unavailable")
     for asset in assets:
         inspect = qa.inspect_video(asset) if asset.type in {"video", "final"} else qa.inspect_image(asset)
         if inspect["decision"] != "pass":
             technical = "fail"
             reasons.extend(inspect["failures"])
         else:
-            scores["technical_score"] = 90.0
-    overall = sum(scores.values()) / 4
-    scores["overall_score"] = round(overall, 2)
+            scores["technical_score"] = float(inspect.get("width") or 0) and 70.0 or 70.0
+            wanted = str(run.inputs.get("aspect_ratio") or "")
+            if wanted == "9:16" and inspect.get("width") and inspect.get("height") and inspect["width"] > inspect["height"]:
+                technical = "fail"
+                platform = "fail"
+                reasons.append("aspect_ratio")
+    if "technical_score" not in scores:
+        scores["technical_score"] = 0.0 if technical != "pass" else 70.0
+    if "visual_score" not in scores:
+        scores["visual_score"] = 0.0
+    if "content_score" not in scores:
+        scores["content_score"] = 0.0
+    scores["platform_score"] = 70.0 if platform == "pass" else 0.0
+    scores["overall_score"] = round(sum(scores[k] for k in ("technical_score", "visual_score", "content_score", "platform_score")) / 4, 2)
     return {
         "visual_quality": visual,
         "identity_quality": identity,

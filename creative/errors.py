@@ -80,7 +80,7 @@ class WorkflowNotFound(CreativeError):
         )
 
 
-class IllegalRunTransition(CreativeError):
+class InvalidStateTransition(CreativeError):
     code = "illegal_run_transition"
 
     def __init__(self, current: str, target: str, *, details: dict | None = None) -> None:
@@ -90,6 +90,17 @@ class IllegalRunTransition(CreativeError):
             f"illegal run transition: {current} -> {target}",
             details={"current": current, "target": target, **dict(details or {})},
         )
+
+
+IllegalRunTransition = InvalidStateTransition
+
+
+class SchemaNotReady(CreativeError):
+    code = "schema_not_ready"
+
+
+class PolicyRejected(CreativeError):
+    code = "policy_rejected"
 
 
 class WorkflowInvalid(CreativeError):
@@ -154,19 +165,22 @@ class Cancelled(CreativeError):
 
 
 FAILURE_CODE_MAP = {
-    "unsupported_capability": "PROVIDER_BLOCKED",
-    "provider_blocked": "PROVIDER_BLOCKED",
+    "unsupported_capability": "CAPABILITY_UNAVAILABLE",
+    "provider_blocked": "PROVIDER_UNAVAILABLE",
     "budget_exceeded": "BUDGET_EXCEEDED",
     "quality_blocked": "QUALITY_FAILED",
-    "workflow_not_found": "WORKFLOW_INVALID",
-    "workflow_invalid": "WORKFLOW_INVALID",
+    "workflow_not_found": "INVALID_WORKFLOW",
+    "workflow_invalid": "INVALID_WORKFLOW",
     "technical_media_failed": "TECHNICAL_MEDIA_FAILED",
-    "judge_blocked": "QUALITY_FAILED",
-    "auth_error": "AUTH_ERROR",
-    "rate_limit": "RATE_LIMIT",
+    "judge_blocked": "JUDGE_UNAVAILABLE",
+    "auth_error": "PROVIDER_AUTH_MISSING",
+    "rate_limit": "PROVIDER_UNAVAILABLE",
     "timeout": "TIMEOUT",
     "cancelled": "CANCELLED",
-    "provider_error": "PROVIDER_ERROR",
+    "provider_error": "PROVIDER_UNAVAILABLE",
+    "illegal_run_transition": "INVALID_WORKFLOW",
+    "schema_not_ready": "INVALID_WORKFLOW",
+    "policy_rejected": "POLICY_REJECTED",
 }
 
 
@@ -198,6 +212,10 @@ def user_message(exc: BaseException) -> str:
         return f"{exc.provider} rate limited"
     if isinstance(exc, UnsupportedCapability):
         return f"unsupported capability: {exc.provider}:{exc.capability}".strip(":")
+    if isinstance(exc, SchemaNotReady):
+        return f"creative schema missing: {exc}"
+    if isinstance(exc, PolicyRejected):
+        return f"policy rejected: {exc}"
     text = str(exc).strip() or exc.__class__.__name__
     if "Traceback" in text:
         return "internal creative error"

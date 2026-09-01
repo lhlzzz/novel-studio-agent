@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Machine-readable runtime check for Meiti V4.1."""
+"""Machine-readable runtime check for Meiti V4.2."""
 
 from __future__ import annotations
 

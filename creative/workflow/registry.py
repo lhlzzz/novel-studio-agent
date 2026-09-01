@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from creative.errors import WorkflowInvalid, WorkflowNotFound
-from creative.schemas import CreativeWorkflow, WorkflowEdge, WorkflowNode, utcnow
+from creative.schemas import CreativeWorkflow, WorkflowEdge, WorkflowNode, canonicalize_node_type, utcnow
 
 try:
     import yaml
@@ -20,8 +20,8 @@ _REGISTRY: dict[str, dict[str, CreativeWorkflow]] = {}
 def workflow_from_dict(data: dict[str, Any]) -> CreativeWorkflow:
     nodes = []
     for item in data.get("nodes") or []:
-        node_type = str(item["type"])
-        if node_type not in __import__("creative.schemas", fromlist=["NODE_TYPES"]).NODE_TYPES:
+        node_type = canonicalize_node_type(str(item["type"]))
+        if node_type not in __import__("creative.schemas", fromlist=["NODE_TYPES"]).NODE_TYPES and str(item["type"]) not in __import__("creative.schemas", fromlist=["NODE_TYPES"]).NODE_TYPES:
             raise ValueError(f"unknown node type: {node_type}")
         nodes.append(WorkflowNode(
             node_id=str(item["node_id"]),
@@ -106,6 +106,24 @@ def load_templates(path: Path | None = None) -> list[CreativeWorkflow]:
     for file in sorted(directory.glob("*.yaml")):
         data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
         workflow = workflow_from_dict(data)
+        register_workflow(workflow)
+        loaded.append(workflow)
+    return loaded
+
+
+def load_from_store(store) -> list[CreativeWorkflow]:
+    loaded = []
+    if store is None or not hasattr(store, "list_workflow_versions"):
+        return loaded
+    try:
+        rows = store.list_workflow_versions()
+    except Exception:
+        return loaded
+    for row in rows:
+        snapshot = row.get("snapshot") or {}
+        if not snapshot.get("workflow_id"):
+            continue
+        workflow = workflow_from_dict(snapshot)
         register_workflow(workflow)
         loaded.append(workflow)
     return loaded

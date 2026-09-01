@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 from uuid import uuid4
 
@@ -11,7 +9,9 @@ from creative.assets import AssetStore
 from creative.errors import (
     BudgetExceeded,
     IllegalRunTransition,
+    InvalidStateTransition,
     JudgeBlocked,
+    PolicyRejected,
     ProviderBlocked,
     QualityBlocked,
     TechnicalMediaError,
@@ -19,8 +19,10 @@ from creative.errors import (
     failure_code,
     user_message,
 )
-from creative.judge import RegenerationStrategy
+from creative.judges import RegenerationStrategy
 from creative.nodes import estimate_workflow_cost, execute_node, quality_gate
+from creative.idempotency import IdempotencyKey
+from creative.runtime.state import apply_block, block_reason_for, transition as state_transition
 from creative.providers.judge.resolver import VisionJudgeResolver
 from creative.providers.resolver import GenerationProviderResolver
 from creative.schemas import RUN_TRANSITIONS, CreativeRun, CreativeWorkflow, MediaAsset, map_task_status, to_plain, utcnow
@@ -32,20 +34,11 @@ from governance.observability import log_event, new_request_id
 
 
 def make_idempotency_key(workflow_id: str, version: str, inputs: dict[str, Any]) -> str:
-    payload = json.dumps({"workflow_id": workflow_id, "version": version, "inputs": inputs}, sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return IdempotencyKey.run(workflow_id, version, inputs)
 
 
 def transition(run: CreativeRun, status: str) -> CreativeRun:
-    allowed = RUN_TRANSITIONS.get(run.status, set())
-    if status != run.status and status not in allowed:
-        raise IllegalRunTransition(run.status, status)
-    run.status = status
-    if status == "RUNNING" and not run.started_at:
-        run.started_at = utcnow()
-    if status in {"SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"}:
-        run.completed_at = utcnow()
-    return run
+    return state_transition(run, status)
 
 
 def workflow_from_snapshot(snapshot: dict[str, Any] | None, fallback_id: str, fallback_version: str) -> CreativeWorkflow:
@@ -127,12 +120,12 @@ class CreativeWorkflowEngine:
                 workflow_snapshot=workflow.export(),
                 replay_of=replay_of,
                 request_id=new_request_id(),
-                error=user_message(exc),
-                error_code=failure_code(exc),
             )
-            transition(run, "BLOCKED")
+            reasons = getattr(exc, "reasons", ()) or (str(exc),)
+            block = "INVALID_INPUT" if any("missing input" in str(item) for item in reasons) else "INVALID_WORKFLOW"
+            apply_block(run, block, user_message(exc), retryable=False)
             self.store.save_run(run)
-            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "code": run.error_code})
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "code": run.error_code, "reason": run.blocked_reason})
             return run
         run = CreativeRun(
             run_id=uuid4().hex,
@@ -151,13 +144,13 @@ class CreativeWorkflowEngine:
         self.store.record_event(run.run_id, "run_created", {"workflow_id": workflow.workflow_id, "version": workflow.version})
         log_event(agent="creative-engine", action="create_run", status="created", request_id=run.request_id or "", run_id=run.run_id, provider="", duration_ms=None)
         if run.budget is not None and run.estimated_cost > float(run.budget):
-            run.error = f"estimated cost {run.estimated_cost} exceeds budget {run.budget}"
-            run.error_code = "BUDGET_EXCEEDED"
-            transition(run, "BLOCKED")
+            apply_block(run, "BUDGET_EXCEEDED", f"estimated cost {run.estimated_cost} exceeds budget {run.budget}", retryable=False)
             self.store.save_run(run)
-            self.store.record_event(run.run_id, "run_blocked", {"error": run.error})
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "reason": run.blocked_reason})
             return run
         try:
+            transition(run, "QUEUED")
+            self.store.save_run(run)
             transition(run, "RUNNING")
             self.store.save_run(run)
             return self._advance(run, workflow)
@@ -221,7 +214,9 @@ class CreativeWorkflowEngine:
     def _poll_open_tasks(self, run: CreativeRun) -> None:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
+        self.store.heartbeat(run.run_id, self.worker_id)
         for task in self.store.list_open_tasks(run.run_id):
+            self.store.heartbeat(run.run_id, self.worker_id)
             if task.timeout_at:
                 from datetime import datetime as dt
                 try:
@@ -255,13 +250,10 @@ class CreativeWorkflowEngine:
                     stored = self.store.assets.put(asset)
                     if stored.asset_id not in run.asset_ids:
                         run.asset_ids.append(stored.asset_id)
-                    node_out = run.node_outputs.setdefault(task.node_id, {"assets": [], "variants": []})
-                    assets = node_out.setdefault("assets", [])
-                    if stored.asset_id not in [item.get("asset_id") if isinstance(item, dict) else getattr(item, "asset_id", None) for item in assets]:
-                        assets.append(to_plain(stored))
-                    node_out["output"] = assets[0]
-                    node_out["asset"] = assets[0]
-                    node_out["variants"] = assets
+                    node_out = run.node_outputs.setdefault(task.node_id, {"asset_ids": [], "character_ids": [], "prompt_ids": [], "judge_run_ids": []})
+                    ids = node_out.setdefault("asset_ids", [])
+                    if stored.asset_id not in ids:
+                        ids.append(stored.asset_id)
                 self.store.record_event(run.run_id, "provider_completed", {"task_id": task.task_id, "status": task.status})
             self.store.save_task(task)
         self.store.save_run(run)
@@ -270,7 +262,7 @@ class CreativeWorkflowEngine:
         order, cycle = topo_sort(workflow)
         if cycle:
             raise WorkflowInvalid("cycle")
-        context = dict(run.node_outputs)
+        context = _hydrate_context(run, self.store)
         regen = RegenerationStrategy()
         max_regens = int(workflow.quality_policy.get("max_regenerations") or 2)
         while run.cursor < len(order):
@@ -283,14 +275,17 @@ class CreativeWorkflowEngine:
                 transition(run, "WAITING_PROVIDER")
                 self.store.save_run(run)
                 return run
-            if node.type in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend", "multi_angle"} and (existing.get("asset") or existing.get("output")):
+            if node.type in {"image_generate", "image.generate", "video_generate", "video.generate", "video.from_image", "image_edit", "image.transform", "video_edit", "video_extend", "multi_angle"} and (existing.get("asset_ids") or existing.get("asset") or existing.get("output")):
                 run.cursor += 1
                 self.store.save_run(run)
                 continue
-            if existing.get("output") is not None and node.type not in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend", "multi_angle", "judge", "render"}:
+            if existing.get("output") is not None and node.type not in {"image_generate", "image.generate", "video_generate", "video.generate", "video.from_image", "image_edit", "image.transform", "video_edit", "video_extend", "multi_angle", "judge", "render"}:
                 run.cursor += 1
                 self.store.save_run(run)
                 continue
+            if node.type in {"judge", "image_analyze"} and run.status == "RUNNING":
+                transition(run, "JUDGING")
+                self.store.save_run(run)
             result = execute_node(
                 node,
                 workflow=workflow,
@@ -301,7 +296,7 @@ class CreativeWorkflowEngine:
                 judge_provider=self._judge_provider() if node.type in {"judge", "image_analyze"} else None,
             )
             if result.get("_pending"):
-                run.node_outputs[node.node_id] = {key: value for key, value in result.items() if key != "_pending"}
+                run.node_outputs[node.node_id] = _node_refs(result)
                 self.store.save_node_output(run.run_id, node.node_id, run.node_outputs[node.node_id])
                 transition(run, "WAITING_PROVIDER")
                 self.store.save_run(run)
@@ -322,12 +317,16 @@ class CreativeWorkflowEngine:
                     run.inputs = _apply_regen(run.inputs, action)
                     for item in order[generate_index: run.cursor + 1]:
                         run.node_outputs.pop(item.node_id, None)
-                    context = dict(run.node_outputs)
+                    context = _hydrate_context(run, self.store)
+                    if run.status == "JUDGING":
+                        transition(run, "RUNNING")
                     self.store.save_run(run)
                     continue
             context[node.node_id] = result
-            run.node_outputs[node.node_id] = _plain_node(result)
+            run.node_outputs[node.node_id] = _node_refs(result)
             self.store.save_node_output(run.run_id, node.node_id, run.node_outputs[node.node_id], result.get("assets") or ([result["asset"]] if result.get("asset") else []))
+            if run.status == "JUDGING":
+                transition(run, "RUNNING")
             run.cursor += 1
             self.store.save_run(run)
             self.store.record_event(run.run_id, "node_completed", {"node_id": node.node_id, "type": node.type})
@@ -360,11 +359,13 @@ class CreativeWorkflowEngine:
             **{key: gate[key] for key in ("technical_score", "visual_score", "content_score", "platform_score", "overall_score") if key in gate},
         }
         required = ("visual_quality", "identity_quality", "technical_quality")
-        if any(run.quality.get(key) != "pass" for key in required) or run.error_code == "QUALITY_FAILED":
-            run.error = run.error or ("quality gate blocked: " + ", ".join(gate.get("reasons") or []))
-            run.error_code = run.error_code or "QUALITY_FAILED"
-            transition(run, "BLOCKED")
-            self.store.record_event(run.run_id, "run_blocked", {"error": run.error})
+        if gate.get("policy_quality") == "fail":
+            apply_block(run, "POLICY_REJECTED", run.error or ("policy blocked: " + ", ".join(gate.get("reasons") or [])), retryable=False)
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "reason": run.blocked_reason})
+        elif any(run.quality.get(key) != "pass" for key in required) or run.error_code == "QUALITY_FAILED":
+            reason = "JUDGE_UNAVAILABLE" if run.quality.get("visual_quality") == "blocked" else "QUALITY_FAILED"
+            apply_block(run, reason, run.error or ("quality gate blocked: " + ", ".join(gate.get("reasons") or [])), retryable=False)
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "reason": run.blocked_reason})
         else:
             transition(run, "SUCCEEDED")
             self.store.save_performance({
@@ -413,17 +414,20 @@ class CreativeWorkflowEngine:
     def _fail(self, run: CreativeRun, exc: Exception) -> CreativeRun:
         run.error = user_message(exc)
         run.error_code = failure_code(exc)
-        target = "BLOCKED" if isinstance(exc, (ProviderBlocked, BudgetExceeded, JudgeBlocked, WorkflowInvalid, QualityBlocked, TechnicalMediaError)) else "FAILED"
+        blocked_types = (ProviderBlocked, BudgetExceeded, JudgeBlocked, WorkflowInvalid, QualityBlocked, PolicyRejected)
+        target = "BLOCKED" if isinstance(exc, blocked_types) else "FAILED"
         if isinstance(exc, TechnicalMediaError):
             run.error_code = "TECHNICAL_MEDIA_FAILED"
             target = "FAILED"
-        try:
-            transition(run, target)
-        except IllegalRunTransition:
-            run.status = target
-            run.completed_at = utcnow()
+        if target == "BLOCKED":
+            apply_block(run, block_reason_for(exc), run.error, retryable=bool(getattr(exc, "retryable", False)))
+        else:
+            try:
+                transition(run, target)
+            except InvalidStateTransition:
+                raise
         self.store.save_run(run)
-        self.store.record_event(run.run_id, "run_blocked" if target == "BLOCKED" else "run_failed", {"error": run.error, "code": run.error_code})
+        self.store.record_event(run.run_id, "run_blocked" if target == "BLOCKED" else "run_failed", {"error": run.error, "code": run.error_code, "reason": getattr(run, "blocked_reason", None)})
         log_event(
             agent="creative-engine",
             action="run",
@@ -453,9 +457,66 @@ def _apply_regen(inputs: dict[str, Any], action: str) -> dict[str, Any]:
 
 
 def _plain_node(result: dict[str, Any]) -> dict[str, Any]:
-    payload = {}
-    for key, value in result.items():
-        if key == "ranked":
+    return _node_refs(result)
+
+
+def _ids(values) -> list[str]:
+    ids = []
+    if values is None:
+        return ids
+    if not isinstance(values, (list, tuple)):
+        values = [values]
+    for item in values:
+        if item is None:
             continue
-        payload[key] = to_plain(value)
+        if isinstance(item, str):
+            ids.append(item)
+        elif isinstance(item, dict) and (item.get("asset_id") or item.get("character_id") or item.get("prompt_id") or item.get("judge_id")):
+            ids.append(item.get("asset_id") or item.get("character_id") or item.get("prompt_id") or item.get("judge_id"))
+        else:
+            for attr in ("asset_id", "character_id", "prompt_id", "judge_id"):
+                value = getattr(item, attr, None)
+                if value:
+                    ids.append(value)
+                    break
+    return list(dict.fromkeys(ids))
+
+
+def _node_refs(result: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "asset_ids": _ids(result.get("assets") or result.get("asset") or result.get("variants") or result.get("output") if not isinstance(result.get("output"), str) else None),
+        "character_ids": _ids(result.get("character") or result.get("character_id")),
+        "prompt_ids": _ids(result.get("prompt_asset") or result.get("prompt_id")),
+        "judge_run_ids": _ids(result.get("judge") or result.get("judge_id")),
+    }
+    if result.get("character_id"):
+        payload["character_id"] = result.get("character_id")
+        if result.get("character_id") not in payload["character_ids"]:
+            payload["character_ids"].append(result.get("character_id"))
+    if isinstance(result.get("output"), str):
+        payload["output"] = result.get("output")
+        payload["prompt"] = result.get("prompt") or result.get("output")
+    if result.get("decision"):
+        payload["decision"] = result.get("decision")
+    if result.get("_pending"):
+        payload["pending"] = True
     return payload
+
+
+
+def _hydrate_context(run: CreativeRun, store) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for node_id, payload in (run.node_outputs or {}).items():
+        data = dict(payload or {})
+        assets = []
+        for item in data.get("asset_ids") or []:
+            asset = store.get_asset(item) or store.assets.get(item)
+            if asset is not None:
+                assets.append(asset)
+        if assets:
+            data["asset"] = assets[0]
+            data["output"] = data.get("output") or assets[0]
+            data["assets"] = assets
+            data["variants"] = assets
+        context[node_id] = data
+    return context

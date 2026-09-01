@@ -7,6 +7,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+NODE_ALIASES = {
+    "image.generate": "image_generate",
+    "image.transform": "image_edit",
+    "video.from_image": "video_generate",
+    "video.generate": "video_generate",
+}
+
 NODE_TYPES = (
     "input",
     "text",
@@ -14,7 +21,9 @@ NODE_TYPES = (
     "reference",
     "character",
     "image_generate",
+    "image.generate",
     "image_edit",
+    "image.transform",
     "image_analyze",
     "image_crop",
     "image_split",
@@ -23,6 +32,8 @@ NODE_TYPES = (
     "image_annotate",
     "multi_angle",
     "video_generate",
+    "video.generate",
+    "video.from_image",
     "video_extend",
     "video_edit",
     "audio",
@@ -38,32 +49,90 @@ NODE_STATUS_IMPLEMENTED = "IMPLEMENTED"
 NODE_STATUS_VERIFIED = "VERIFIED"
 NODE_STATUS_BLOCKED = "BLOCKED"
 
+
+def _node_spec(*, status: str, requires: tuple[str, ...] = (), cost_class: str = "none", async_node: bool = False, reason: str = "", input_schema: dict[str, Any] | None = None, output_schema: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "status": status,
+        "input_schema": dict(input_schema or {}),
+        "output_schema": dict(output_schema or {}),
+        "required_capabilities": requires,
+        "provider_requirements": requires,
+        "cost_class": cost_class,
+        "async": async_node,
+        "retry_policy": {"retryable": async_node, "on": ("timeout", "429", "5xx") if async_node else ()},
+        "idempotency_policy": "run_id:node_id:attempt",
+        "reason": reason,
+        "requires": requires,
+    }
+
+
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
     "input": {"status": NODE_STATUS_IMPLEMENTED},
     "text": {"status": NODE_STATUS_IMPLEMENTED},
     "prompt": {"status": NODE_STATUS_IMPLEMENTED},
     "reference": {"status": NODE_STATUS_IMPLEMENTED},
     "character": {"status": NODE_STATUS_IMPLEMENTED},
-    "image_generate": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_image",)},
-    "image_edit": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("image_to_image",)},
+    "image_generate": _node_spec(status=NODE_STATUS_IMPLEMENTED, requires=("text_to_image", "image_generation"), cost_class="image", async_node=True, input_schema={"prompt": "str", "negative_prompt": "str", "aspect_ratio": "str", "resolution": "str", "reference_assets": "list", "seed": "int", "style": "str"}, output_schema={"asset_ids": "list"}),
+    "image_edit": _node_spec(status=NODE_STATUS_IMPLEMENTED, requires=("image_to_image",), cost_class="image", async_node=True, input_schema={"source_asset": "str", "prompt": "str", "mask": "str", "reference_assets": "list"}, output_schema={"asset_ids": "list"}),
     "image_analyze": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("vision_judge",)},
     "image_crop": {"status": NODE_STATUS_IMPLEMENTED},
     "image_split": {"status": NODE_STATUS_IMPLEMENTED},
     "image_resize": {"status": NODE_STATUS_IMPLEMENTED},
-    "image_upscale": {"status": NODE_STATUS_BLOCKED, "reason": "super-resolution requires a verified provider capability"},
+    "image_upscale": _node_spec(status=NODE_STATUS_BLOCKED, reason="super-resolution requires a verified provider capability"),
     "image_annotate": {"status": NODE_STATUS_IMPLEMENTED},
     "multi_angle": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_image",)},
-    "video_generate": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_video", "image_to_video")},
+    "video_generate": _node_spec(status=NODE_STATUS_IMPLEMENTED, requires=("text_to_video", "image_to_video", "video_generation"), cost_class="video", async_node=True, input_schema={"source_image": "str", "prompt": "str", "duration": "number", "aspect_ratio": "str", "motion": "str", "camera": "str"}, output_schema={"asset_ids": "list"}),
     "video_extend": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("video_extend",)},
     "video_edit": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("video_edit",)},
-    "audio": {"status": NODE_STATUS_BLOCKED, "reason": "no verified audio provider"},
+    "audio": _node_spec(status=NODE_STATUS_BLOCKED, reason="no verified audio provider", requires=("audio_generation",)),
     "subtitle": {"status": NODE_STATUS_IMPLEMENTED},
     "render": {"status": NODE_STATUS_IMPLEMENTED},
     "judge": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("vision_judge",)},
     "output": {"status": NODE_STATUS_IMPLEMENTED},
     "motion_annotation": {"status": NODE_STATUS_IMPLEMENTED},
     "storyboard": {"status": NODE_STATUS_IMPLEMENTED},
+    "image.generate": None,
+    "image.transform": None,
+    "video.from_image": None,
+    "video.generate": None,
 }
+NODE_REGISTRY["image.generate"] = {**NODE_REGISTRY["image_generate"], "canonical": "image_generate"}
+NODE_REGISTRY["image.transform"] = {**NODE_REGISTRY["image_edit"], "canonical": "image_edit"}
+NODE_REGISTRY["video.from_image"] = {**NODE_REGISTRY["video_generate"], "canonical": "video_generate", "required_capabilities": ("image_to_video",)}
+NODE_REGISTRY["video.generate"] = {**NODE_REGISTRY["video_generate"], "canonical": "video_generate"}
+
+
+class NodeRegistry:
+    """Unique owner of production node contracts."""
+
+    def __init__(self, specs: dict[str, dict[str, Any]] | None = None) -> None:
+        self._specs = dict(specs or NODE_REGISTRY)
+
+    def get(self, node_type: str) -> dict[str, Any]:
+        spec = self._specs.get(node_type)
+        if not spec:
+            spec = self._specs.get(canonicalize_node_type(node_type), {})
+        return spec or {}
+
+    def require(self, node_type: str) -> dict[str, Any]:
+        spec = self.get(node_type)
+        if not spec:
+            from creative.errors import WorkflowInvalid
+            raise WorkflowInvalid(f"unknown node: {node_type}")
+        if spec.get("status") == NODE_STATUS_BLOCKED:
+            from creative.errors import ProviderBlocked
+            raise ProviderBlocked(node_type, spec.get("reason") or "node blocked")
+        return spec
+
+    def types(self) -> tuple[str, ...]:
+        return tuple(self._specs)
+
+
+NODES = NodeRegistry()
+
+
+def canonicalize_node_type(node_type: str) -> str:
+    return NODE_ALIASES.get(node_type, node_type)
 
 RUN_STATES = (
     "DRAFT",
@@ -82,7 +151,7 @@ RUN_TRANSITIONS = {
     "QUEUED": {"RUNNING", "CANCELLED", "BLOCKED"},
     "RUNNING": {"WAITING_PROVIDER", "JUDGING", "SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"},
     "WAITING_PROVIDER": {"RUNNING", "JUDGING", "FAILED", "CANCELLED", "BLOCKED"},
-    "JUDGING": {"RUNNING", "SUCCEEDED", "FAILED", "BLOCKED"},
+    "JUDGING": {"RUNNING", "WAITING_PROVIDER", "SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"},
     "BLOCKED": {"QUEUED", "CANCELLED"},
     "SUCCEEDED": set(),
     "FAILED": set(),
@@ -106,11 +175,21 @@ ASSET_TYPES = (
 REGENERATION_STRATEGIES = ("change_prompt", "change_variation", "change_reference", "change_camera", "change_model")
 
 FAILURE_CODES = (
+    "CAPABILITY_UNAVAILABLE",
+    "PROVIDER_UNAVAILABLE",
+    "PROVIDER_AUTH_MISSING",
+    "PROVIDER_CONTRACT_UNVERIFIED",
+    "BUDGET_EXCEEDED",
+    "POLICY_REJECTED",
+    "INVALID_WORKFLOW",
+    "INVALID_INPUT",
+    "RESEARCH_UNAVAILABLE",
+    "DISTRIBUTION_UNAVAILABLE",
+    "JUDGE_UNAVAILABLE",
     "PROVIDER_BLOCKED",
     "PROVIDER_ERROR",
     "AUTH_ERROR",
     "RATE_LIMIT",
-    "BUDGET_EXCEEDED",
     "WORKFLOW_INVALID",
     "QUALITY_FAILED",
     "TECHNICAL_MEDIA_FAILED",
@@ -216,6 +295,23 @@ class CreativeWorkflow:
         return payload
 
 
+@dataclass(frozen=True)
+class WorkflowDefinition:
+    workflow_id: str
+    source: str
+    latest_version: str
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class WorkflowVersion:
+    workflow_id: str
+    version: str
+    snapshot: dict[str, Any]
+    source: str = "template"
+    name: str = ""
+
+
 @dataclass
 class CreativeRun:
     run_id: str
@@ -247,6 +343,10 @@ class CreativeRun:
     selection_score: float | None = None
     request_id: str | None = None
     error_code: str | None = None
+    blocked_reason: str | None = None
+    blocked_message: str | None = None
+    blocked_at: str | None = None
+    retryable: bool = False
 
 
 @dataclass
@@ -384,6 +484,11 @@ class GenerationUsage:
     timestamp: str
     run_id: str = ""
     node_id: str = ""
+    input_units: float = 0.0
+    output_units: float = 0.0
+    duration_ms: float = 0.0
+    estimated_cost: float = 0.0
+    actual_cost: float = 0.0
 
 
 @dataclass(frozen=True)

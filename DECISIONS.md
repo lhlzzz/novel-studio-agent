@@ -1,4 +1,4 @@
-# Meiti V4.1 Decisions
+# Meiti V4.2 Decisions
 
 - **2026-08-26:** Platform is an integration, not an agent or workspace.
 - **2026-08-26:** Meiti owns business data; Postiz owns distribution infrastructure.

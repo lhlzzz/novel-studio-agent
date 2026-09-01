@@ -61,9 +61,28 @@ class MockGenerationProvider(CapabilityMixin):
     def create_task(self, kind: str, payload: dict[str, Any]) -> ProviderTask:
         if kind not in self.supported:
             raise UnsupportedCapability(kind, provider=self.name)
+        key = str((payload or {}).get("idempotency_key") or "")
+        if key:
+            for task in self._tasks.values():
+                stored = getattr(task, "result", {}) or {}
+                if stored.get("idempotency_key") == key:
+                    return task
+            for path in self.task_dir.glob("*.json"):
+                raw = json.loads(path.read_text())
+                if (raw.get("payload") or {}).get("idempotency_key") == key:
+                    task = raw.get("task") or {}
+                    return ProviderTask(
+                        provider=self.name,
+                        provider_task_id=str(task.get("provider_task_id") or path.stem),
+                        status=str(task.get("status") or "queued"),
+                        kind=str(task.get("kind") or kind),
+                        result=dict(task.get("result") or {}),
+                    )
         task_id = uuid4().hex
         status = "succeeded" if self.polls_until_done <= 0 else "queued"
         result = self._result(kind, payload) if status == "succeeded" else {}
+        if key:
+            result = {**result, "idempotency_key": key}
         task = ProviderTask(provider=self.name, provider_task_id=task_id, status=status, kind=kind, result=result)
         self._save(task, payload)
         return task

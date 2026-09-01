@@ -1,4 +1,4 @@
-"""Media agent selects and executes creative workflows. It does not call providers."""
+"""Media agent selects and submits creative workflows. It does not call providers."""
 
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ class MediaAgent:
     state_store = "postgres:agent_records"
     tests = ("tests/unit/test_media_upload.py", "tests/creative/test_workflow_runtime.py")
 
-    def __init__(self, *, engine: CreativeWorkflowEngine | None = None) -> None:
+    def __init__(self, *, engine: CreativeWorkflowEngine | None = None, runtime=None) -> None:
         self.engine = engine
+        self.runtime = runtime
 
     def run(self, task: dict[str, Any]) -> dict[str, Any]:
         if self._is_generate(task):
@@ -32,6 +33,14 @@ class MediaAgent:
             return True
         return any(task.get(key) for key in ("brief", "creative_brief", "creative_requirement", "workflow_id"))
 
+    def _engine(self, *, allow_mock: bool) -> CreativeWorkflowEngine:
+        if self.engine is not None:
+            return self.engine
+        if self.runtime is not None:
+            return self.runtime.engine
+        from creative.runtime.container import CreativeRuntime
+        return CreativeRuntime.create(allow_mock=allow_mock, production=not allow_mock).engine
+
     def _generate(self, task: dict[str, Any]) -> dict[str, Any]:
         requirement = dict(task.get("creative_requirement") or task.get("creative_brief") or {})
         for key in ("brief", "aspect_ratio", "duration_seconds", "face_visible", "character_id", "variant_count", "budget", "commerce_intent", "camera", "motion", "style", "workflow_id"):
@@ -40,7 +49,7 @@ class MediaAgent:
         if task.get("title") and not requirement.get("brief"):
             requirement["brief"] = task.get("title")
         allow_mock = bool(task.get("allow_mock"))
-        engine = self.engine or CreativeWorkflowEngine(allow_mock=allow_mock)
+        engine = self._engine(allow_mock=allow_mock)
         workflow = resolve_from_requirement(requirement)
         run = engine.execute(
             workflow.workflow_id,
@@ -49,7 +58,7 @@ class MediaAgent:
             idempotency_key=task.get("idempotency_key"),
             allow_mock=allow_mock if "allow_mock" in task else None,
         )
-        assets = [engine.store.assets.get(item) for item in run.asset_ids]
+        assets = [engine.store.assets.get(item) or engine.store.get_asset(item) for item in run.asset_ids]
         package = None
         if run.status == "SUCCEEDED":
             package = engine.to_content_package(
@@ -58,7 +67,7 @@ class MediaAgent:
                 title=str(task.get("title") or requirement.get("brief") or "Untitled"),
                 body=str(task.get("body") or requirement.get("brief") or ""),
             )
-        code = run.error_code or ("QUALITY_FAILED" if run.status == "BLOCKED" else "")
+        code = run.error_code or run.blocked_reason or ""
         if run.status == "SUCCEEDED" or code in CREATIVE_MEMORY_CODES:
             write_patterns({
                 "kind": "workflow",
@@ -71,6 +80,9 @@ class MediaAgent:
                 },
                 "confidence": 0.6 if run.status == "SUCCEEDED" else 0.4,
             })
+        error = run.blocked_message or run.error
+        if run.status == "BLOCKED":
+            error = f"Creative generation blocked: {error or run.blocked_reason or run.status}"
         return {
             "agent": self.name,
             "valid": run.status == "SUCCEEDED",
@@ -80,7 +92,8 @@ class MediaAgent:
             "assets": [item for item in assets if item],
             "package": package,
             "blocked": run.status == "BLOCKED",
-            "error": run.error,
+            "blocked_reason": run.blocked_reason,
+            "error": error,
         }
 
     def _hash_local(self, task: dict[str, Any]) -> dict[str, Any]:

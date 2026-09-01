@@ -1,4 +1,4 @@
-# Meiti V4.1 Handoff
+# Meiti V4.2 Handoff
 
 Branch `main`. Creative Workflow Engine is in `creative/`.
 

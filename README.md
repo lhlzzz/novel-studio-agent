@@ -1,4 +1,4 @@
-# Meiti V4.1
+# Meiti V4.2
 
 Meiti is an AI Creator Operating System.
 
@@ -7,11 +7,10 @@ Meiti + Creative Workflow + Lechuang + Postiz
 ```
 
 ```text
-Research -> Strategy -> Creative Direction -> Creative Workflow
--> Durable Creative Runtime -> Async Provider Execution
--> Real Asset Persistence -> Real AI Quality Judgment
--> Cost Control -> Replay / Resume -> ContentPackage
--> Postiz Distribution -> Analytics -> Memory -> Strategy
+User -> MediaAgent -> Creative Runtime -> Workflow Graph -> Node
+-> Provider Resolver -> Creative Provider -> MediaAsset
+-> Technical QA -> AI Judge -> Policy Gate -> ContentPackage
+-> Distribution -> Analytics -> Memory -> Strategy
 ```
 
 ```text
@@ -20,12 +19,15 @@ Lechuang = Generation Provider
 Postiz = Distribution Provider
 ```
 
-Media Agent selects a CreativeWorkflow. The engine executes a durable node
-graph. Providers are execution backends, never agents. Creative generation
-never publishes. Distribution never generates media.
+Media Agent selects a CreativeWorkflow. The runtime container constructs the
+engine, store, resolvers, judges, cost, and replay owners. Workers lease runs
+from PostgreSQL. Providers are execution backends, never agents. Creative
+generation never publishes. Distribution never generates media.
 
 Live Lechuang calls stay BLOCKED until `LECHUANG_API_KEY`, `LECHUANG_API_URL`,
-and a verified API contract exist. Mock creative is tests-only.
+and a verified API contract exist. AI Judge stays BLOCKED without a vision
+provider. Real distribution stays BLOCKED without `POSTIZ_API_KEY` and a
+verified account. Mock creative is tests-only.
 
 ```bash
 python -m pytest

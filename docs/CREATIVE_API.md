@@ -1,6 +1,13 @@
 # Creative Runtime API
 
-Meiti V4.1 production API. Agents select workflows; this module executes them.
+Meiti V4.2 production API. Agents select workflows; CreativeRuntime executes them.
+
+## Composition root
+
+`creative.runtime.container.CreativeRuntime`
+
+MediaAgent, Creative API, Creative Worker, Doctor, and CLI obtain the engine,
+store, resolvers, judges, cost, and replay owners from this container.
 
 ## Creative API
 
@@ -22,34 +29,25 @@ Replay creates a new run with `replay_of` set. Identical inputs reuse `idempoten
 
 `creative.workflow.registry`
 
-- `list_workflows()`
-- `resolve_workflow(workflow_id, version=None)`
-- `register_workflow(workflow)` — versions are immutable
-- `validate_workflow(workflow, inputs)` in `creative.validation`
-
-`creative.workflow.resolver.resolve_from_requirement(requirement)` ranks templates. MediaAgent is the only agent entry.
+- Git templates: `creative/workflow/templates/`
+- User/runtime versions: PostgreSQL `creative_workflows`
+- Versions are immutable; edits create a new version
+- `creative.workflow.resolver.WorkflowResolver` returns `ResolvedWorkflow`
 
 ## Provider API
 
 `creative.providers.resolver.GenerationProviderResolver`
 
 - `resolve(name)` — production never falls back to mock
-- `select(requirement)` — `ProviderRanker` scores verified capability, history, cost, latency, preference
+- `select(requirement)` — ranks capability, model, node type, workflow, content type, health, cost, latency, success rate
 
-Lechuang HTTP lives only in `LechuangClient`: `create_task`, `get_task`, `cancel_task`, `get_result`, `upload_asset`. Live calls stay BLOCKED until the official contract is verified.
-
-## Asset API
-
-`creative.store.CreativeStore` + `creative.assets.AssetStore`
-
-- Content-addressed files at `media/assets/<aa>/<sha256>.<ext>`
-- `MediaAsset` rows in PostgreSQL
-- `CharacterRepository` persists characters; references must be MediaAssets
+Lechuang HTTP lives only in `LechuangClient`. Live calls stay BLOCKED until the official contract is verified.
 
 ## Judge API
 
-`creative.providers.judge.VisionJudgeResolver`
+`creative.judges`
 
-- `judge_image`, `judge_video`, `judge_frames`, `judge_consistency`
-- Technical QA uses Pillow / ffprobe
+- Technical QA is local
+- Vision/video judges require a verified vision provider
+- ContentFitJudge is not ContentPolicyGate
 - Missing vision provider => BLOCKED, never PASS
