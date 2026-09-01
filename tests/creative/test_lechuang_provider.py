@@ -23,3 +23,27 @@ def test_lechuang_does_not_guess_with_key_only(monkeypatch):
     assert ready is False and ("blocked" in reason.lower() or "contract" in reason.lower() or "extractable" in reason.lower())
     with pytest.raises((ProviderBlocked, UnsupportedCapability)):
         adapter.generate_video({"prompt": "nope"})
+
+
+def test_lechuang_typed_contracts_exist_but_stay_unverified():
+    from creative.providers.lechuang.schemas import (
+        CreateImageRequest,
+        CreateImageToImageRequest,
+        CreateImageToVideoRequest,
+        CreateTaskResponse,
+        CreateVideoRequest,
+        ProviderError,
+        TaskResultResponse,
+        TaskStatusResponse,
+    )
+    image = CreateImageRequest(prompt="one person one scene")
+    video = CreateImageToVideoRequest(prompt="lock identity", source_asset_id="asset")
+    assert image.prompt and video.source_asset_id
+    assert CreateVideoRequest(prompt="x").prompt == "x"
+    assert CreateImageToImageRequest(prompt="x").prompt == "x"
+    assert CreateTaskResponse(task_id="t", status="queued").status == "queued"
+    assert TaskStatusResponse(task_id="t", status="processing").status == "processing"
+    assert TaskResultResponse(task_id="t", status="completed").media_url is None
+    assert ProviderError(code="invalid_response", message="nope").retryable is False
+    adapter = LechuangAdapter(client=LechuangClient(base_url="https://example.invalid", api_key="secret"))
+    assert adapter.live_ready()[0] is False

@@ -1,14 +1,16 @@
-# Meiti V4.2 Next Action
+# Meiti V4.3 Next Action
 
-**GOAL:** Extract the official Lechuang API contract from the operator key/docs
-surface, then verify one image and one image-to-video task without guessing.
+**GOAL:** Keep Meiti BLOCKED until real operator credentials and the official
+Lechuang contract exist, then run one real image plus image-to-video E2E and
+one Postiz TEST publication.
 
-**VERIFY:** `creative_doctor.py` reports Lechuang auth/image/video PASS only
-after a real create-task -> poll -> persist cycle.
+**VERIFY:** `python scripts/meiti_doctor.py` prints `Overall: READY` only after
+real IDs exist in `docs/audits/meiti-v4.3-production-e2e.json`.
 
 1. Obtain Lechuang `base_url`, auth, endpoints, models, and schemas from the
    official key/docs surface. Put the key in the operator environment only.
-2. Fill `creative/providers/lechuang/models.yaml` with verified=true only after
-   runtime evidence.
-3. Keep Postiz live publish blocked until `POSTIZ_API_KEY`, a running Postiz
-   process, and one verified overseas account exist.
+2. Set `AI_GATEWAY_API_KEY` / `AI_GATEWAY_API_URL` for vision. Do not merge this
+   provider with Lechuang.
+3. Start `infrastructure/postiz` and set `POSTIZ_API_KEY`, then verify one
+   overseas account before enabling it.
+4. Set `SCRAPECREATORS_API_KEY` before treating Research as available.

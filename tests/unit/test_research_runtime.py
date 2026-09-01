@@ -7,6 +7,8 @@ def test_research_unavailable_without_credential(monkeypatch):
     assert result["status"] == "unavailable"
     assert result["publishable"] is False if "publishable" in result else True
     assert result["claims"] == []
+    assert result.get("artifact") is None
+    assert result["status"] != "ready"
 
 
 def test_research_skill_router_selects_outlier():

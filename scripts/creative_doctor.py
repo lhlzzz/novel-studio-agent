@@ -125,11 +125,11 @@ def run() -> dict:
             "Lechuang contract": _status(contract, contract_verified=contract, reason=reason),
             "image capability": _status(ready and contract, reason=reason),
             "video capability": _status(ready and contract, reason=reason),
-            "judge capability": _blocked(judge_reason),
+            "judge capability": _status(False, reason=judge_reason),
         },
         "LIVE": {
             "Lechuang live": _status(ready and contract, reason=reason),
-            "Creative E2E": _status(ready and contract and mock_run.status == "SUCCEEDED", reason=reason if not ready else mock_error),
+            "Creative Live Execution": _status(ready and contract, reason=reason if not (ready and contract) else "live generation evidence missing"),
         },
     }
 

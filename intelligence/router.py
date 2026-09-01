@@ -7,7 +7,8 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,27 @@ class ResearchCredentialState:
 
 class ResearchError(RuntimeError):
     """A live research request failed and produced no validated evidence."""
+
+
+@dataclass(frozen=True)
+class ResearchRequest:
+    kind: str
+    platform: str = "tiktok"
+    handle: str | None = None
+    url: str | None = None
+    region: str = "US"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResearchArtifact:
+    artifact_id: str
+    kind: str
+    provider: str
+    claims: tuple[ResearchClaim, ...]
+    created_at: str
+    endpoint: str = ""
+    raw_response: dict[str, Any] | None = None
 
 
 class ScrapeCreatorsClient:
@@ -194,6 +216,7 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
             "claims": [],
             "credential": state,
             "publishable": False,
+            "artifact": None,
         }
     try:
         endpoint, params = _request_spec(skill, task)
@@ -207,6 +230,7 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
             "claims": [],
             "credential": state,
             "publishable": False,
+            "artifact": None,
         }
     if not claims:
         return {
@@ -216,8 +240,9 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
             "claims": [],
             "credential": state,
             "publishable": False,
+            "artifact": None,
         }
-    from memory.writeback import write_patterns
+    from memory.writeback import write_patterns, write_production
 
     written = 0
     for claim in claims:
@@ -229,6 +254,22 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
                 "source": claim.source,
                 "confidence": claim.confidence,
             }).get("written") or 0)
+    artifact = ResearchArtifact(
+        artifact_id=uuid4().hex,
+        kind=skill,
+        provider="scrapecreators",
+        claims=tuple(claims),
+        created_at=datetime.now(timezone.utc).isoformat(),
+        endpoint=endpoint,
+        raw_response=response if isinstance(response, dict) else None,
+    )
+    write_production({
+        "kind": "research_artifact",
+        "research": artifact.artifact_id,
+        "artifact": artifact.artifact_id,
+        "source": "scrapecreators",
+        "confidence": 0.8,
+    })
     return {
         "status": "ready",
         "skill": skill,
@@ -237,4 +278,5 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
         "evidence": [claim.__dict__ for claim in claims],
         "memory_writeback": written,
         "publishable": False,
+        "artifact": artifact,
     }

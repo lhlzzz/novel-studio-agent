@@ -245,49 +245,246 @@ def check_control_plane() -> dict:
         return {"status": "BLOCKED", "error": str(exc)}
 
 
-def run() -> dict:
+
+def _status(ok: bool, **extra) -> dict:
+    payload = {"status": "PASS" if ok else "BLOCKED"}
+    payload.update(extra)
+    return payload
+
+
+def check_architecture() -> dict:
+    repo = check_repository()
+    agents = check_agents()
+    return _status(repo.get("status") == "PASS" and agents.get("status") == "PASS", repository=repo, agents=agents)
+
+
+def check_creative_runtime() -> dict:
+    engine = check_creative_engine()
+    try:
+        from creative.runtime.container import CreativeRuntime
+        ok = engine.get("status") == "PASS" and callable(getattr(CreativeRuntime, "production", None))
+        return _status(ok, engine=engine)
+    except Exception as exc:
+        return _status(False, error=str(exc))
+
+
+def check_creative_persistence() -> dict:
+    database = check_database()
+    try:
+        from creative.store import CreativeStore, schema_ready
+        store = CreativeStore.production()
+        ready, missing = schema_ready(store.engine)
+        return _status(database.get("status") == "PASS" and ready, missing=missing, database=database)
+    except Exception as exc:
+        return _status(False, error=str(exc))
+
+
+def check_generation_resolver() -> dict:
+    try:
+        from creative.providers.resolver import GenerationProviderResolver
+        from integrations.providers.resolver import resolve_provider
+        resolver = GenerationProviderResolver(allow_mock=False)
+        postiz = resolve_provider("postiz")
+        ok = "lechuang" in resolver.providers and "mock" not in resolver.providers and postiz.implementation is not None
+        return _status(ok, creative_providers=sorted(resolver.providers), postiz=postiz.name)
+    except Exception as exc:
+        return _status(False, error=str(exc))
+
+
+def check_lechuang_contract() -> dict:
+    from creative.providers.lechuang.client import CONTRACT_VERIFIED, LechuangClient
+    from creative.providers.lechuang.schemas import CreateImageRequest, CreateTaskResponse, ProviderError
+    client = LechuangClient()
+    typed = all((CreateImageRequest, CreateTaskResponse, ProviderError))
+    verified = bool(client.contract_verified and CONTRACT_VERIFIED and typed)
+    return _status(verified, reason=client.contract_reason, env="LECHUANG_API_URL", service="lechuang", next="Extract the official Lechuang HTTP contract from the operator workbench/docs. Do not guess endpoints.")
+
+
+def check_lechuang_auth() -> dict:
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    adapter = LechuangAdapter()
+    auth = adapter.client.auth()
+    return _status(bool(auth.api_key_present), reason=("ok" if auth.api_key_present else "LECHUANG_API_KEY missing"), env="LECHUANG_API_KEY", next="Put a real LECHUANG_API_KEY in the operator environment after the contract is verified.")
+
+
+def check_lechuang_capability(name: str) -> dict:
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    adapter = LechuangAdapter()
+    ready, reason = adapter.live_ready()
+    verified = adapter.has_verified(name)
+    return _status(ready and verified, reason=reason, capability=name, verified=verified, env="LECHUANG_API_KEY", service="lechuang")
+
+
+def check_vision_provider() -> dict:
+    from creative.providers.judge.gateway import GatewayVisionProvider
+    provider = GatewayVisionProvider()
+    ready, reason = provider.live_ready()
+    if not ready:
+        return _status(False, reason=reason, env="AI_GATEWAY_API_KEY", service="ai-gateway", next="Set AI_GATEWAY_API_KEY and AI_GATEWAY_API_URL for the operator AI Gateway. Do not merge this with Lechuang.")
+    ok, probe_reason = provider.probe()
+    return _status(ok, reason=probe_reason, env="AI_GATEWAY_API_KEY", service="ai-gateway", next="Replace the invalid AI Gateway key or restore gateway access.")
+
+
+def check_ai_judge() -> dict:
+    vision = check_vision_provider()
+    from creative.errors import JudgeBlocked
+    from creative.judges import ImageJudge
+    from creative.assets import MIN_PNG, persist_bytes
+    import tempfile
+    missing = ImageJudge().judge(None)
+    closed = missing.decision == "FAIL" and missing.passed is False
+    blocked = False
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+            image = persist_bytes(MIN_PNG, asset_type="image", suffix=".png", root=Path(tmp), mime_type="image/png", width=64, height=64)
+            ImageJudge().judge(image)
+    except JudgeBlocked:
+        blocked = True
+    ok = vision.get("status") == "PASS" and closed and blocked
+    return _status(ok, vision=vision, missing_asset=missing.decision, no_provider_blocked=blocked, reason=vision.get("reason"))
+
+
+def check_postiz_runtime() -> dict:
     postiz = check_postiz()
-    workers = check_workers()
-    lechuang = check_lechuang()
+    reachable = bool(postiz.get("reachable"))
+    return _status(reachable, reason=postiz.get("reason") or postiz.get("error") or ("ok" if reachable else "Postiz process is not reachable"), env="POSTIZ_API_URL", service="postiz", next="Start infrastructure/postiz with docker-compose. Pulling missing redis/temporal/elasticsearch images is required.")
+
+
+def check_publication_persistence() -> dict:
+    try:
+        from scripts.db.engine import engine
+        from sqlalchemy import inspect
+        tables = set(inspect(engine).get_table_names())
+        required = {"publications", "distribution_jobs", "integrations"}
+        return _status(required.issubset(tables), tables=sorted(tables & required))
+    except Exception as exc:
+        return _status(False, error=str(exc))
+
+
+def check_reconciliation() -> dict:
+    try:
+        from services.reconciliation.service import reconcile_publication
+        return _status(callable(reconcile_publication))
+    except Exception as exc:
+        return _status(False, error=str(exc))
+
+
+def e2e_path() -> Path:
+    return ROOT / "docs/audits/meiti-v4.3-production-e2e.json"
+
+
+def load_e2e() -> dict:
+    path = e2e_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def write_e2e_audit(checks: dict) -> dict:
+    existing = load_e2e()
+    creative = existing.get("creative") if isinstance(existing.get("creative"), dict) else {}
+    distribution = existing.get("distribution") if isinstance(existing.get("distribution"), dict) else {}
+    payload = {
+        "version": "4.3",
+        "overall": "READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED",
+        "creative": {
+            "workflow": creative.get("workflow") or "",
+            "provider": creative.get("provider") or "",
+            "image_asset_id": creative.get("image_asset_id") or "",
+            "video_asset_id": creative.get("video_asset_id") or "",
+            "judge": creative.get("judge") or "blocked",
+            "reason": checks.get("Real Creative E2E", {}).get("reason"),
+        },
+        "distribution": {
+            "provider": distribution.get("provider") or "postiz",
+            "integration_id": distribution.get("integration_id") or "",
+            "remote_post_id": distribution.get("remote_post_id") or "",
+            "status": distribution.get("status") or "blocked",
+            "reason": checks.get("Real Distribution E2E", {}).get("reason"),
+        },
+        "reconciliation": existing.get("reconciliation") or {"status": "blocked"},
+        "analytics": existing.get("analytics") or {"ingested": False},
+        "memory": existing.get("memory") or {"written": False},
+        "blockers": [
+            {"check": name, "reason": value.get("reason") or value.get("error"), "env": value.get("env"), "service": value.get("service"), "next": value.get("next")}
+            for name, value in checks.items()
+            if value.get("status") != "PASS"
+        ],
+    }
+    path = e2e_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+    return payload
+
+
+def check_real_creative_e2e() -> dict:
+    data = load_e2e()
+    creative = data.get("creative") or {}
+    image = str(creative.get("image_asset_id") or "").strip()
+    video = str(creative.get("video_asset_id") or "").strip()
+    judge = str(creative.get("judge") or "").lower()
+    ok = bool(image and video and judge == "pass" and not image.startswith("fake") and not video.startswith("fake"))
+    return _status(ok, reason="no real creative E2E evidence" if not ok else "ok", env="LECHUANG_API_KEY", service="lechuang", next="After the Lechuang contract is verified, run one image and one image-to-video workflow and persist real asset IDs.")
+
+
+def check_real_distribution_e2e() -> dict:
+    data = load_e2e()
+    distribution = data.get("distribution") or {}
+    remote = str(distribution.get("remote_post_id") or "").strip()
+    status = str(distribution.get("status") or "").lower()
+    integration = str(distribution.get("integration_id") or "").strip()
+    ok = bool(remote and integration and status == "published" and not remote.startswith("fake"))
+    return _status(ok, reason="no real distribution E2E evidence" if not ok else "ok", env="POSTIZ_API_KEY", service="postiz", next="Start Postiz, set POSTIZ_API_KEY, verify one overseas integration, then publish MEITI_PRODUCTION_E2E_TEST.")
+
+
+def run() -> dict:
+    lechuang_auth = check_lechuang_auth()
+    lechuang_contract = check_lechuang_contract()
+    postiz = check_postiz()
     return {
-        "Repository": check_repository(),
-        "Database": check_database(),
-        "pgvector": check_pgvector(),
-        "Embedding": check_embedding(),
-        "Knowledge Graph": check_kg(),
-        "Agent Registry": check_agents(),
-        "Provider Registry": check_provider_registry(),
-        "Postiz": postiz,
-        "Postiz authentication": {"status": postiz.get("status"), "reason": postiz.get("reason")},
-        "Postiz integrations": check_postiz_integrations(),
-        "Postiz capabilities": check_postiz_capabilities(),
-        "Research": check_research(),
-        "Scheduler": workers,
-        "Workers": workers,
-        "Creative Workflow Engine": check_creative_engine(),
-        "Lechuang": lechuang,
-        "Lechuang authentication": {"status": lechuang.get("auth"), "reason": lechuang.get("reason")},
-        "Lechuang capabilities": {"status": "PASS" if lechuang.get("contract_verified") else "BLOCKED"},
+        "Architecture": check_architecture(),
+        "Creative Runtime": check_creative_runtime(),
+        "Creative Persistence": check_creative_persistence(),
+        "Provider Resolver": check_generation_resolver(),
+        "Lechuang Contract": lechuang_contract,
+        "Lechuang Auth": lechuang_auth,
+        "Image Generation": check_lechuang_capability("text_to_image"),
+        "Image-to-Image": check_lechuang_capability("image_to_image"),
+        "Image-to-Video": check_lechuang_capability("image_to_video"),
+        "Video Generation": check_lechuang_capability("text_to_video"),
+        "Vision Provider": check_vision_provider(),
+        "AI Judge": check_ai_judge(),
+        "Postiz Runtime": check_postiz_runtime(),
+        "Postiz Authentication": {"status": postiz.get("status"), "reason": postiz.get("reason"), "env": "POSTIZ_API_KEY", "service": "postiz", "next": "Set POSTIZ_API_KEY after Postiz is running."},
+        "Integration Discovery": check_postiz_integrations(),
+        "Research": {**check_research(), "env": "SCRAPECREATORS_API_KEY", "service": "scrapecreators", "next": "Set SCRAPECREATORS_API_KEY. Research stays BLOCKED until the key exists.", "reason": "SCRAPECREATORS_API_KEY missing" if check_research().get("status") != "PASS" else None},
+        "Real Creative E2E": check_real_creative_e2e(),
+        "Real Distribution E2E": check_real_distribution_e2e(),
+        "Publication Persistence": check_publication_persistence(),
+        "Reconciliation": check_reconciliation(),
         "Analytics": check_analytics(),
         "Memory": check_memory(),
-        "Publish Gate": check_gate(),
-        "Control Plane": check_control_plane(),
     }
 
 
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") for key, value in checks.items()}
-    blocked = [name for name, status in statuses.items() if status == "BLOCKED"]
+    blocked = [name for name, status in statuses.items() if status != "PASS"]
     return {"ready": not blocked, "checks": statuses, "details": checks}
 
 
 def main() -> int:
     checks = run()
+    audit = write_e2e_audit(checks)
     payload = as_payload(checks)
     for name, status in payload["checks"].items():
         print(f"{name}: {status}")
-    print("OVERALL:", "PASS" if payload["ready"] else "BLOCKED")
-    print(json.dumps({"ready": payload["ready"], "checks": payload["checks"]}, default=str))
+    print("Overall:", "READY" if payload["ready"] else "BLOCKED")
+    print(json.dumps({"ready": payload["ready"], "overall": audit.get("overall"), "checks": payload["checks"], "blockers": audit.get("blockers")}, default=str))
     return 0 if payload["ready"] else 1
 
 

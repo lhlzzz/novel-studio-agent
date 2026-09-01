@@ -25,3 +25,9 @@ Do not guess URLs, models, or payloads.
 `cancel_task`, `get_result`.
 
 Claimed capabilities live in `models.yaml` with `verified: false`.
+
+## Typed contract
+
+Meiti-side request/response types live in `schemas.py`. HTTP endpoints stay empty
+in `models.yaml` until the official Lechuang contract is extracted. `verified: true`
+is forbidden without a real create/poll/result cycle.

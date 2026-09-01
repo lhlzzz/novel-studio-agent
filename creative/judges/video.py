@@ -55,4 +55,9 @@ class VideoJudge:
             judge_id=uuid4().hex,
             judge_provider=video.judge_provider,
             creative_run_id=video.creative_run_id,
+            passed=decision == "PASS",
+            violations=tuple(item for item in reasons if item.startswith("fail:")),
+            warnings=tuple(item for item in reasons if not item.startswith("fail:")),
+            latency_ms=float(getattr(video, "latency_ms", 0) or 0) + float(getattr(framed, "latency_ms", 0) or 0),
+            cost=getattr(video, "cost", None),
         )

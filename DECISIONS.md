@@ -17,3 +17,7 @@
 
 - **2026-09-01:** Creative runtime is durable: PostgreSQL CreativeRun/Task, worker lease, resume, replay from workflow snapshot.
 - **2026-09-01:** Per-node provider binding. Immutable assets. sha256 identity. Async worker.
+
+- **2026-09-01:** V4.3 production activation does not guess the Lechuang HTTP contract. Typed Meiti-side request/response objects exist; live calls stay BLOCKED until official endpoints are extracted.
+- **2026-09-01:** AI Gateway Vision Provider is independent of Lechuang. Invalid or missing gateway credentials fail closed.
+- **2026-09-01:** Research artifacts are first-class and never written as ContentPackage.

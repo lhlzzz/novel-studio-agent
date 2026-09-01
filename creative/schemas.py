@@ -468,6 +468,17 @@ class JudgeResult:
     judge_id: str | None = None
     judge_provider: str | None = None
     creative_run_id: str | None = None
+    passed: bool = False
+    violations: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    latency_ms: float = 0.0
+    cost: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision == "PASS" and not self.passed:
+            object.__setattr__(self, "passed", True)
+        if self.decision != "PASS" and self.passed:
+            object.__setattr__(self, "passed", False)
 
 
 @dataclass(frozen=True)
@@ -489,6 +500,8 @@ class GenerationUsage:
     duration_ms: float = 0.0
     estimated_cost: float = 0.0
     actual_cost: float = 0.0
+    request_id: str = ""
+    currency: str = "credits"
 
 
 @dataclass(frozen=True)

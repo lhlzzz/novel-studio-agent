@@ -117,4 +117,7 @@ class MockVisionJudgeProvider:
             asset_id=asset_id,
             judge_id=uuid4().hex,
             judge_provider=self.name,
+            passed=decision == "PASS",
+            violations=tuple(item for item in reasons if item.startswith("fail:")),
+            warnings=tuple(item for item in reasons if not item.startswith("fail:")),
         )

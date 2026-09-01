@@ -12,6 +12,8 @@ def test_judges_return_score_decision_reason(tmp_path):
     assert result.score >= 0
     assert result.judge_version
     assert result.judge_provider == "mock-vision"
+    assert result.passed is (result.decision == "PASS")
+    assert isinstance(result.violations, tuple)
     missing = VideoJudge(provider).judge(None)
     assert missing.decision == "FAIL"
     assert missing.reasons
@@ -24,3 +26,17 @@ def test_judge_without_provider_is_blocked(tmp_path):
     except JudgeBlocked:
         return
     raise AssertionError("expected JudgeBlocked")
+
+
+def test_gateway_vision_blocks_without_credentials(monkeypatch):
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("VISION_API_KEY", raising=False)
+    monkeypatch.delenv("XIAOMI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_GATEWAY_API_URL", raising=False)
+    monkeypatch.delenv("VISION_API_URL", raising=False)
+    monkeypatch.delenv("XIAOMI_BASE_URL", raising=False)
+    from creative.providers.judge.gateway import GatewayVisionProvider
+    provider = GatewayVisionProvider()
+    ready, reason = provider.live_ready()
+    assert ready is False
+    assert "AI_GATEWAY_API_KEY" in reason

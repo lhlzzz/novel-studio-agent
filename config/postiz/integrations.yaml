@@ -3,17 +3,52 @@
 provider: postiz
 accounts:
   - platform: x
+    provider: postiz
     integration_id:
+    account_id:
+    account_name:
     status: pending
+    capabilities: []
+    enabled: false
+    verified: false
+    verified_at:
   - platform: linkedin
+    provider: postiz
     integration_id:
+    account_id:
+    account_name:
     status: pending
+    capabilities: []
+    enabled: false
+    verified: false
+    verified_at:
   - platform: instagram
+    provider: postiz
     integration_id:
+    account_id:
+    account_name:
     status: pending
+    capabilities: []
+    enabled: false
+    verified: false
+    verified_at:
   - platform: youtube
+    provider: postiz
     integration_id:
+    account_id:
+    account_name:
     status: pending
+    capabilities: []
+    enabled: false
+    verified: false
+    verified_at:
   - platform: tiktok
+    provider: postiz
     integration_id:
+    account_id:
+    account_name:
     status: pending
+    capabilities: []
+    enabled: false
+    verified: false
+    verified_at:

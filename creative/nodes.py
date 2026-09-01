@@ -417,6 +417,8 @@ def _record_usage(store, run, task, provider, node, kind, prompt, payload, refer
         duration_ms=0.0,
         estimated_cost=estimate,
         actual_cost=credits,
+        request_id=task.task_id,
+        currency="credits",
     ))
 
 

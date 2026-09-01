@@ -42,3 +42,15 @@ def test_lechuang_timeout_and_error_do_not_guess():
         adapter.poll("missing")
     with pytest.raises((ProviderBlocked, UnsupportedCapability)):
         adapter.result("missing")
+
+
+def test_lechuang_http_errors_are_mapped():
+    client = LechuangClient(base_url="https://example.invalid", api_key="secret")
+    with pytest.raises(AuthError):
+        client.map_http_error(401, "{}")
+    with pytest.raises(RateLimited):
+        client.map_http_error(429, "{}", {"Retry-After": "1"})
+    with pytest.raises(ProviderBlocked):
+        client.map_http_error(500, "oops")
+    with pytest.raises(ProviderBlocked):
+        client.map_http_error(400, "bad")

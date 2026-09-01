@@ -79,6 +79,10 @@ class DistributionAgent:
                         status=str(item.get("status") or "pending"),
                         provider=provider,
                         account_name=str(item.get("account_name") or ""),
+                        account_id=str(item.get("account_id") or "").strip(),
+                        capabilities=tuple(item.get("capabilities") or ()),
+                        verified_at=item.get("verified_at"),
+                        enabled=bool(item.get("enabled") and item.get("verified")),
                     )
                 )
         return accounts
@@ -118,6 +122,10 @@ class DistributionAgent:
                 status="active",
                 provider=runtime.provider,
                 account_name=runtime.account_name,
+                account_id=getattr(runtime, "account_id", "") or "",
+                capabilities=tuple((getattr(capabilities, "records", {}) or {})),
+                verified_at=getattr(runtime, "verified_at", None),
+                enabled=True,
             )
         raise RuntimeError(f"no active verified account for platform={platform}")
 

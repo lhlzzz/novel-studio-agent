@@ -34,4 +34,8 @@ def retrieve(task: dict[str, Any] | None = None) -> dict[str, Any]:
         "platform_performance": [fact for fact in related if fact.namespace == "platform"],
         "brand_knowledge": [fact for fact in related if fact.namespace == "brand"],
         "query": query,
+        "creative": [fact for fact in related if fact.namespace == "creative"],
+        "publication": [fact for fact in related if fact.namespace == "publication"],
+        "analytics": [fact for fact in related if fact.namespace == "analytics"],
+        "research": [fact for fact in related if fact.namespace == "research"],
     }

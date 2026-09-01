@@ -21,6 +21,8 @@ def missing_asset(judge_type: str) -> JudgeResult:
         timestamp=utcnow(),
         judge_id=uuid4().hex,
         judge_provider="",
+        passed=False,
+        violations=("fail: missing asset",),
     )
 
 

@@ -122,6 +122,13 @@ def test_idempotent_publish():
     assert adapter.published is False
 
 
+def test_v43_doctor_keeps_unverified_live_paths_blocked():
+    from scripts.meiti_doctor import check_lechuang_contract, check_real_creative_e2e, check_real_distribution_e2e
+    assert check_lechuang_contract()["status"] == "BLOCKED"
+    assert check_real_creative_e2e()["status"] == "BLOCKED"
+    assert check_real_distribution_e2e()["status"] == "BLOCKED"
+
+
 def test_retry_policy():
     from integrations.providers.postiz.errors import RateLimitError, ServerError, ValidationError, classify_http_error
 
@@ -155,3 +162,11 @@ def test_no_secret_logging():
     assert logged["api_key"] == "[redacted]"
     source = (ROOT / "integrations/providers/postiz/client.py").read_text(encoding="utf-8")
     assert "print(self.api_key)" not in source
+
+
+def test_v43_doctor_keeps_unverified_live_paths_blocked():
+    from scripts.meiti_doctor import check_lechuang_contract, check_real_creative_e2e, check_real_distribution_e2e
+
+    assert check_lechuang_contract()["status"] == "BLOCKED"
+    assert check_real_creative_e2e()["status"] == "BLOCKED"
+    assert check_real_distribution_e2e()["status"] == "BLOCKED"

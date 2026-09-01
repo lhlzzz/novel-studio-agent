@@ -1,4 +1,4 @@
-# Meiti V4.2 State
+# Meiti V4.3 State
 
 Creative Runtime: PASS
 Lechuang: BLOCKED
@@ -19,3 +19,7 @@ Real Distribution E2E: BLOCKED
 - Lechuang live calls are BLOCKED until the official API schema is extracted.
 - Mock generation is tests-only and is never reported as live.
 - Postiz remains the distribution provider behind ProviderResolver and Gate.
+
+- V4.3 keeps the V4.2 architecture. Live READY requires real Lechuang, Vision, Postiz, Research, and E2E evidence.
+- AI Gateway is a separate vision provider from Lechuang. Credential reuse is allowed; identity is not merged.
+- Doctor reports BLOCKED instead of PASS when keys, contracts, or real publications are missing.

@@ -134,6 +134,10 @@ class IntegrationAccount:
     status: str = "pending"
     provider: str = ""
     account_name: str = ""
+    account_id: str = ""
+    capabilities: tuple[str, ...] = ()
+    verified_at: str | None = None
+    enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,14 @@ class Publication:
 
     def resolved_provider_post_id(self) -> str:
         return self.provider_post_id
+
+    @property
+    def remote_post_id(self) -> str:
+        return self.provider_post_id
+
+    @property
+    def remote_url(self) -> str | None:
+        return self.external_url
 
     def resolved_platform_object_id(self) -> str | None:
         return self.platform_object_id

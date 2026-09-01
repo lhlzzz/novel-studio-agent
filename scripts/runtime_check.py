@@ -14,14 +14,20 @@ from scripts.meiti_doctor import as_payload, run
 
 
 LIVE_KEYS = {
-    "Postiz",
-    "Postiz authentication",
-    "Postiz integrations",
-    "Postiz capabilities",
+    "Lechuang Contract",
+    "Lechuang Auth",
+    "Image Generation",
+    "Image-to-Image",
+    "Image-to-Video",
+    "Video Generation",
+    "Vision Provider",
+    "AI Judge",
+    "Postiz Runtime",
+    "Postiz Authentication",
+    "Integration Discovery",
     "Research",
-    "Lechuang",
-    "Lechuang authentication",
-    "Lechuang capabilities",
+    "Real Creative E2E",
+    "Real Distribution E2E",
 }
 
 

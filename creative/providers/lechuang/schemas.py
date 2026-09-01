@@ -28,3 +28,99 @@ class LechuangTaskView:
     provider_task_id: str
     status: str
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CreateImageRequest:
+    prompt: str
+    width: int | None = None
+    height: int | None = None
+    aspect_ratio: str | None = None
+    model: str | None = None
+    negative_prompt: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CreateImageToImageRequest:
+    prompt: str
+    source_asset_id: str | None = None
+    source_url: str | None = None
+    source_path: str | None = None
+    strength: float | None = None
+    model: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CreateVideoRequest:
+    prompt: str
+    duration_seconds: float | None = None
+    aspect_ratio: str | None = None
+    model: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CreateImageToVideoRequest:
+    prompt: str
+    source_asset_id: str | None = None
+    source_url: str | None = None
+    source_path: str | None = None
+    duration_seconds: float | None = None
+    model: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ProviderError:
+    code: str
+    message: str
+    retryable: bool = False
+    status_code: int | None = None
+    request_id: str | None = None
+    raw_response: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class CreateTaskResponse:
+    task_id: str
+    status: str
+    request_id: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskStatusResponse:
+    task_id: str
+    status: str
+    progress: float | None = None
+    error: ProviderError | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskResultResponse:
+    task_id: str
+    status: str
+    media_url: str | None = None
+    media_urls: tuple[str, ...] = ()
+    mime_type: str | None = None
+    request_id: str | None = None
+    credits: float | None = None
+    error: ProviderError | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
+
+
+REQUEST_TYPES = {
+    "generate_image": CreateImageRequest,
+    "text_to_image": CreateImageRequest,
+    "edit_image": CreateImageToImageRequest,
+    "image_to_image": CreateImageToImageRequest,
+    "generate_video": CreateVideoRequest,
+    "text_to_video": CreateVideoRequest,
+    "image_to_video": CreateImageToVideoRequest,
+}

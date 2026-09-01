@@ -10,10 +10,13 @@ from creative.errors import JudgeBlocked, ProviderBlocked
 class VisionJudgeResolver:
     def __init__(self, *, providers: dict[str, Any] | None = None, allow_mock: bool = False) -> None:
         self.allow_mock = allow_mock
-        self.providers = dict(providers or {})
+        self.providers = dict(providers) if providers is not None else {}
         if allow_mock and "mock-vision" not in self.providers:
             from creative.providers.judge.mock import MockVisionJudgeProvider
             self.providers["mock-vision"] = MockVisionJudgeProvider()
+        if providers is None and not allow_mock and "ai-gateway" not in self.providers:
+            from creative.providers.judge.gateway import GatewayVisionProvider
+            self.providers["ai-gateway"] = GatewayVisionProvider()
 
     def resolve(self):
         if self.allow_mock:

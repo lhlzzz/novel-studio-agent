@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-import time
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from creative.errors import AuthError, ProviderBlocked, RateLimited, UnsupportedCapability
+from creative.errors import AuthError, ProviderBlocked, RateLimited
 from creative.providers.lechuang.capabilities import load_models
 from creative.providers.lechuang.schemas import LechuangAuth
 
@@ -54,22 +55,83 @@ class LechuangClient:
             if "LECHUANG_API_KEY" in reason:
                 raise AuthError(reason, provider="lechuang")
             raise ProviderBlocked("lechuang", reason)
-        raise UnsupportedCapability(f"{method} {path}", provider="lechuang")
+        if not path:
+            raise ProviderBlocked("lechuang", "Lechuang endpoint missing from verified contract")
+        return self._http(method, path, **kwargs)
+
+    def map_http_error(self, status_code: int, body: str = "", headers: dict[str, str] | None = None) -> None:
+        if int(status_code) in {401, 403}:
+            raise AuthError("Lechuang authentication failed", provider="lechuang")
+        if int(status_code) == 429:
+            self.handle_rate_limit(status_code, headers)
+        if int(status_code) >= 500:
+            raise ProviderBlocked("lechuang", f"provider failure HTTP {status_code}", details={"retryable": True, "body": body[:300]})
+        raise ProviderBlocked("lechuang", f"invalid response HTTP {status_code}", details={"body": body[:300]})
+
+    def _endpoint(self, name: str, **fmt: Any) -> str:
+        endpoints = ((load_models().get("contract") or {}).get("endpoints") or {})
+        path = str(endpoints.get(name) or "").strip()
+        if not path:
+            raise ProviderBlocked("lechuang", f"Lechuang {name} endpoint missing from verified contract")
+        return path.format(**fmt)
+
+    def _require_ready(self) -> None:
+        ready, reason = self.live_ready()
+        if ready:
+            return
+        if "LECHUANG_API_KEY" in reason:
+            raise AuthError(reason, provider="lechuang")
+        raise ProviderBlocked("lechuang", reason)
+
+    def _http(self, method: str, path: str, **kwargs: Any) -> Any:
+        import json
+        url = path if path.startswith("http") else f"{self.base_url}{path}"
+        payload = kwargs.get("json")
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        request = Request(url, data=data, headers=headers, method=method.upper())
+        try:
+            with urlopen(request, timeout=30) as response:
+                raw = response.read().decode("utf-8")
+                if not raw:
+                    raise ProviderBlocked("lechuang", "missing result")
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    raise ProviderBlocked("lechuang", "invalid response") from exc
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace") if hasattr(exc, "read") else str(exc)
+            headers = {key: value for key, value in (exc.headers.items() if exc.headers else [])}
+            self.map_http_error(exc.code, body, headers)
+            raise ProviderBlocked("lechuang", f"invalid response HTTP {exc.code}")
+        except TimeoutError as exc:
+            raise ProviderBlocked("lechuang", "HTTP timeout", details={"retryable": True}) from exc
+        except URLError as exc:
+            raise ProviderBlocked("lechuang", f"provider failure: {exc.reason}", details={"retryable": True}) from exc
 
     def create_task(self, kind: str, payload: dict[str, Any]) -> Any:
-        return self.request("POST", "/tasks", json={"kind": kind, "payload": payload})
+        self._require_ready()
+        return self.request("POST", self._endpoint("create_task"), json={"kind": kind, "payload": payload})
 
     def get_task(self, provider_task_id: str) -> Any:
-        return self.request("GET", f"/tasks/{provider_task_id}")
+        self._require_ready()
+        return self.request("GET", self._endpoint("get_task", task_id=provider_task_id))
 
     def cancel_task(self, provider_task_id: str) -> Any:
-        return self.request("POST", f"/tasks/{provider_task_id}/cancel")
+        self._require_ready()
+        return self.request("POST", self._endpoint("cancel_task", task_id=provider_task_id))
 
     def get_result(self, provider_task_id: str) -> Any:
-        return self.request("GET", f"/tasks/{provider_task_id}/result")
+        self._require_ready()
+        return self.request("GET", self._endpoint("get_result", task_id=provider_task_id))
 
     def upload_asset(self, payload: dict[str, Any]) -> Any:
-        return self.request("POST", "/assets", json=payload)
+        self._require_ready()
+        return self.request("POST", self._endpoint("upload"), json=payload)
 
     def handle_rate_limit(self, status_code: int, headers: dict[str, str] | None = None) -> None:
         if int(status_code) != 429:
