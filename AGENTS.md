@@ -1,4 +1,4 @@
-# Meiti V4 Agent Operating Contract
+# Meiti V4.1 Agent Operating Contract
 
 Meiti is an AI Creator Operating System. Meiti owns Intelligence, Strategy,
 Content, Media, Creative Workflow, Memory, Analytics, Commerce, Distribution,
@@ -16,6 +16,12 @@ Governance, and Integrations.
 
 `All generated assets are immutable.`
 
+`Assets are content-addressed by sha256.`
+
+`All async generation is durable.`
+
+`Agent selects workflow; workflow executes nodes.`
+
 `All generation inputs are reproducible.`
 
 `Provider capabilities must be verified.`
@@ -24,7 +30,11 @@ Governance, and Integrations.
 
 `Distribution is downstream of ContentPackage.`
 
+`Judge never publishes.`
+
 `Creative generation never directly publishes.`
+
+`Creative never publishes.`
 
 `Platform integration never becomes an Agent.`
 

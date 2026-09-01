@@ -19,7 +19,7 @@ def requirement_text(requirement: dict[str, Any]) -> str:
     return " ".join(str(item).lower() for item in parts if item)
 
 
-def resolve_from_requirement(requirement: dict[str, Any]) -> CreativeWorkflow:
+def resolve_from_requirement(requirement: dict[str, Any], *, performances: list[dict[str, Any]] | None = None) -> CreativeWorkflow:
     explicit = requirement.get("workflow_id")
     if explicit:
         return resolve_workflow(str(explicit))
@@ -38,7 +38,16 @@ def resolve_from_requirement(requirement: dict[str, Any]) -> CreativeWorkflow:
         return resolve_workflow("character-consistency-v1")
     if "lifestyle" in text or "生活" in text or requirement.get("face_visible") is False:
         return resolve_workflow("creator-lifestyle-v1")
-    return resolve_workflow("creator-image-to-video-v1")
+    selected = resolve_workflow("creator-image-to-video-v1")
+    if performances:
+        ranked = WorkflowRanker().rank(performances)
+        for item in ranked:
+            if item.get("sample_size", 99) and item.get("workflow_id"):
+                try:
+                    return resolve_workflow(str(item["workflow_id"]))
+                except Exception:
+                    continue
+    return selected
 
 
 class WorkflowRanker:

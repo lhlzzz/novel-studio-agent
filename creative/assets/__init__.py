@@ -5,10 +5,9 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from typing import Any, Callable
 
-from creative.schemas import ASSET_TYPES, Character, MediaAsset, VisualDNA, utcnow
+from creative.schemas import ASSET_TYPES, Character, MediaAsset, VisualDNA
 
 MIN_PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -44,6 +43,7 @@ def persist_bytes(
     workflow_id: str | None = None,
     workflow_version: str | None = None,
     creative_run_id: str | None = None,
+    prompt_id: str | None = None,
     character_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> MediaAsset:
@@ -71,6 +71,7 @@ def persist_bytes(
         workflow_id=workflow_id,
         workflow_version=workflow_version,
         creative_run_id=creative_run_id,
+        prompt_id=prompt_id,
         character_id=character_id,
         size=len(data),
         metadata=dict(metadata or {}),
@@ -89,13 +90,19 @@ class AssetStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.assets: dict[str, MediaAsset] = {}
         self.characters: dict[str, Character] = {}
+        self._persist_asset: Callable[[MediaAsset], MediaAsset] | None = None
+        self._persist_character: Callable[[Character], Character] | None = None
+        self._load_character: Callable[[str], Character | None] | None = None
 
-    def put(self, asset: MediaAsset) -> MediaAsset:
+    def put(self, asset: MediaAsset, *, persist: bool = True) -> MediaAsset:
         existing = self.assets.get(asset.sha256)
         canonical = existing or asset
+        if persist and self._persist_asset is not None and existing is None:
+            canonical = self._persist_asset(canonical) or canonical
         self.assets[canonical.sha256] = canonical
         self.assets[canonical.asset_id] = canonical
-        self.assets[asset.asset_id] = asset if asset.asset_id != canonical.asset_id else canonical
+        if asset.asset_id != canonical.asset_id:
+            self.assets[asset.asset_id] = canonical
         return canonical
 
     def get(self, asset_id: str) -> MediaAsset | None:
@@ -103,10 +110,20 @@ class AssetStore:
 
     def put_character(self, character: Character) -> Character:
         self.characters[character.character_id] = character
+        if self._persist_character is not None:
+            return self._persist_character(character)
         return character
 
     def get_character(self, character_id: str) -> Character | None:
-        return self.characters.get(character_id)
+        cached = self.characters.get(character_id)
+        if cached is not None:
+            return cached
+        if self._load_character is not None:
+            loaded = self._load_character(character_id)
+            if loaded is not None:
+                self.characters[character_id] = loaded
+            return loaded
+        return None
 
     def save_generated(
         self,
@@ -134,5 +151,27 @@ def character_from_dict(data: dict[str, Any]) -> Character:
     )
 
 
-def new_placeholder_id() -> str:
-    return uuid4().hex
+def media_asset_from_dict(data: dict[str, Any]) -> MediaAsset:
+    return MediaAsset(
+        asset_id=str(data["asset_id"]),
+        type=str(data.get("type") or "image"),
+        path=str(data.get("path") or ""),
+        sha256=str(data.get("sha256") or data["asset_id"]),
+        width=data.get("width"),
+        height=data.get("height"),
+        duration=data.get("duration"),
+        fps=data.get("fps"),
+        mime_type=str(data.get("mime_type") or ""),
+        workflow_id=data.get("workflow_id"),
+        workflow_version=data.get("workflow_version"),
+        creative_run_id=data.get("creative_run_id"),
+        prompt_id=data.get("prompt_id"),
+        character_id=data.get("character_id"),
+        size=int(data.get("size") or 0),
+        metadata=dict(data.get("metadata") or {}),
+        technical_score=data.get("technical_score"),
+        visual_score=data.get("visual_score"),
+        content_score=data.get("content_score"),
+        platform_score=data.get("platform_score"),
+        overall_score=data.get("overall_score"),
+    )

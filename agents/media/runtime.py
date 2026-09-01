@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+from creative.schemas import CREATIVE_MEMORY_CODES
 from creative.workflow.engine import CreativeWorkflowEngine
 from creative.workflow.resolver import resolve_from_requirement
 from memory.writeback import write_patterns
@@ -57,17 +58,19 @@ class MediaAgent:
                 title=str(task.get("title") or requirement.get("brief") or "Untitled"),
                 body=str(task.get("body") or requirement.get("brief") or ""),
             )
-        write_patterns({
-            "kind": "workflow",
-            "successful_pattern" if run.status == "SUCCEEDED" else "failed_pattern": {
-                "workflow_id": run.workflow_id,
-                "workflow_version": run.workflow_version,
-                "status": run.status,
-                "model": "mock" if allow_mock else "lechuang",
-                "character_id": requirement.get("character_id"),
-            },
-            "confidence": 0.6 if run.status == "SUCCEEDED" else 0.4,
-        })
+        code = run.error_code or ("QUALITY_FAILED" if run.status == "BLOCKED" else "")
+        if run.status == "SUCCEEDED" or code in CREATIVE_MEMORY_CODES:
+            write_patterns({
+                "kind": "workflow",
+                "successful_pattern" if run.status == "SUCCEEDED" else "failed_pattern": {
+                    "workflow_id": run.workflow_id,
+                    "workflow_version": run.workflow_version,
+                    "status": run.status,
+                    "error_code": code,
+                    "character_id": requirement.get("character_id"),
+                },
+                "confidence": 0.6 if run.status == "SUCCEEDED" else 0.4,
+            })
         return {
             "agent": self.name,
             "valid": run.status == "SUCCEEDED",

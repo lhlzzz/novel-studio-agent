@@ -37,6 +37,11 @@ from scripts.db.models import (
     MetricSnapshotRecord,
     PublicationRecord,
     PublishGate,
+    CreativeRunRecord,
+    CreativeTaskRecord,
+    MediaAssetRecord,
+    CharacterRecord,
+    JudgeResultRecord,
 )
 
 PROJECT_NAME = "meiti"
@@ -64,6 +69,11 @@ BASE_TABLE_MODELS = (
     ("publications", PublicationRecord),
     ("media_uploads", MediaUploadRecord),
     ("metric_snapshots", MetricSnapshotRecord),
+    ("creative_runs", CreativeRunRecord),
+    ("creative_tasks", CreativeTaskRecord),
+    ("media_assets", MediaAssetRecord),
+    ("characters", CharacterRecord),
+    ("judge_results", JudgeResultRecord),
 )
 
 

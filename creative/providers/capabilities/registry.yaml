@@ -30,5 +30,5 @@ models:
     aspect_ratio: ["9:16", "16:9", "1:1"]
     duration: ["4", "8", "15"]
     async: true
-    verified: true
+    verified: false
     capabilities: [text_to_image, image_to_image, text_to_video, image_to_video]

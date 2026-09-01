@@ -1,4 +1,4 @@
-# Meiti V4 Next Action
+# Meiti V4.1 Next Action
 
 **GOAL:** Extract the official Lechuang API contract from the operator key/docs
 surface, then verify one image and one image-to-video task without guessing.

@@ -17,7 +17,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import JSON as SA_JSON
 from sqlalchemy.dialects.postgresql import JSONB
+
+JSONType = SA_JSON().with_variant(JSONB(), "postgresql")
 from sqlalchemy.types import UserDefinedType
 
 from scripts.db.engine import Base
@@ -563,3 +566,285 @@ class MetricSnapshotRecord(Base):
         Index("idx_meiti_metric_snapshots_publication", "publication_id"),
         Index("idx_meiti_metric_snapshots_observed", "observed_at"),
     )
+
+
+CREATIVE_TABLE_NAMES = (
+    "creative_workflows",
+    "creative_runs",
+    "creative_tasks",
+    "creative_node_outputs",
+    "media_assets",
+    "characters",
+    "prompt_assets",
+    "generation_usage",
+    "workflow_performance",
+    "judge_results",
+    "creative_events",
+)
+
+
+class CreativeWorkflowRecord(Base):
+    """Immutable workflow version snapshot."""
+
+    __tablename__ = "creative_workflows"
+
+    workflow_id = Column(String(255), primary_key=True)
+    version = Column(String(80), primary_key=True)
+    name = Column(Text, nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    category = Column(String(80), nullable=False, default="video")
+    inputs = Column(JSONType, nullable=False, default=dict)
+    nodes = Column(JSONType, nullable=False, default=list)
+    edges = Column(JSONType, nullable=False, default=list)
+    variables = Column(JSONType, nullable=False, default=dict)
+    quality_policy = Column(JSONType, nullable=False, default=dict)
+    outputs = Column(JSONType, nullable=False, default=dict)
+    snapshot = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CreativeRunRecord(Base):
+    __tablename__ = "creative_runs"
+
+    run_id = Column(String(255), primary_key=True)
+    workflow_id = Column(String(255), nullable=False)
+    workflow_version = Column(String(80), nullable=False)
+    status = Column(String(40), nullable=False, default="DRAFT")
+    inputs = Column(JSONType, nullable=False, default=dict)
+    outputs = Column(JSONType, nullable=False, default=dict)
+    estimated_cost = Column(Numeric(18, 6), nullable=False, default=0)
+    actual_cost = Column(Numeric(18, 6), nullable=False, default=0)
+    budget = Column(Numeric(18, 6))
+    idempotency_key = Column(String(255), unique=True)
+    replay_of = Column(String(255))
+    cursor = Column(Integer, nullable=False, default=0)
+    node_outputs = Column(JSONType, nullable=False, default=dict)
+    judge_results = Column(JSONType, nullable=False, default=list)
+    quality = Column(JSONType, nullable=False, default=dict)
+    error = Column(Text)
+    error_code = Column(String(80))
+    workflow_snapshot = Column(JSONType, nullable=False, default=dict)
+    asset_ids = Column(JSONType, nullable=False, default=list)
+    task_ids = Column(JSONType, nullable=False, default=list)
+    selected_asset_id = Column(String(255))
+    selection_reason = Column(Text)
+    selection_score = Column(Numeric(18, 6))
+    worker_id = Column(String(255))
+    lease_until = Column(DateTime)
+    heartbeat_at = Column(DateTime)
+    request_id = Column(String(255), nullable=False, default="")
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_creative_runs_status", "status"),
+        Index("idx_creative_runs_workflow", "workflow_id", "workflow_version"),
+        Index("idx_creative_runs_lease", "lease_until"),
+    )
+
+
+class CreativeTaskRecord(Base):
+    __tablename__ = "creative_tasks"
+
+    task_id = Column(String(255), primary_key=True)
+    run_id = Column(String(255), ForeignKey("creative_runs.run_id", ondelete="CASCADE"), nullable=False)
+    node_id = Column(String(255), nullable=False)
+    provider = Column(String(120), nullable=False)
+    provider_task_id = Column(String(255), nullable=False, default="")
+    kind = Column(String(80), nullable=False, default="")
+    status = Column(String(40), nullable=False, default="QUEUED")
+    payload = Column(JSONType, nullable=False, default=dict)
+    result = Column(JSONType, nullable=False, default=dict)
+    poll_count = Column(Integer, nullable=False, default=0)
+    attempt = Column(Integer, nullable=False, default=0)
+    execution_key = Column(String(255), nullable=False, default="")
+    error = Column(Text)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    timeout_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("execution_key", name="uq_creative_task_execution"),
+        Index("idx_creative_tasks_run", "run_id"),
+        Index("idx_creative_tasks_status", "status"),
+        Index("idx_creative_tasks_provider_task", "provider_task_id"),
+    )
+
+
+class CreativeNodeOutputRecord(Base):
+    __tablename__ = "creative_node_outputs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(255), ForeignKey("creative_runs.run_id", ondelete="CASCADE"), nullable=False)
+    node_id = Column(String(255), nullable=False)
+    output = Column(JSONType, nullable=False, default=dict)
+    assets = Column(JSONType, nullable=False, default=list)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_id", name="uq_creative_node_output"),
+        Index("idx_creative_node_outputs_run", "run_id"),
+    )
+
+
+class MediaAssetRecord(Base):
+    __tablename__ = "media_assets"
+
+    asset_id = Column(String(255), primary_key=True)
+    sha256 = Column(String(64), nullable=False, unique=True)
+    type = Column(String(40), nullable=False)
+    path = Column(Text, nullable=False)
+    mime_type = Column(String(120), nullable=False, default="")
+    size = Column(Integer, nullable=False, default=0)
+    width = Column(Integer)
+    height = Column(Integer)
+    duration = Column(Numeric(18, 6))
+    fps = Column(Numeric(18, 6))
+    workflow_id = Column(String(255))
+    workflow_version = Column(String(80))
+    creative_run_id = Column(String(255))
+    prompt_id = Column(String(255))
+    character_id = Column(String(255))
+    metadata_json = Column("metadata", JSONType, nullable=False, default=dict)
+    technical_score = Column(Numeric(18, 6))
+    visual_score = Column(Numeric(18, 6))
+    content_score = Column(Numeric(18, 6))
+    platform_score = Column(Numeric(18, 6))
+    overall_score = Column(Numeric(18, 6))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_media_assets_run", "creative_run_id"),
+        Index("idx_media_assets_type", "type"),
+    )
+
+
+class CharacterRecord(Base):
+    __tablename__ = "characters"
+
+    character_id = Column(String(255), primary_key=True)
+    name = Column(Text, nullable=False)
+    visual_dna = Column(JSONType, nullable=False, default=dict)
+    behavior_dna = Column(Text, nullable=False, default="")
+    style_dna = Column(Text, nullable=False, default="")
+    reference_assets = Column(JSONType, nullable=False, default=list)
+    voice_assets = Column(JSONType, nullable=False, default=list)
+    notes = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PromptAssetRecord(Base):
+    __tablename__ = "prompt_assets"
+
+    prompt_id = Column(String(255), primary_key=True)
+    version = Column(String(80), nullable=False, default="v1")
+    family_id = Column(String(255), nullable=False, default="")
+    prompt = Column(Text, nullable=False)
+    negative_prompt = Column(Text, nullable=False, default="")
+    references = Column(JSONType, nullable=False, default=list)
+    model = Column(String(120), nullable=False, default="")
+    provider = Column(String(120), nullable=False, default="")
+    parameters = Column(JSONType, nullable=False, default=dict)
+    workflow_id = Column(String(255), nullable=False, default="")
+    workflow_version = Column(String(80), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_prompt_assets_family", "family_id"),
+        Index("idx_prompt_assets_workflow", "workflow_id", "workflow_version"),
+    )
+
+
+class GenerationUsageRecord(Base):
+    __tablename__ = "generation_usage"
+
+    usage_id = Column(String(255), primary_key=True)
+    provider = Column(String(120), nullable=False)
+    model = Column(String(120), nullable=False, default="")
+    task = Column(String(80), nullable=False)
+    input = Column(JSONType, nullable=False, default=dict)
+    output = Column(JSONType, nullable=False, default=dict)
+    credits_estimated = Column(Numeric(18, 6), nullable=False, default=0)
+    credits_actual = Column(Numeric(18, 6), nullable=False, default=0)
+    status = Column(String(40), nullable=False, default="")
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+    run_id = Column(String(255), nullable=False, default="")
+    node_id = Column(String(255), nullable=False, default="")
+
+    __table_args__ = (
+        Index("idx_generation_usage_run", "run_id"),
+        Index("idx_generation_usage_provider", "provider"),
+    )
+
+
+class WorkflowPerformanceRecord(Base):
+    __tablename__ = "workflow_performance"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_id = Column(String(255), nullable=False)
+    version = Column(String(80), nullable=False)
+    run_id = Column(String(255), nullable=False, default="")
+    asset_id = Column(String(255), nullable=False, default="")
+    publication_id = Column(String(255), nullable=False, default="")
+    platform = Column(String(80), nullable=False, default="")
+    provider = Column(String(120), nullable=False, default="")
+    model = Column(String(120), nullable=False, default="")
+    character = Column(String(255), nullable=False, default="")
+    scene = Column(Text, nullable=False, default="")
+    motion = Column(Text, nullable=False, default="")
+    camera = Column(Text, nullable=False, default="")
+    duration = Column(Numeric(18, 6))
+    quality_score = Column(Numeric(18, 6))
+    engagement = Column(Numeric(18, 6))
+    conversion = Column(Numeric(18, 6))
+    cost = Column(Numeric(18, 6))
+    latency = Column(Numeric(18, 6))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_workflow_performance_workflow", "workflow_id", "version"),
+        Index("idx_workflow_performance_run", "run_id"),
+    )
+
+
+class JudgeResultRecord(Base):
+    __tablename__ = "judge_results"
+
+    judge_id = Column(String(255), primary_key=True)
+    asset_id = Column(String(255))
+    creative_run_id = Column(String(255), nullable=False, default="")
+    judge_type = Column(String(80), nullable=False)
+    judge_provider = Column(String(120), nullable=False, default="")
+    judge_model = Column(String(120), nullable=False, default="")
+    judge_version = Column(String(80), nullable=False, default="")
+    score = Column(Numeric(18, 6), nullable=False, default=0)
+    breakdown = Column(JSONType, nullable=False, default=dict)
+    reasons = Column(JSONType, nullable=False, default=list)
+    decision = Column(String(40), nullable=False)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_judge_results_run", "creative_run_id"),
+        Index("idx_judge_results_asset", "asset_id"),
+    )
+
+
+class CreativeEventRecord(Base):
+    __tablename__ = "creative_events"
+
+    event_id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(255), nullable=False, default="")
+    event_type = Column(String(80), nullable=False)
+    payload = Column(JSONType, nullable=False, default=dict)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_creative_events_run", "run_id"),
+        Index("idx_creative_events_type", "event_type"),
+    )
+

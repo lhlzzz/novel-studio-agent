@@ -8,7 +8,7 @@ from creative.errors import ProviderBlocked, UnsupportedCapability
 from creative.providers.base import CapabilityMixin
 from creative.providers.lechuang.capabilities import claimed_capabilities, load_models
 from creative.providers.lechuang.client import LechuangClient
-from creative.schemas import ProviderTask
+from creative.schemas import ProviderQuote, ProviderTask
 
 METHOD_TO_CAPABILITY = {
     "generate_text": "text_to_text",
@@ -28,12 +28,31 @@ class LechuangAdapter(CapabilityMixin):
         self.client = client or LechuangClient()
         claimed = {item.name for item in claimed_capabilities()}
         self.supported = frozenset(claimed)
+        self.verified_capabilities = frozenset(
+            item.name for item in claimed_capabilities() if item.verified
+        )
 
     def live_ready(self) -> tuple[bool, str]:
         return self.client.live_ready()
 
     def authenticate(self) -> bool:
         return self.live_ready()[0]
+
+    def has_verified(self, capability: str) -> bool:
+        return capability in self.verified_capabilities
+
+    def estimate(self, kind: str, payload: dict[str, Any] | None = None) -> float:
+        quote = self.quote(kind, payload)
+        return float(quote.credits)
+
+    def quote(self, kind: str, payload: dict[str, Any] | None = None) -> ProviderQuote:
+        models = load_models()
+        credits = 1.0 if "image" in kind else 8.0
+        for spec in (models.get("models") or {}).values():
+            if kind in (spec.get("capabilities") or []) or METHOD_TO_CAPABILITY.get(kind) in (spec.get("capabilities") or []):
+                credits = float(spec.get("cost_credits") or credits)
+                break
+        return ProviderQuote(credits=credits, mock=False, provider=self.name, parameters={"kind": kind, "source": "claimed"})
 
     def _blocked_or_unsupported(self, method: str) -> None:
         ready, reason = self.live_ready()
@@ -42,49 +61,42 @@ class LechuangAdapter(CapabilityMixin):
         capability = METHOD_TO_CAPABILITY.get(method, method)
         models = load_models()
         verified = bool((models.get("contract") or {}).get("verified"))
-        if capability not in self.supported or not verified:
+        if capability not in self.supported or not verified or capability not in self.verified_capabilities:
             raise UnsupportedCapability(capability, provider="lechuang")
 
     def create_task(self, kind: str, payload: dict[str, Any]) -> ProviderTask:
         self._blocked_or_unsupported(kind)
-        raise UnsupportedCapability(kind, provider="lechuang")
+        return self.client.create_task(kind, payload)
 
     def get_task(self, provider_task_id: str) -> ProviderTask:
         self._blocked_or_unsupported("get_task")
-        raise UnsupportedCapability("get_task", provider="lechuang")
+        return self.client.get_task(provider_task_id)
 
     def cancel_task(self, provider_task_id: str) -> ProviderTask:
         self._blocked_or_unsupported("cancel_task")
-        raise UnsupportedCapability("cancel_task", provider="lechuang")
+        return self.client.cancel_task(provider_task_id)
 
     def get_result(self, provider_task_id: str) -> dict[str, Any]:
         self._blocked_or_unsupported("get_result")
-        raise UnsupportedCapability("get_result", provider="lechuang")
+        return self.client.get_result(provider_task_id)
 
     def generate_text(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("generate_text")
-        raise UnsupportedCapability("text_to_text", provider="lechuang")
+        return self.create_task("generate_text", payload)
 
     def generate_image(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("generate_image")
-        raise UnsupportedCapability("text_to_image", provider="lechuang")
+        return self.create_task("generate_image", payload)
 
     def edit_image(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("edit_image")
-        raise UnsupportedCapability("image_to_image", provider="lechuang")
+        return self.create_task("edit_image", payload)
 
     def generate_video(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("generate_video")
-        raise UnsupportedCapability("text_to_video", provider="lechuang")
+        return self.create_task("generate_video", payload)
 
     def extend_video(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("extend_video")
-        raise UnsupportedCapability("video_extend", provider="lechuang")
+        return self.create_task("extend_video", payload)
 
     def edit_video(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("edit_video")
-        raise UnsupportedCapability("video_edit", provider="lechuang")
+        return self.create_task("edit_video", payload)
 
     def upload_asset(self, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported("upload_asset")
-        raise UnsupportedCapability("upload_asset", provider="lechuang")
+        return self.create_task("upload_asset", payload)

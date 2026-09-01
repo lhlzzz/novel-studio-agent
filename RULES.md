@@ -1,4 +1,4 @@
-# Meiti V4 Rules
+# Meiti V4.1 Rules
 
 Meiti is the single owner of the AI Creator Operating System.
 Platforms are integrations and adapters only; they are never agents,
@@ -36,3 +36,11 @@ workspaces, or independent business databases.
 Lechuang is a generation provider. Postiz is a distribution provider.
 Meiti owns business intelligence, content, memory, strategy, commerce,
 analytics, gates, and creative workflows.
+
+29. No production passthrough nodes.
+30. No in-memory source of truth.
+31. No fake AI judge.
+32. No fake render.
+33. No guessed provider contract.
+34. No provider fallback in production.
+35. No data loss across process restart.

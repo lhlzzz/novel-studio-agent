@@ -61,6 +61,10 @@ nodes:
   type: judge
   config:
     judge: image
+- node_id: identity
+  type: judge
+  config:
+    judge: identity
 - node_id: video
   type: video_generate
   provider: lechuang
@@ -104,6 +108,10 @@ edges:
   target_node: image_qa
   target_input: asset
 - source_node: image_qa
+  source_output: output
+  target_node: identity
+  target_input: asset
+- source_node: identity
   source_output: output
   target_node: video
   target_input: reference

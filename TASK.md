@@ -1,4 +1,4 @@
-# Meiti V4 Task
+# Meiti V4.1 Task
 
 **GOAL:** Operate Meiti as one AI Creator Operating System with research,
 strategy, creative workflows, judged generation, governed distribution, and

@@ -38,17 +38,23 @@ def snapshot() -> dict[str, Any]:
         "queue": "services.queue",
     }
     research = credential_state()
+    creative = _creative()
+    providers = sorted({item["provider"] for item in integrations} | set(creative.get("providers") or []))
     return {
         "agents": agents,
         "integrations": integrations,
         "accounts": [item for item in integrations if item["enabled"]],
-        "providers": sorted({item["provider"] for item in integrations}),
+        "providers": providers,
         "jobs": database.get("jobs", []),
         "failures": database.get("failures", []),
         "analytics": database.get("analytics", []),
         "research": {"available": research.available, "authenticated": research.authenticated},
         "workers": workers,
         "database": {"ok": database.get("ok", False), "error": database.get("error")},
+        "creative_runs": creative.get("runs", []),
+        "creative_tasks": creative.get("tasks", []),
+        "assets": creative.get("assets", []),
+        "judges": creative.get("judges", []),
     }
 
 
@@ -65,3 +71,21 @@ def _database() -> dict[str, Any]:
         return {"ok": True, "jobs": jobs, "failures": failures, "analytics": analytics}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "jobs": [], "failures": [], "analytics": []}
+
+
+def _creative() -> dict[str, Any]:
+    try:
+        from creative.providers.lechuang.adapter import LechuangAdapter
+        from creative.store import CreativeStore
+        store = CreativeStore.production()
+        adapter = LechuangAdapter()
+        ready, reason = adapter.live_ready()
+        return {
+            "runs": store.list_runs(),
+            "tasks": [item for run in store.list_runs() for item in store.list_tasks(run.run_id)],
+            "assets": store.list_assets(),
+            "judges": [{"name": "vision", "ready": ready, "reason": reason}],
+            "providers": ["lechuang", "postiz"],
+        }
+    except Exception as exc:
+        return {"runs": [], "tasks": [], "assets": [], "judges": [{"name": "vision", "ready": False, "reason": str(exc)}], "providers": ["lechuang"]}

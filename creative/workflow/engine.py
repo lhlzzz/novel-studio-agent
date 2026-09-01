@@ -8,60 +8,32 @@ from typing import Any
 from uuid import uuid4
 
 from creative.assets import AssetStore
-from creative.errors import BudgetExceeded, IllegalRunTransition, ProviderBlocked, QualityBlocked
+from creative.errors import (
+    BudgetExceeded,
+    IllegalRunTransition,
+    JudgeBlocked,
+    ProviderBlocked,
+    QualityBlocked,
+    TechnicalMediaError,
+    WorkflowInvalid,
+    failure_code,
+    user_message,
+)
 from creative.judge import RegenerationStrategy
 from creative.nodes import estimate_workflow_cost, execute_node, quality_gate
+from creative.providers.judge.resolver import VisionJudgeResolver
 from creative.providers.resolver import GenerationProviderResolver
-from creative.schemas import RUN_TRANSITIONS, CreativeRun, CreativeWorkflow, MediaAsset, to_plain, utcnow
-from creative.workflow.registry import resolve_workflow
+from creative.schemas import RUN_TRANSITIONS, CreativeRun, CreativeWorkflow, MediaAsset, map_task_status, to_plain, utcnow
+from creative.store import CreativeStore
+from creative.validation import topo_sort, validate_workflow
+from creative.workflow.registry import resolve_workflow, workflow_from_dict
 from creative.workflow.resolver import resolve_from_requirement
+from governance.observability import log_event, new_request_id
 
 
 def make_idempotency_key(workflow_id: str, version: str, inputs: dict[str, Any]) -> str:
     payload = json.dumps({"workflow_id": workflow_id, "version": version, "inputs": inputs}, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-class CreativeStore:
-    def __init__(self, *, assets: AssetStore | None = None) -> None:
-        self.assets = assets or AssetStore()
-        self.runs: dict[str, CreativeRun] = {}
-        self.tasks: dict[str, Any] = {}
-        self.usage: dict[str, Any] = {}
-        self.prompts: dict[str, Any] = {}
-        self.performance: list[Any] = []
-        self.by_idempotency: dict[str, str] = {}
-
-    def save_run(self, run: CreativeRun) -> CreativeRun:
-        self.runs[run.run_id] = run
-        if run.idempotency_key:
-            self.by_idempotency[run.idempotency_key] = run.run_id
-        return run
-
-    def get_run(self, run_id: str) -> CreativeRun | None:
-        return self.runs.get(run_id)
-
-    def get_by_idempotency(self, key: str) -> CreativeRun | None:
-        run_id = self.by_idempotency.get(key)
-        return self.runs.get(run_id) if run_id else None
-
-    def save_task(self, task) -> None:
-        self.tasks[task.task_id] = task
-
-    def list_open_tasks(self, run_id: str):
-        return [item for item in self.tasks.values() if item.run_id == run_id and item.status in {"queued", "running"}]
-
-    def save_usage(self, usage) -> None:
-        self.usage[usage.usage_id] = usage
-
-    def save_prompt(self, prompt) -> None:
-        self.prompts[prompt.prompt_id] = prompt
-
-    def list_runs(self, status: str | None = None) -> list[CreativeRun]:
-        runs = list(self.runs.values())
-        if status:
-            return [item for item in runs if item.status == status]
-        return runs
 
 
 def transition(run: CreativeRun, status: str) -> CreativeRun:
@@ -76,30 +48,10 @@ def transition(run: CreativeRun, status: str) -> CreativeRun:
     return run
 
 
-def _topo(workflow: CreativeWorkflow) -> list:
-    inbound = {node.node_id: 0 for node in workflow.nodes}
-    outgoing: dict[str, list[str]] = {node.node_id: [] for node in workflow.nodes}
-    for edge in workflow.edges:
-        if edge.target_node in inbound:
-            inbound[edge.target_node] += 1
-        outgoing.setdefault(edge.source_node, []).append(edge.target_node)
-    ready = [node for node in workflow.nodes if inbound[node.node_id] == 0]
-    ordered = []
-    seen: set[str] = set()
-    while ready:
-        node = ready.pop(0)
-        if node.node_id in seen:
-            continue
-        seen.add(node.node_id)
-        ordered.append(node)
-        for target in outgoing.get(node.node_id, []):
-            inbound[target] -= 1
-            if inbound[target] == 0:
-                ready.extend([item for item in workflow.nodes if item.node_id == target])
-    if len(ordered) != len(workflow.nodes):
-        remaining = [node for node in workflow.nodes if node.node_id not in seen]
-        ordered.extend(remaining)
-    return ordered
+def workflow_from_snapshot(snapshot: dict[str, Any] | None, fallback_id: str, fallback_version: str) -> CreativeWorkflow:
+    if snapshot:
+        return workflow_from_dict(snapshot)
+    return resolve_workflow(fallback_id, fallback_version)
 
 
 class CreativeWorkflowEngine:
@@ -109,16 +61,30 @@ class CreativeWorkflowEngine:
         store: CreativeStore | None = None,
         resolver: GenerationProviderResolver | None = None,
         allow_mock: bool = False,
+        worker_id: str | None = None,
+        judge_resolver: VisionJudgeResolver | None = None,
     ) -> None:
         self.store = store or CreativeStore()
         self.allow_mock = allow_mock
+        self.worker_id = worker_id or f"engine-{uuid4().hex[:8]}"
         self.resolver = resolver or GenerationProviderResolver(allow_mock=allow_mock)
+        self.judge_resolver = judge_resolver or VisionJudgeResolver(allow_mock=allow_mock)
         if allow_mock:
             from creative.providers.mock import MockGenerationProvider
             mock = self.resolver.providers.get("mock") or MockGenerationProvider(store=self.store.assets)
             if getattr(mock, "store", None) is not self.store.assets:
-                mock = MockGenerationProvider(store=self.store.assets, polls_until_done=getattr(mock, "polls_until_done", 0))
+                mock = MockGenerationProvider(
+                    store=self.store.assets,
+                    polls_until_done=getattr(mock, "polls_until_done", 0),
+                )
                 self.resolver.providers["mock"] = mock
+            if "lechuang" not in self.resolver.providers or getattr(self.resolver.providers.get("lechuang"), "name", "") != "mock":
+                if self.allow_mock:
+                    self.resolver.providers.setdefault("lechuang", mock)
+
+    @classmethod
+    def production(cls, **kwargs: Any) -> "CreativeWorkflowEngine":
+        return cls(store=CreativeStore.production(), allow_mock=False, **kwargs)
 
     def select(self, requirement: dict[str, Any]) -> CreativeWorkflow:
         return resolve_from_requirement(requirement)
@@ -133,18 +99,41 @@ class CreativeWorkflowEngine:
         idempotency_key: str | None = None,
         replay_of: str | None = None,
         allow_mock: bool | None = None,
+        workflow: CreativeWorkflow | None = None,
     ) -> CreativeRun:
         if allow_mock is not None:
             self.allow_mock = allow_mock
             self.resolver.allow_mock = allow_mock
+            self.judge_resolver.allow_mock = allow_mock
         payload = dict(requirement or {})
         payload.update(inputs or {})
-        workflow = resolve_workflow(workflow_id) if workflow_id else self.select(payload)
+        if workflow is None:
+            workflow = resolve_workflow(workflow_id) if workflow_id else self.select(payload)
         key = None if replay_of else (idempotency_key or make_idempotency_key(workflow.workflow_id, workflow.version, payload))
         if key:
             existing = self.store.get_by_idempotency(key)
             if existing is not None:
                 return existing
+        try:
+            validate_workflow(workflow, payload)
+        except WorkflowInvalid as exc:
+            run = CreativeRun(
+                run_id=uuid4().hex,
+                workflow_id=workflow.workflow_id,
+                workflow_version=workflow.version,
+                inputs=payload,
+                budget=float(budget if budget is not None else payload.get("budget") or 40),
+                idempotency_key=key,
+                workflow_snapshot=workflow.export(),
+                replay_of=replay_of,
+                request_id=new_request_id(),
+                error=user_message(exc),
+                error_code=failure_code(exc),
+            )
+            transition(run, "BLOCKED")
+            self.store.save_run(run)
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error, "code": run.error_code})
+            return run
         run = CreativeRun(
             run_id=uuid4().hex,
             workflow_id=workflow.workflow_id,
@@ -154,136 +143,243 @@ class CreativeWorkflowEngine:
             idempotency_key=key,
             workflow_snapshot=workflow.export(),
             replay_of=replay_of,
+            request_id=new_request_id(),
         )
-        run.estimated_cost = estimate_workflow_cost(workflow, payload)
+        run.estimated_cost = estimate_workflow_cost(workflow, payload, resolver=self.resolver)
         self.store.save_run(run)
+        self.store.save_workflow_snapshot(run.workflow_snapshot)
+        self.store.record_event(run.run_id, "run_created", {"workflow_id": workflow.workflow_id, "version": workflow.version})
+        log_event(agent="creative-engine", action="create_run", status="created", request_id=run.request_id or "", run_id=run.run_id, provider="", duration_ms=None)
         if run.budget is not None and run.estimated_cost > float(run.budget):
             run.error = f"estimated cost {run.estimated_cost} exceeds budget {run.budget}"
+            run.error_code = "BUDGET_EXCEEDED"
             transition(run, "BLOCKED")
             self.store.save_run(run)
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error})
             return run
         try:
             transition(run, "RUNNING")
+            self.store.save_run(run)
             return self._advance(run, workflow)
-        except ProviderBlocked as exc:
-            run.error = str(exc)
-            transition(run, "BLOCKED")
-            self.store.save_run(run)
-            return run
-        except BudgetExceeded as exc:
-            run.error = str(exc)
-            transition(run, "BLOCKED")
-            self.store.save_run(run)
-            return run
         except Exception as exc:
-            run.error = str(exc)
-            transition(run, "FAILED")
-            self.store.save_run(run)
-            return run
+            return self._fail(run, exc)
 
     def replay(self, run_id: str, *, allow_mock: bool | None = None) -> CreativeRun:
         previous = self.store.get_run(run_id)
         if previous is None:
             raise KeyError(run_id)
+        workflow = workflow_from_snapshot(previous.workflow_snapshot, previous.workflow_id, previous.workflow_version)
         return self.execute(
             previous.workflow_id,
             dict(previous.inputs),
             replay_of=run_id,
             budget=previous.budget,
             allow_mock=self.allow_mock if allow_mock is None else allow_mock,
+            workflow=workflow,
         )
 
-    def resume(self, run_id: str) -> CreativeRun:
+    def resume(self, run_id: str, *, worker_id: str | None = None) -> CreativeRun:
         run = self.store.get_run(run_id)
         if run is None:
             raise KeyError(run_id)
-        workflow = resolve_workflow(run.workflow_id, run.workflow_version)
+        worker = worker_id or self.worker_id
+        if not self.store.acquire_lease(run.run_id, worker):
+            return run
+        run = self.store.get_run(run_id) or run
+        workflow = workflow_from_snapshot(run.workflow_snapshot, run.workflow_id, run.workflow_version)
         self._poll_open_tasks(run)
+        run = self.store.get_run(run.run_id) or run
         if run.status == "WAITING_PROVIDER" and not self.store.list_open_tasks(run.run_id):
             transition(run, "RUNNING")
+            self.store.save_run(run)
         if run.status != "RUNNING":
             return run
-        return self._advance(run, workflow)
+        try:
+            return self._advance(run, workflow)
+        except Exception as exc:
+            return self._fail(run, exc)
+
+    def cancel(self, run_id: str) -> CreativeRun:
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        if run.status not in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            transition(run, "CANCELLED")
+            run.error_code = "CANCELLED"
+            self.store.save_run(run)
+        return run
+
+    def _judge_provider(self):
+        try:
+            return self.judge_resolver.resolve()
+        except (JudgeBlocked, ProviderBlocked):
+            if self.allow_mock:
+                from creative.providers.judge.mock import MockVisionJudgeProvider
+                return MockVisionJudgeProvider()
+            raise
 
     def _poll_open_tasks(self, run: CreativeRun) -> None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
         for task in self.store.list_open_tasks(run.run_id):
+            if task.timeout_at:
+                from datetime import datetime as dt
+                try:
+                    deadline = dt.fromisoformat(task.timeout_at.replace("Z", "+00:00"))
+                    if deadline.tzinfo is None:
+                        deadline = deadline.replace(tzinfo=timezone.utc)
+                    if now > deadline:
+                        task.status = "FAILED"
+                        task.error = "generation timed out"
+                        self.store.save_task(task)
+                        continue
+                except ValueError:
+                    pass
             provider, _ = self.resolver.resolve(task.provider if task.provider != "mock" else "mock")
             if task.provider == "lechuang" and self.allow_mock:
                 provider, _ = self.resolver.resolve("lechuang")
+            if task.poll_count >= 30:
+                task.status = "FAILED"
+                task.error = "generation timed out"
+                self.store.save_task(task)
+                continue
             handle = provider.get_task(task.provider_task_id)
             task.poll_count = handle.poll_count
-            task.status = handle.status
+            task.status = map_task_status(handle.status)
             task.result = dict(handle.result or {})
             task.error = handle.error
-            if handle.status == "succeeded":
+            if task.status == "SUCCEEDED":
                 task.completed_at = utcnow()
                 asset = handle.result.get("asset")
                 if isinstance(asset, MediaAsset):
-                    self.store.assets.put(asset)
-                    run.asset_ids.append(asset.asset_id)
+                    stored = self.store.assets.put(asset)
+                    if stored.asset_id not in run.asset_ids:
+                        run.asset_ids.append(stored.asset_id)
                     node_out = run.node_outputs.setdefault(task.node_id, {"assets": [], "variants": []})
-                    node_out.setdefault("assets", []).append(asset)
-                    node_out["output"] = node_out["assets"][0]
-                    node_out["asset"] = node_out["assets"][0]
-                    node_out["variants"] = node_out["assets"]
+                    assets = node_out.setdefault("assets", [])
+                    if stored.asset_id not in [item.get("asset_id") if isinstance(item, dict) else getattr(item, "asset_id", None) for item in assets]:
+                        assets.append(to_plain(stored))
+                    node_out["output"] = assets[0]
+                    node_out["asset"] = assets[0]
+                    node_out["variants"] = assets
+                self.store.record_event(run.run_id, "provider_completed", {"task_id": task.task_id, "status": task.status})
             self.store.save_task(task)
+        self.store.save_run(run)
 
     def _advance(self, run: CreativeRun, workflow: CreativeWorkflow) -> CreativeRun:
-        order = _topo(workflow)
+        order, cycle = topo_sort(workflow)
+        if cycle:
+            raise WorkflowInvalid("cycle")
         context = dict(run.node_outputs)
         regen = RegenerationStrategy()
+        max_regens = int(workflow.quality_policy.get("max_regenerations") or 2)
         while run.cursor < len(order):
             node = order[run.cursor]
+            self.store.heartbeat(run.run_id, self.worker_id)
+            self.store.record_event(run.run_id, "node_started", {"node_id": node.node_id, "type": node.type})
             open_for_node = [item for item in self.store.list_open_tasks(run.run_id) if item.node_id == node.node_id]
             existing = context.get(node.node_id) or {}
             if open_for_node:
                 transition(run, "WAITING_PROVIDER")
                 self.store.save_run(run)
                 return run
-            if existing.get("asset") or existing.get("output") is not None and node.type in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend"}:
-                if node.type in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend"} and existing.get("asset"):
-                    run.cursor += 1
-                    continue
-            result = execute_node(node, workflow=workflow, run=run, context=context, store=self.store, resolver=self.resolver)
+            if node.type in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend", "multi_angle"} and (existing.get("asset") or existing.get("output")):
+                run.cursor += 1
+                self.store.save_run(run)
+                continue
+            if existing.get("output") is not None and node.type not in {"image_generate", "video_generate", "image_edit", "video_edit", "video_extend", "multi_angle", "judge", "render"}:
+                run.cursor += 1
+                self.store.save_run(run)
+                continue
+            result = execute_node(
+                node,
+                workflow=workflow,
+                run=run,
+                context=context,
+                store=self.store,
+                resolver=self.resolver,
+                judge_provider=self._judge_provider() if node.type in {"judge", "image_analyze"} else None,
+            )
             if result.get("_pending"):
                 run.node_outputs[node.node_id] = {key: value for key, value in result.items() if key != "_pending"}
+                self.store.save_node_output(run.run_id, node.node_id, run.node_outputs[node.node_id])
                 transition(run, "WAITING_PROVIDER")
                 self.store.save_run(run)
                 return run
             if node.type == "judge" and result.get("decision") == "FAIL":
-                action = regen.next_action(int((run.outputs.get("regen_attempt") or 0)))
-                run.outputs["regen_attempt"] = int(run.outputs.get("regen_attempt") or 0) + 1
-                if action != "stop":
-                    generate_index = max((index for index, item in enumerate(order[: run.cursor]) if item.type in {"image_generate", "video_generate"}), default=None)
-                    if generate_index is not None:
-                        run.cursor = generate_index
-                        run.inputs = {**run.inputs, "variation_seed": action, "camera": "handheld" if action == "change_camera" else run.inputs.get("camera")}
-                        continue
+                attempt = int((run.outputs.get("regen_attempt") or 0))
+                action = regen.next_action(attempt, max_regenerations=max_regens)
+                run.outputs["regen_attempt"] = attempt + 1
+                if action == "stop":
+                    run.error = "quality gate blocked: regeneration budget exceeded"
+                    run.error_code = "QUALITY_FAILED"
+                    context[node.node_id] = result
+                    run.node_outputs[node.node_id] = _plain_node(result)
+                    break
+                generate_index = max((index for index, item in enumerate(order[: run.cursor]) if item.type in {"image_generate", "video_generate", "multi_angle"}), default=None)
+                if generate_index is not None:
+                    run.cursor = generate_index
+                    run.inputs = _apply_regen(run.inputs, action)
+                    for item in order[generate_index: run.cursor + 1]:
+                        run.node_outputs.pop(item.node_id, None)
+                    context = dict(run.node_outputs)
+                    self.store.save_run(run)
+                    continue
             context[node.node_id] = result
             run.node_outputs[node.node_id] = _plain_node(result)
+            self.store.save_node_output(run.run_id, node.node_id, run.node_outputs[node.node_id], result.get("assets") or ([result["asset"]] if result.get("asset") else []))
             run.cursor += 1
+            self.store.save_run(run)
+            self.store.record_event(run.run_id, "node_completed", {"node_id": node.node_id, "type": node.type})
         final = None
         for node in reversed(order):
-            payload = context.get(node.node_id) or {}
+            payload = context.get(node.node_id) or run.node_outputs.get(node.node_id) or {}
             candidate = payload.get("asset") or payload.get("output")
             if isinstance(candidate, MediaAsset):
                 final = candidate
                 break
-        assets = [self.store.assets.get(item) for item in run.asset_ids if self.store.assets.get(item)]
-        gate = quality_gate(run, [item for item in assets if item is not None])
-        run.quality = {key: str(value) for key, value in gate.items() if key != "reasons"}
+            if isinstance(candidate, dict) and candidate.get("asset_id"):
+                final = self.store.get_asset(candidate["asset_id"]) or self.store.assets.get(candidate["asset_id"])
+                if final:
+                    break
+        assets = [self.store.get_asset(item) or self.store.assets.get(item) for item in run.asset_ids]
+        assets = [item for item in assets if item]
+        gate = quality_gate(run, assets)
+        run.quality = {key: str(value) for key, value in gate.items() if key not in {"reasons", "technical_score", "visual_score", "content_score", "platform_score", "overall_score"}}
+        run.selected_asset_id = run.selected_asset_id or (final.asset_id if final else None)
         run.outputs = {
-            "asset_id": final.asset_id if final else None,
-            "assets": [item.asset_id for item in assets if item],
+            "asset_id": final.asset_id if final else run.selected_asset_id,
+            "assets": [item.asset_id for item in assets],
             "quality": run.quality,
             "estimated_cost": run.estimated_cost,
             "actual_cost": run.actual_cost,
+            "selected_asset_id": run.selected_asset_id,
+            "selection_reason": run.selection_reason,
+            "selection_score": run.selection_score,
+            "regen_attempt": run.outputs.get("regen_attempt"),
+            **{key: gate[key] for key in ("technical_score", "visual_score", "content_score", "platform_score", "overall_score") if key in gate},
         }
-        if any(run.quality.get(key) != "pass" for key in ("visual_quality", "identity_quality", "technical_quality")):
-            run.error = "quality gate blocked: " + ", ".join(gate.get("reasons") or [])
+        required = ("visual_quality", "identity_quality", "technical_quality")
+        if any(run.quality.get(key) != "pass" for key in required) or run.error_code == "QUALITY_FAILED":
+            run.error = run.error or ("quality gate blocked: " + ", ".join(gate.get("reasons") or []))
+            run.error_code = run.error_code or "QUALITY_FAILED"
             transition(run, "BLOCKED")
+            self.store.record_event(run.run_id, "run_blocked", {"error": run.error})
         else:
             transition(run, "SUCCEEDED")
+            self.store.save_performance({
+                "workflow_id": run.workflow_id,
+                "version": run.workflow_version,
+                "run_id": run.run_id,
+                "asset_id": run.selected_asset_id or "",
+                "quality_score": gate.get("overall_score"),
+                "cost": run.actual_cost,
+                "character": run.inputs.get("character_id") or "",
+                "motion": run.inputs.get("motion") or "",
+                "camera": run.inputs.get("camera") or "",
+                "duration": run.inputs.get("duration_seconds"),
+            })
+            self.store.record_event(run.run_id, "run_completed", {"asset_id": run.selected_asset_id})
         self.store.save_run(run)
         return run
 
@@ -291,7 +387,9 @@ class CreativeWorkflowEngine:
         from content.models import ContentPackage
         if run.status != "SUCCEEDED":
             raise QualityBlocked([run.error or run.status])
-        assets = [self.store.assets.get(item) for item in run.asset_ids]
+        if any(str(run.quality.get(key) or "") != "pass" for key in ("visual_quality", "identity_quality", "technical_quality") if run.quality):
+            raise QualityBlocked([run.error or "quality gate blocked"])
+        assets = [self.store.get_asset(item) or self.store.assets.get(item) for item in run.asset_ids]
         paths = tuple(item.path for item in assets if item)
         now = utcnow()
         return ContentPackage(
@@ -308,8 +406,50 @@ class CreativeWorkflowEngine:
                 "creative_run_id": run.run_id,
                 "workflow_id": run.workflow_id,
                 "workflow_version": run.workflow_version,
+                "selected_asset_id": run.selected_asset_id,
             },
         )
+
+    def _fail(self, run: CreativeRun, exc: Exception) -> CreativeRun:
+        run.error = user_message(exc)
+        run.error_code = failure_code(exc)
+        target = "BLOCKED" if isinstance(exc, (ProviderBlocked, BudgetExceeded, JudgeBlocked, WorkflowInvalid, QualityBlocked, TechnicalMediaError)) else "FAILED"
+        if isinstance(exc, TechnicalMediaError):
+            run.error_code = "TECHNICAL_MEDIA_FAILED"
+            target = "FAILED"
+        try:
+            transition(run, target)
+        except IllegalRunTransition:
+            run.status = target
+            run.completed_at = utcnow()
+        self.store.save_run(run)
+        self.store.record_event(run.run_id, "run_blocked" if target == "BLOCKED" else "run_failed", {"error": run.error, "code": run.error_code})
+        log_event(
+            agent="creative-engine",
+            action="run",
+            status=target.lower(),
+            request_id=run.request_id or "",
+            run_id=run.run_id,
+            provider="",
+            error_code=run.error_code,
+        )
+        return run
+
+
+def _apply_regen(inputs: dict[str, Any], action: str) -> dict[str, Any]:
+    payload = {**inputs, "regen_action": action, "variation_seed": action}
+    if action == "change_camera":
+        payload["camera"] = "handheld"
+    if action == "change_model":
+        payload["model_override"] = inputs.get("model_override") or "mock"
+        payload["provider_override"] = inputs.get("provider_override") or inputs.get("provider")
+    if action == "change_variation":
+        payload["seed"] = int(inputs.get("seed") or 0) + 17
+    if action == "change_prompt":
+        payload["brief"] = f"{inputs.get('brief') or ''} regenerated framing".strip()
+    if action == "change_reference" and inputs.get("reference_override"):
+        payload["reference"] = inputs.get("reference_override")
+    return payload
 
 
 def _plain_node(result: dict[str, Any]) -> dict[str, Any]:

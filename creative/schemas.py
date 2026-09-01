@@ -18,6 +18,7 @@ NODE_TYPES = (
     "image_analyze",
     "image_crop",
     "image_split",
+    "image_resize",
     "image_upscale",
     "image_annotate",
     "multi_angle",
@@ -32,6 +33,37 @@ NODE_TYPES = (
     "motion_annotation",
     "storyboard",
 )
+
+NODE_STATUS_IMPLEMENTED = "IMPLEMENTED"
+NODE_STATUS_VERIFIED = "VERIFIED"
+NODE_STATUS_BLOCKED = "BLOCKED"
+
+NODE_REGISTRY: dict[str, dict[str, Any]] = {
+    "input": {"status": NODE_STATUS_IMPLEMENTED},
+    "text": {"status": NODE_STATUS_IMPLEMENTED},
+    "prompt": {"status": NODE_STATUS_IMPLEMENTED},
+    "reference": {"status": NODE_STATUS_IMPLEMENTED},
+    "character": {"status": NODE_STATUS_IMPLEMENTED},
+    "image_generate": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_image",)},
+    "image_edit": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("image_to_image",)},
+    "image_analyze": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("vision_judge",)},
+    "image_crop": {"status": NODE_STATUS_IMPLEMENTED},
+    "image_split": {"status": NODE_STATUS_IMPLEMENTED},
+    "image_resize": {"status": NODE_STATUS_IMPLEMENTED},
+    "image_upscale": {"status": NODE_STATUS_BLOCKED, "reason": "super-resolution requires a verified provider capability"},
+    "image_annotate": {"status": NODE_STATUS_IMPLEMENTED},
+    "multi_angle": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_image",)},
+    "video_generate": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("text_to_video", "image_to_video")},
+    "video_extend": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("video_extend",)},
+    "video_edit": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("video_edit",)},
+    "audio": {"status": NODE_STATUS_BLOCKED, "reason": "no verified audio provider"},
+    "subtitle": {"status": NODE_STATUS_IMPLEMENTED},
+    "render": {"status": NODE_STATUS_IMPLEMENTED},
+    "judge": {"status": NODE_STATUS_IMPLEMENTED, "requires": ("vision_judge",)},
+    "output": {"status": NODE_STATUS_IMPLEMENTED},
+    "motion_annotation": {"status": NODE_STATUS_IMPLEMENTED},
+    "storyboard": {"status": NODE_STATUS_IMPLEMENTED},
+}
 
 RUN_STATES = (
     "DRAFT",
@@ -57,7 +89,7 @@ RUN_TRANSITIONS = {
     "CANCELLED": set(),
 }
 
-TASK_STATES = ("queued", "running", "succeeded", "failed", "cancelled")
+TASK_STATES = ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED")
 
 ASSET_TYPES = (
     "image",
@@ -73,6 +105,37 @@ ASSET_TYPES = (
 
 REGENERATION_STRATEGIES = ("change_prompt", "change_variation", "change_reference", "change_camera", "change_model")
 
+FAILURE_CODES = (
+    "PROVIDER_BLOCKED",
+    "PROVIDER_ERROR",
+    "AUTH_ERROR",
+    "RATE_LIMIT",
+    "BUDGET_EXCEEDED",
+    "WORKFLOW_INVALID",
+    "QUALITY_FAILED",
+    "TECHNICAL_MEDIA_FAILED",
+    "TIMEOUT",
+    "CANCELLED",
+    "CREATIVE_PATTERN_FAILED",
+)
+
+CREATIVE_MEMORY_CODES = frozenset({"QUALITY_FAILED", "WORKFLOW_INVALID", "CREATIVE_PATTERN_FAILED"})
+
+CROP_ASPECTS = ("1:1", "4:5", "3:4", "16:9", "9:16", "custom")
+
+EVENT_TYPES = (
+    "run_created",
+    "node_started",
+    "node_completed",
+    "provider_submitted",
+    "provider_completed",
+    "judge_completed",
+    "asset_created",
+    "run_blocked",
+    "run_failed",
+    "run_completed",
+)
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -86,6 +149,21 @@ def to_plain(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [to_plain(item) for item in value]
     return value
+
+
+def map_task_status(status: str) -> str:
+    raw = str(status or "queued").strip()
+    lookup = {
+        "queued": "QUEUED",
+        "running": "RUNNING",
+        "succeeded": "SUCCEEDED",
+        "success": "SUCCEEDED",
+        "failed": "FAILED",
+        "cancelled": "CANCELLED",
+        "canceled": "CANCELLED",
+        "blocked": "BLOCKED",
+    }
+    return lookup.get(raw.lower(), raw.upper() if raw else "QUEUED")
 
 
 @dataclass(frozen=True)
@@ -161,6 +239,14 @@ class CreativeRun:
     cursor: int = 0
     node_outputs: dict[str, Any] = field(default_factory=dict)
     quality: dict[str, str] = field(default_factory=dict)
+    worker_id: str | None = None
+    lease_until: str | None = None
+    heartbeat_at: str | None = None
+    selected_asset_id: str | None = None
+    selection_reason: str | None = None
+    selection_score: float | None = None
+    request_id: str | None = None
+    error_code: str | None = None
 
 
 @dataclass
@@ -170,7 +256,7 @@ class CreativeTask:
     node_id: str
     provider: str
     provider_task_id: str
-    status: str = "queued"
+    status: str = "QUEUED"
     poll_count: int = 0
     started_at: str | None = None
     completed_at: str | None = None
@@ -178,6 +264,9 @@ class CreativeTask:
     kind: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
+    attempt: int = 0
+    timeout_at: str | None = None
+    execution_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,6 +287,11 @@ class MediaAsset:
     character_id: str | None = None
     size: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    technical_score: float | None = None
+    visual_score: float | None = None
+    content_score: float | None = None
+    platform_score: float | None = None
+    overall_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -271,6 +365,9 @@ class JudgeResult:
     breakdown: dict[str, float]
     timestamp: str
     asset_id: str | None = None
+    judge_id: str | None = None
+    judge_provider: str | None = None
+    creative_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -301,6 +398,15 @@ class WorkflowPerformance:
     cost: float | None = None
     latency: float | None = None
     run_id: str = ""
+    asset_id: str = ""
+    publication_id: str = ""
+    provider: str = ""
+    model: str = ""
+    character: str = ""
+    scene: str = ""
+    motion: str = ""
+    camera: str = ""
+    duration: float | None = None
 
 
 @dataclass(frozen=True)
@@ -310,9 +416,12 @@ class PromptAsset:
     negative_prompt: str = ""
     references: tuple[str, ...] = ()
     model: str = ""
+    provider: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
+    workflow_id: str = ""
     workflow_version: str = ""
     version: str = "v1"
+    family_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -320,6 +429,17 @@ class LechuangAssetReference:
     provider: str
     remote_id: str
     remote_url: str = ""
+
+
+@dataclass(frozen=True)
+class AssetReference:
+    kind: str
+    asset_id: str | None = None
+    provider: str | None = None
+    remote_id: str | None = None
+    character_id: str | None = None
+    url: str | None = None
+    path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -331,3 +451,13 @@ class ProviderTask:
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     poll_count: int = 0
+
+
+@dataclass(frozen=True)
+class ProviderQuote:
+    credits: float
+    currency: str = "credits"
+    parameters: dict[str, Any] = field(default_factory=dict)
+    valid_until: str | None = None
+    mock: bool = False
+    provider: str = ""

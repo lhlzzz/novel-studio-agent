@@ -77,10 +77,46 @@ def match_capabilities(requirement: dict[str, Any], registry: list[ModelCapabili
     return hits
 
 
+class ProviderRanker:
+    def rank(self, matches: list[ModelCapability], *, requirement: dict[str, Any] | None = None, history: list[dict[str, Any]] | None = None) -> list[ModelCapability]:
+        requirement = requirement or {}
+        history = history or []
+        preferred = str(requirement.get("provider") or requirement.get("user_preference") or "")
+        policy = dict(requirement.get("workflow_policy") or {})
+        scored = []
+        for item in matches:
+            quality = _history_score(history, item, "quality_score", 50)
+            cost = _history_score(history, item, "cost", 5)
+            latency = _history_score(history, item, "latency", 20)
+            score = 0.0
+            score += 40 if item.verified else 0
+            score += 15 if requirement.get("capability") in item.capabilities else 5
+            score += min(quality, 100) * 0.2
+            score -= min(cost, 50) * 0.15
+            score -= min(latency, 120) * 0.05
+            if preferred and item.provider == preferred:
+                score += 12
+            if policy.get("provider") == item.provider:
+                score += 8
+            availability = 10 if item.verified else 0
+            score += availability
+            scored.append((score, item))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in scored]
+
+
+def _history_score(history: list[dict[str, Any]], item: ModelCapability, field: str, default: float) -> float:
+    rows = [row for row in history if row.get("provider") == item.provider or row.get("model") == item.model]
+    if not rows:
+        return default
+    return sum(float(row.get(field) or default) for row in rows) / len(rows)
+
+
 class GenerationProviderResolver:
-    def __init__(self, *, providers: dict[str, Any] | None = None, allow_mock: bool = False) -> None:
+    def __init__(self, *, providers: dict[str, Any] | None = None, allow_mock: bool = False, ranker: ProviderRanker | None = None) -> None:
         self.allow_mock = allow_mock
         self.providers = dict(providers or {})
+        self.ranker = ranker or ProviderRanker()
         if "lechuang" not in self.providers:
             self.providers["lechuang"] = LechuangAdapter()
         if "mock" not in self.providers:
@@ -98,14 +134,21 @@ class GenerationProviderResolver:
             if self.allow_mock:
                 return self.providers["mock"], "mock"
             raise ProviderBlocked("lechuang", reason)
+        if name == "mock" and not self.allow_mock:
+            raise ProviderBlocked("mock", "mock is tests only")
         if name not in self.providers:
             raise UnsupportedCapability(name, provider="resolver")
         return self.providers[name], name
 
-    def select(self, requirement: dict[str, Any]) -> tuple[Any, ModelCapability | None]:
+    def select(self, requirement: dict[str, Any], *, history: list[dict[str, Any]] | None = None) -> tuple[Any, ModelCapability | None]:
         matches = match_capabilities(requirement)
-        live = [item for item in matches if item.verified]
-        chosen = (live or matches or [None])[0]
+        ranked = self.ranker.rank(matches, requirement=requirement, history=history)
+        live = [item for item in ranked if item.verified]
+        chosen = (live or ranked or [None])[0]
+        if chosen is not None and not chosen.verified and not self.allow_mock:
+            raise ProviderBlocked(chosen.provider, f"{chosen.model} unverified")
         provider_name = chosen.provider if chosen else str(requirement.get("provider") or "lechuang")
+        if provider_name == "mock" and not self.allow_mock:
+            raise ProviderBlocked("mock", "mock is tests only")
         implementation, resolved = self.resolve(provider_name, requirement=requirement)
         return implementation, chosen

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from creative.errors import WorkflowNotFound
+from creative.errors import WorkflowInvalid, WorkflowNotFound
 from creative.schemas import CreativeWorkflow, WorkflowEdge, WorkflowNode, utcnow
 
 try:
@@ -62,6 +62,16 @@ def workflow_from_dict(data: dict[str, Any]) -> CreativeWorkflow:
 
 def register_workflow(workflow: CreativeWorkflow) -> CreativeWorkflow:
     versions = _REGISTRY.setdefault(workflow.workflow_id, {})
+    existing = versions.get(workflow.version)
+    if existing is not None:
+        current = existing.export()
+        incoming = workflow.export()
+        for key in ("created_at", "updated_at", "providers"):
+            current.pop(key, None)
+            incoming.pop(key, None)
+        if current != incoming:
+            raise WorkflowInvalid(f"workflow version immutable: {workflow.workflow_id}@{workflow.version}")
+        return existing
     versions[workflow.version] = workflow
     return workflow
 

@@ -1,4 +1,4 @@
-# Meiti V4 Decisions
+# Meiti V4.1 Decisions
 
 - **2026-08-26:** Platform is an integration, not an agent or workspace.
 - **2026-08-26:** Meiti owns business data; Postiz owns distribution infrastructure.
@@ -14,3 +14,6 @@
 - **2026-09-01:** Default people/lifestyle path is image -> image QA -> image-to-video.
 - **2026-09-01:** Generation assets are immutable and content-addressed by sha256.
 - **2026-09-01:** Judge returns score/decision/reason and never publishes.
+
+- **2026-09-01:** Creative runtime is durable: PostgreSQL CreativeRun/Task, worker lease, resume, replay from workflow snapshot.
+- **2026-09-01:** Per-node provider binding. Immutable assets. sha256 identity. Async worker.
