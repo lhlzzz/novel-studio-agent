@@ -38,12 +38,13 @@ class DistributionService:
         self.store = store or InMemoryStore()
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
-        integration = self.adapter.get_integration(job.integration_id)  # type: ignore[attr-defined]
-        settings = self.adapter.get_settings(job.integration_id)  # type: ignore[attr-defined]
+        account = self._account(job)
+        settings = self.adapter.get_settings(account.id)  # type: ignore[attr-defined]
         errors = self.adapter.validate_payload(job)  # type: ignore[attr-defined]
         return {
             "status": "BLOCKED" if errors else "READY",
-            "integration_id": integration.id,
+            "account_id": account.id,
+            "integration_id": account.id,
             "settings": settings,
             "errors": errors,
             "job": asdict(job),
@@ -136,15 +137,15 @@ class DistributionService:
             self.store.save_job(job)
             self._record_attempt(job, attempt_no, started, "failed", "missing_provider_post_id", "provider response did not contain an external post id", result)
             raise ExternalActionBlocked("provider response did not contain an external post id")
-        integration = self.adapter.get_integration(job.integration_id)  # type: ignore[attr-defined]
-        platform_object_id = result.get("external_id") or result.get("externalId")
+        account = self._account(job)
+        platform_object_id = result.get("external_id") or result.get("externalId") or result.get("platform_object_id")
         status = "SCHEDULED" if job.action == "schedule" else "SUBMITTED"
         job = transition_job(job, status, provider_response=result)
         self.store.save_job(job)
         publication = Publication(
             distribution_job_id=job.job_id,
-            integration_id=integration.id,
-            provider=integration.provider,
+            account_id=account.id,
+            provider=getattr(account, "provider", ""),
             provider_post_id=post_id,
             platform_object_id=str(platform_object_id) if platform_object_id is not None else None,
             status=str(result.get("status") or status),
@@ -152,6 +153,8 @@ class DistributionService:
             external_url=result.get("url") or result.get("releaseURL") or result.get("external_url"),
             content_package_id=job.content_package_id,
             request_id=job.request_id,
+            platform=getattr(account, "platform", "") or getattr(account, "provider", ""),
+            created_at=_utcnow(),
         )
         try:
             self.store.save_publication(publication)
@@ -168,8 +171,8 @@ class DistributionService:
                 agent="distribution-agent",
                 action="publication_persistence",
                 job_id=job.job_id,
-                provider=integration.provider,
-                integration_id=integration.id,
+                provider=getattr(account, 'provider', ''),
+                integration_id=account.id,
                 status="INCONSISTENT",
                 error_code="publication_persistence_failed",
                 request_id=job.request_id,
@@ -182,12 +185,18 @@ class DistributionService:
             agent="distribution-agent",
             action=job.action,
             job_id=job.job_id,
-            provider=integration.provider,
-            integration_id=integration.id,
+            provider=getattr(account, 'provider', ''),
+            integration_id=account.id,
             status=publication.status,
             request_id=job.request_id,
         )
         return publication
+
+    def _account(self, job: DistributionJob):
+        get_account = getattr(self.adapter, "get_account", None)
+        if callable(get_account):
+            return get_account(job.account_id)
+        return self.adapter.get_integration(job.account_id)  # type: ignore[attr-defined]
 
     def _record_attempt(
         self,
@@ -215,6 +224,6 @@ class DistributionService:
                 response_summary=response_summary,
                 request_id=job.request_id,
                 provider=str(getattr(self.adapter, "provider", "")),
-                integration_id=job.integration_id,
+                integration_id=job.account_id,
             )
         )

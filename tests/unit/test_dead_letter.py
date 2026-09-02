@@ -1,4 +1,4 @@
-from integrations.providers.postiz.errors import NetworkError, ValidationError
+from social.providers.errors import NetworkError, ValidationError
 from services.queue import WorkQueue
 
 

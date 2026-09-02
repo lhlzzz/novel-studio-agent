@@ -1,4 +1,4 @@
-"""Normalize Postiz/provider analytics without inventing unsupported metrics."""
+"""Normalize native social provider analytics without inventing unsupported metrics."""
 
 from __future__ import annotations
 

@@ -9,7 +9,6 @@ Skills are installed under domain owners:
 - `commerce/`: offer and product marketing capabilities
 - `general/`: general Meiti engineering guidance
 - `intelligence/`: external research skills
-- `distribution/`: Postiz distribution skill
 
 Provider integrations are selected by `integrations/registry/`, never by a
 provider-owned agent or directory.

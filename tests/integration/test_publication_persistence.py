@@ -9,8 +9,9 @@ def test_publication_persisted_and_external_ids_separated():
     saved = store.get_publication("job-1")
     assert saved is not None
     assert saved.distribution_job_id == "job-1"
-    assert saved.provider_post_id == "postiz-post-1"
+    assert saved.provider_post_id == "x-post-1"
     assert saved.platform_object_id == "x-status-1"
+    assert saved.account_id == "i"
     assert saved.distribution_job_id != saved.provider_post_id
     assert saved.provider_post_id != saved.platform_object_id
     assert publication.content_package_id == "test-package-001"

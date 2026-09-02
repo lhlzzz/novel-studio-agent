@@ -3,13 +3,12 @@
 ## Single owner
 
 Meiti PostgreSQL + pgvector is the metadata source of truth for content,
-creative runs, embeddings, Content KG, analytics, commerce, memory, and
-publish gates. Filesystem / object storage is the binary source of truth.
-Memory is cache only.
+creative runs, embeddings, Content KG, analytics, commerce, memory, social
+accounts, publications, and publish gates. Filesystem / object storage is the
+binary source of truth. Memory is cache only.
 
-Postiz runs its own PostgreSQL database inside `infrastructure/postiz/`.
-Postiz data is distribution infrastructure and is never mixed with Meiti
-business tables.
+Native social credentials are stored in the runtime secret store. Business
+tables may store `credential_ref` only.
 
 Runtime never creates tables. Schema changes go through migration.
 
@@ -21,5 +20,12 @@ Runtime never creates tables. Schema changes go through migration.
 - `media_assets`: content-addressed asset metadata
 - `generation_usage`: per-call cost
 - `judge_results`: persisted judge decisions
+
+## Social tables
+
+- `social_accounts`: native platform account metadata
+- `distribution_jobs`: gated publish/schedule jobs
+- `publications`: provider/platform identifiers
+- `derived_assets`: platform-specific transforms of immutable MediaAsset
 
 The configured Meiti URL is `MEITI_DATABASE_URL` or `DATABASE_URL`.

@@ -39,10 +39,13 @@ def check_provider_registry() -> dict:
         from integrations.registry.loader import load_registry
         registry = load_registry()
         enabled_from_yaml = [name for name, item in registry.items() if item.enabled]
+        required = {"x", "instagram", "youtube", "tiktok", "linkedin"}
+        missing = sorted(required - set(registry))
         return {
-            "status": "PASS" if "postiz" in registry and not enabled_from_yaml else "BLOCKED",
+            "status": "PASS" if not missing and not enabled_from_yaml else "BLOCKED",
             "providers": sorted(registry),
             "enabled": enabled_from_yaml,
+            "missing": missing,
         }
     except Exception as exc:
         return {"status": "BLOCKED", "error": str(exc)}
@@ -110,67 +113,31 @@ def check_memory() -> dict:
 
 def check_gate() -> dict:
     from governance.distribution_gate import check_distribution_job
-    from integrations.contracts.distribution import ContentVariant, DistributionJob, Integration, IntegrationCapabilities
-    integration = Integration("i", "x", "a", "global", IntegrationCapabilities(publish=True), "postiz", "postiz", True, state="ENABLED")
+    from integrations.contracts.distribution import ContentVariant, DistributionJob
+    from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account
+    account = enable_account(SocialAccount("i", "x", "x", username="meiti", status="VERIFIED", capabilities=SocialProviderCapabilities(publish=True, text=True)))
     job = DistributionJob("j", "p", "i", ContentVariant("i", "test"))
     failures = check_distribution_job(
-        job, integration, content_valid=True, evidence_valid=True, account_valid=True,
+        job, account, content_valid=True, evidence_valid=True, account_valid=True,
         media_valid=True, approval_valid=False, provider_verified=True, integration_verified=True,
-        capability_verified=True, idempotency_valid=True, media_uploaded=True, payload_valid=True,
+        account_verified=True, capability_verified=True, idempotency_valid=True, media_uploaded=True, payload_valid=True,
     )
     return {"status": "PASS" if failures == ["approval invalid"] else "BLOCKED", "failures": failures}
 
 
-_POSTIZ_CACHE = None
+def check_social_provider_registry() -> dict:
+    from scripts.social_doctor import check_provider_registry
+    return check_provider_registry()
 
 
-def check_postiz() -> dict:
-    global _POSTIZ_CACHE
-    if _POSTIZ_CACHE is not None:
-        return dict(_POSTIZ_CACHE)
-    from integrations.providers.postiz.client import PostizClient
-    from integrations.providers.postiz.errors import PostizClientError
-    client = PostizClient(timeout=2.0, max_attempts=1)
-    key_missing = not os.getenv("POSTIZ_API_KEY", "").strip()
-    try:
-        health = client.health()
-        payload = {
-            "status": "PASS" if health.authenticated else "BLOCKED",
-            "health": health.__dict__,
-            "reason": None if health.authenticated else ("POSTIZ_API_KEY missing" if key_missing else "not authenticated"),
-            "reachable": health.reachable,
-            "authenticated": health.authenticated,
-            "account_count": health.account_count,
-        }
-    except PostizClientError as exc:
-        payload = {
-            "status": "BLOCKED",
-            "error": str(exc),
-            "reason": "POSTIZ_API_KEY missing" if key_missing else str(exc),
-            "reachable": False,
-            "authenticated": False,
-            "account_count": 0,
-        }
-    if key_missing:
-        payload["status"] = "BLOCKED"
-        payload["reason"] = "POSTIZ_API_KEY missing"
-    _POSTIZ_CACHE = payload
-    return dict(payload)
+def check_social_accounts() -> dict:
+    from scripts.social_doctor import check_account_manager
+    return check_account_manager()
 
 
-def check_postiz_integrations() -> dict:
-    postiz = check_postiz()
-    if postiz.get("status") != "PASS":
-        return {"status": "BLOCKED", "reason": postiz.get("reason") or postiz.get("error")}
-    count = int(postiz.get("account_count") or 0)
-    return {"status": "PASS" if count else "BLOCKED", "account_count": count}
-
-
-def check_postiz_capabilities() -> dict:
-    postiz = check_postiz()
-    if postiz.get("status") != "PASS":
-        return {"status": "BLOCKED", "reason": postiz.get("reason") or postiz.get("error")}
-    return {"status": "PASS" if postiz.get("authenticated") else "BLOCKED"}
+def check_social_provider_health() -> dict:
+    from scripts.social_doctor import check_provider_health
+    return check_provider_health()
 
 
 def check_research() -> dict:
@@ -282,11 +249,11 @@ def check_creative_persistence() -> dict:
 def check_generation_resolver() -> dict:
     try:
         from creative.providers.resolver import GenerationProviderResolver
-        from integrations.providers.resolver import resolve_provider
+        from social.providers.resolver import resolve_social_provider
         resolver = GenerationProviderResolver(allow_mock=False)
-        postiz = resolve_provider("postiz")
-        ok = "lechuang" in resolver.providers and "mock" not in resolver.providers and postiz.implementation is not None
-        return _status(ok, creative_providers=sorted(resolver.providers), postiz=postiz.name)
+        social = resolve_social_provider("x")
+        ok = "lechuang" in resolver.providers and "mock" not in resolver.providers and social.implementation is not None
+        return _status(ok, creative_providers=sorted(resolver.providers), social=social.name)
     except Exception as exc:
         return _status(False, error=str(exc))
 
@@ -345,18 +312,13 @@ def check_ai_judge() -> dict:
     return _status(ok, vision=vision, missing_asset=missing.decision, no_provider_blocked=blocked, reason=vision.get("reason"))
 
 
-def check_postiz_runtime() -> dict:
-    postiz = check_postiz()
-    reachable = bool(postiz.get("reachable"))
-    return _status(reachable, reason=postiz.get("reason") or postiz.get("error") or ("ok" if reachable else "Postiz process is not reachable"), env="POSTIZ_API_URL", service="postiz", next="Start infrastructure/postiz with docker-compose. Pulling missing redis/temporal/elasticsearch images is required.")
-
 
 def check_publication_persistence() -> dict:
     try:
         from scripts.db.engine import engine
         from sqlalchemy import inspect
         tables = set(inspect(engine).get_table_names())
-        required = {"publications", "distribution_jobs", "integrations"}
+        required = {"publications", "distribution_jobs", "social_accounts"}
         return _status(required.issubset(tables), tables=sorted(tables & required))
     except Exception as exc:
         return _status(False, error=str(exc))
@@ -364,7 +326,7 @@ def check_publication_persistence() -> dict:
 
 def check_reconciliation() -> dict:
     try:
-        from services.reconciliation.service import reconcile_publication
+        from social.reconciliation.service import reconcile_publication
         return _status(callable(reconcile_publication))
     except Exception as exc:
         return _status(False, error=str(exc))
@@ -389,7 +351,7 @@ def write_e2e_audit(checks: dict) -> dict:
     creative = existing.get("creative") if isinstance(existing.get("creative"), dict) else {}
     distribution = existing.get("distribution") if isinstance(existing.get("distribution"), dict) else {}
     payload = {
-        "version": "4.3",
+        "version": "4.4",
         "overall": "READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED",
         "creative": {
             "workflow": creative.get("workflow") or "",
@@ -400,8 +362,8 @@ def write_e2e_audit(checks: dict) -> dict:
             "reason": checks.get("Real Creative E2E", {}).get("reason"),
         },
         "distribution": {
-            "provider": distribution.get("provider") or "postiz",
-            "integration_id": distribution.get("integration_id") or "",
+            "provider": distribution.get("provider") or "x",
+            "account_id": distribution.get("account_id") or distribution.get("integration_id") or "",
             "remote_post_id": distribution.get("remote_post_id") or "",
             "status": distribution.get("status") or "blocked",
             "reason": checks.get("Real Distribution E2E", {}).get("reason"),
@@ -436,15 +398,14 @@ def check_real_distribution_e2e() -> dict:
     distribution = data.get("distribution") or {}
     remote = str(distribution.get("remote_post_id") or "").strip()
     status = str(distribution.get("status") or "").lower()
-    integration = str(distribution.get("integration_id") or "").strip()
-    ok = bool(remote and integration and status == "published" and not remote.startswith("fake"))
-    return _status(ok, reason="no real distribution E2E evidence" if not ok else "ok", env="POSTIZ_API_KEY", service="postiz", next="Start Postiz, set POSTIZ_API_KEY, verify one overseas integration, then publish MEITI_PRODUCTION_E2E_TEST.")
+    account = str(distribution.get("account_id") or distribution.get("integration_id") or "").strip()
+    ok = bool(remote and account and status == "published" and not remote.startswith("fake"))
+    return _status(ok, reason="no real distribution E2E evidence" if not ok else "ok", env="X_CLIENT_ID", service="x", next="Complete native X OAuth, verify one account, then publish MEITI_PRODUCTION_E2E_TEST.")
 
 
 def run() -> dict:
     lechuang_auth = check_lechuang_auth()
     lechuang_contract = check_lechuang_contract()
-    postiz = check_postiz()
     return {
         "Architecture": check_architecture(),
         "Creative Runtime": check_creative_runtime(),
@@ -458,9 +419,9 @@ def run() -> dict:
         "Video Generation": check_lechuang_capability("text_to_video"),
         "Vision Provider": check_vision_provider(),
         "AI Judge": check_ai_judge(),
-        "Postiz Runtime": check_postiz_runtime(),
-        "Postiz Authentication": {"status": postiz.get("status"), "reason": postiz.get("reason"), "env": "POSTIZ_API_KEY", "service": "postiz", "next": "Set POSTIZ_API_KEY after Postiz is running."},
-        "Integration Discovery": check_postiz_integrations(),
+        "Social Provider Registry": check_social_provider_registry(),
+        "Social Accounts": check_social_accounts(),
+        "Social Provider Health": check_social_provider_health(),
         "Research": {**check_research(), "env": "SCRAPECREATORS_API_KEY", "service": "scrapecreators", "next": "Set SCRAPECREATORS_API_KEY. Research stays BLOCKED until the key exists.", "reason": "SCRAPECREATORS_API_KEY missing" if check_research().get("status") != "PASS" else None},
         "Real Creative E2E": check_real_creative_e2e(),
         "Real Distribution E2E": check_real_distribution_e2e(),

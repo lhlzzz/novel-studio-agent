@@ -1,3 +1,4 @@
 # Distribution Agent
 
-Owns integration routing, governed jobs, scheduling, status, and retries.
+Owns account selection, governed jobs, scheduling, status, and retries.
+It never calls platform HTTP or stores provider tokens.

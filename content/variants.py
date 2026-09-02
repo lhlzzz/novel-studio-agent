@@ -14,7 +14,8 @@ PLATFORM_CONSTRAINTS = {
 }
 
 
-def build_variant(package: ContentPackage, *, integration_id: str, platform: str) -> ContentVariant:
+def build_variant(package: ContentPackage, *, account_id: str | None = None, platform: str, integration_id: str | None = None) -> ContentVariant:
+    account_id = account_id or integration_id or ""
     constraints = dict(PLATFORM_CONSTRAINTS.get(platform, {"max_chars": 2000, "hashtag_limit": 5}))
     metadata = dict(package.metadata or {})
     hashtags = tuple(metadata.get("hashtags") or ())
@@ -28,7 +29,7 @@ def build_variant(package: ContentPackage, *, integration_id: str, platform: str
     media = tuple(package.media_assets or metadata.get("media") or ())
     caption = package.caption or body
     return ContentVariant(
-        integration_id=integration_id,
+        account_id=account_id,
         body=body,
         media=media,
         metadata={**metadata, "platform": platform, "settings": dict(metadata.get("settings") or {})},

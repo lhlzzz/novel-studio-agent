@@ -1,5 +1,5 @@
 {
-  "version": "4.3",
+  "version": "4.4",
   "overall": "BLOCKED",
   "creative": {
     "workflow": "",
@@ -10,8 +10,8 @@
     "reason": "no real creative E2E evidence"
   },
   "distribution": {
-    "provider": "postiz",
-    "integration_id": "",
+    "provider": "x",
+    "account_id": "",
     "remote_post_id": "",
     "status": "blocked",
     "reason": "no real distribution E2E evidence"
@@ -83,22 +83,8 @@
       "next": null
     },
     {
-      "check": "Postiz Runtime",
-      "reason": "POSTIZ_API_KEY missing",
-      "env": "POSTIZ_API_URL",
-      "service": "postiz",
-      "next": "Start infrastructure/postiz with docker-compose. Pulling missing redis/temporal/elasticsearch images is required."
-    },
-    {
-      "check": "Postiz Authentication",
-      "reason": "POSTIZ_API_KEY missing",
-      "env": "POSTIZ_API_KEY",
-      "service": "postiz",
-      "next": "Set POSTIZ_API_KEY after Postiz is running."
-    },
-    {
-      "check": "Integration Discovery",
-      "reason": "POSTIZ_API_KEY missing",
+      "check": "Social Provider Health",
+      "reason": null,
       "env": null,
       "service": null,
       "next": null
@@ -120,9 +106,9 @@
     {
       "check": "Real Distribution E2E",
       "reason": "no real distribution E2E evidence",
-      "env": "POSTIZ_API_KEY",
-      "service": "postiz",
-      "next": "Start Postiz, set POSTIZ_API_KEY, verify one overseas integration, then publish MEITI_PRODUCTION_E2E_TEST."
+      "env": "X_CLIENT_ID",
+      "service": "x",
+      "next": "Complete native X OAuth, verify one account, then publish MEITI_PRODUCTION_E2E_TEST."
     }
   ]
 }

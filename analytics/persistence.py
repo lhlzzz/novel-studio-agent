@@ -46,7 +46,7 @@ def persist_metrics(metrics: NormalizedMetrics) -> None:
 SNAPSHOTS: list[dict[str, Any]] = []
 
 
-def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "postiz") -> list[dict[str, Any]]:
+def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native") -> list[dict[str, Any]]:
     observed_at = datetime.now(timezone.utc).isoformat()
     created: list[dict[str, Any]] = []
     durable_publication = False

@@ -14,6 +14,12 @@ from integrations.contracts.distribution import (
     Integration,
     IntegrationCapabilities,
 )
+from social.providers.registry import (
+    clear_runtime_state as clear_social_runtime_state,
+    load_social_registry,
+    runtime_state as social_runtime_state,
+    set_runtime_state as set_social_runtime_state,
+)
 
 _RUNTIME_STATE: dict[str, dict[str, Any]] = {}
 
@@ -29,7 +35,7 @@ def _claimed_capabilities(raw: dict[str, Any] | None) -> IntegrationCapabilities
 
 
 def runtime_state(provider: str) -> dict[str, Any]:
-    return dict(_RUNTIME_STATE.get(provider) or {"state": "REGISTERED", "enabled": False})
+    return dict(_RUNTIME_STATE.get(provider) or social_runtime_state(provider) or {"state": "REGISTERED", "enabled": False})
 
 
 def set_runtime_state(
@@ -46,34 +52,31 @@ def set_runtime_state(
         "verified_at": verified_at,
         "capabilities": capabilities,
     }
+    set_social_runtime_state(provider, state=state, enabled=enabled, verified_at=verified_at)
 
 
 def clear_runtime_state() -> None:
     _RUNTIME_STATE.clear()
+    clear_social_runtime_state()
 
 
 def load_registry(path: Path | None = None) -> dict[str, Integration]:
-    path = path or Path(__file__).with_name("platforms.yaml")
-    try:
-        import yaml
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("PyYAML is required to load the integration registry") from exc
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    social = load_social_registry(path)
     integrations: dict[str, Integration] = {}
-    for provider, config in (raw.get("providers") or {}).items():
-        claimed = _claimed_capabilities(config.get("capabilities") or {})
+    for provider, registration in social.items():
         runtime = runtime_state(provider)
-        capabilities = runtime.get("capabilities") or claimed
+        capabilities = runtime.get("capabilities") or registration.capabilities.to_integration()
         integrations[provider] = Integration(
-            id=config.get("id", provider),
+            id=registration.id,
             provider=provider,
-            account_id=config.get("account_id", ""),
-            region=config.get("region", "global"),
+            account_id="",
+            region=registration.region,
             capabilities=capabilities,
-            adapter=config.get("adapter", provider),
-            distribution_backend=config.get("distribution", "custom"),
+            adapter=registration.adapter,
+            distribution_backend=registration.distribution_backend,
             enabled=bool(runtime.get("enabled", False)),
-            state=str(runtime.get("state") or "REGISTERED"),
+            state=str(runtime.get("state") or registration.state or "REGISTERED"),
             verified_at=runtime.get("verified_at"),
+            platform=registration.platform,
         )
     return integrations

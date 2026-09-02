@@ -142,7 +142,7 @@ class IntegrationAccount:
 
 @dataclass(frozen=True)
 class ContentVariant:
-    integration_id: str
+    account_id: str
     body: str
     media: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -154,12 +154,16 @@ class ContentVariant:
     hook: str = ""
     format: str = ""
 
+    @property
+    def integration_id(self) -> str:
+        return self.account_id
+
 
 @dataclass(frozen=True)
 class DistributionJob:
     job_id: str
     content_package_id: str
-    integration_id: str
+    account_id: str
     variant: ContentVariant
     action: str = "publish"
     scheduled_at: str | None = None
@@ -174,6 +178,10 @@ class DistributionJob:
     creator_id: str | None = None
     campaign_id: str | None = None
     request_id: str = ""
+
+    @property
+    def integration_id(self) -> str:
+        return self.account_id
 
 
 @dataclass(frozen=True)
@@ -203,7 +211,7 @@ class DistributionAttempt:
 @dataclass(frozen=True)
 class Publication:
     distribution_job_id: str
-    integration_id: str
+    account_id: str
     provider: str
     provider_post_id: str
     platform_object_id: str | None = None
@@ -213,6 +221,8 @@ class Publication:
     content_package_id: str = ""
     request_id: str = ""
     publication_id: str = ""
+    platform: str = ""
+    created_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.publication_id:
@@ -235,6 +245,10 @@ class Publication:
 
     def resolved_platform_object_id(self) -> str | None:
         return self.platform_object_id
+
+    @property
+    def integration_id(self) -> str:
+        return self.account_id
 
 
 @dataclass(frozen=True)
@@ -298,11 +312,11 @@ class IllegalJobTransition(RuntimeError):
 
 def make_idempotency_key(
     content_package_id: str,
-    integration_id: str,
+    account_id: str,
     action: str,
     scheduled_at: str | None = None,
 ) -> str:
-    raw = f"{content_package_id}|{integration_id}|{action}|{scheduled_at or ''}"
+    raw = f"{content_package_id}|{account_id}|{action}|{scheduled_at or ''}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -317,8 +331,9 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
     errors: list[str] = []
     if not job.job_id or not job.content_package_id:
         errors.append("job_id and content_package_id are required")
-    if job.integration_id != integration.id:
-        errors.append("job integration does not match registered integration")
+    job_account = getattr(job, "account_id", None) or getattr(job, "integration_id", "")
+    if job_account != integration.id:
+        errors.append("job account does not match registered account")
     if not job.variant.body.strip() and not job.variant.media:
         errors.append("content body or media is required")
     if job.action not in {"publish", "schedule", "delete", "cancel"}:
@@ -326,6 +341,8 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
     capability_name = "schedule" if job.action == "schedule" else "publish"
     if job.action in {"publish", "schedule"} and not integration.capabilities.verified(capability_name):
         errors.append(f"{job.action} capability is unverified or unsupported")
-    if not integration.enabled or integration.state not in {"ENABLED", "VERIFIED"}:
-        errors.append("integration is not enabled")
+    enabled = bool(getattr(integration, "enabled", False) or getattr(integration, "status", "") == "ENABLED")
+    state = str(getattr(integration, "state", None) or getattr(integration, "status", "") or "")
+    if not enabled or state not in {"ENABLED", "VERIFIED"}:
+        errors.append("account is not enabled")
     return errors

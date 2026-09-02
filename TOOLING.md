@@ -1,4 +1,4 @@
-# Meiti V4.2 Tooling
+# Meiti V4.4 Tooling
 
 ## Creative
 
@@ -20,8 +20,9 @@ Environment (never commit secrets):
 DATABASE_URL=
 LECHUANG_API_URL=
 LECHUANG_API_KEY=
-POSTIZ_API_URL=
-POSTIZ_API_KEY=
+X_CLIENT_ID=
+X_CLIENT_SECRET=
+X_REDIRECT_URI=
 SCRAPECREATORS_API_KEY=
 ```
 
@@ -36,16 +37,18 @@ python scripts/db/migrate.py history
 python scripts/db/migrate.py verify
 ```
 
-## Distribution
+## Social
 
 ```bash
-docker compose -f infrastructure/postiz/docker-compose.yml up -d
+python scripts/meiti.py social accounts
+python scripts/meiti.py social verify
+python scripts/social_doctor.py
 python scripts/meiti_doctor.py
 python scripts/runtime_check.py
 ```
 
-ProviderResolver routes distribution adapters. CreativeWorkflow never calls
-the distribution provider.
+SocialProviderResolver routes native platform adapters. CreativeWorkflow never
+calls a social provider. Meiti owns scheduling.
 
 ## Control plane
 

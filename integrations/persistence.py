@@ -37,6 +37,9 @@ class JobStore(Protocol):
     def save_content_package(self, package: ContentPackage) -> ContentPackage: ...
     def save_campaign(self, campaign: Campaign) -> Campaign: ...
     def save_integration(self, integration: Any) -> Any: ...
+    def save_account(self, account: Any) -> Any: ...
+    def get_account(self, account_id: str) -> Any | None: ...
+    def list_accounts(self) -> list[Any]: ...
 
 
 @dataclass
@@ -49,6 +52,7 @@ class InMemoryStore:
     packages: dict[str, ContentPackage] = field(default_factory=dict)
     campaigns: dict[str, Campaign] = field(default_factory=dict)
     integrations: dict[str, Any] = field(default_factory=dict)
+    accounts: dict[str, Any] = field(default_factory=dict)
 
     def save_job(self, job: DistributionJob) -> DistributionJob:
         existing = self.get_job_by_idempotency(job.idempotency_key or "")
@@ -105,6 +109,17 @@ class InMemoryStore:
     def save_integration(self, integration: Any) -> Any:
         self.integrations[integration.id] = integration
         return integration
+
+    def save_account(self, account: Any) -> Any:
+        self.accounts[account.account_id] = account
+        self.integrations[account.account_id] = account.as_integration() if hasattr(account, "as_integration") else account
+        return account
+
+    def get_account(self, account_id: str):
+        return self.accounts.get(account_id)
+
+    def list_accounts(self):
+        return list(self.accounts.values())
 
 
 class DatabaseStore:
@@ -201,6 +216,71 @@ class DatabaseStore:
             session.commit()
         return integration
 
+    def save_account(self, account: Any) -> Any:
+        self.save_integration(account.as_integration() if hasattr(account, "as_integration") else account)
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialAccountRecord
+
+        with SessionLocal() as session:
+            row = session.get(SocialAccountRecord, account.account_id)
+            fields = {
+                "provider": account.provider,
+                "platform": account.platform,
+                "username": account.username,
+                "display_name": account.display_name,
+                "avatar_url": account.avatar_url,
+                "status": account.status,
+                "capabilities": account.capabilities.claimed() if hasattr(account.capabilities, "claimed") else {},
+                "credential_ref": account.credential_ref,
+                "provider_account_id": account.provider_account_id,
+                "last_verified_at": _as_datetime(account.last_verified_at),
+                "blocked_reason": account.blocked_reason,
+                "region": account.region,
+            }
+            if row is None:
+                row = SocialAccountRecord(account_id=account.account_id, **fields)
+                session.add(row)
+            else:
+                for key, value in fields.items():
+                    setattr(row, key, value)
+            session.commit()
+        return account
+
+    def get_account(self, account_id: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialAccountRecord
+        from social.accounts.models import SocialAccount, SocialProviderCapabilities
+
+        with SessionLocal() as session:
+            row = session.get(SocialAccountRecord, account_id)
+            if row is None:
+                return None
+            return SocialAccount(
+                account_id=row.account_id,
+                provider=row.provider,
+                platform=row.platform,
+                username=row.username,
+                display_name=row.display_name,
+                avatar_url=row.avatar_url,
+                status=row.status,
+                capabilities=SocialProviderCapabilities.from_claimed(row.capabilities or {}),
+                credential_ref=row.credential_ref or "",
+                provider_account_id=row.provider_account_id or "",
+                last_verified_at=row.last_verified_at.isoformat() if row.last_verified_at else None,
+                blocked_reason=row.blocked_reason,
+                region=row.region,
+                created_at=row.created_at.isoformat() if row.created_at else None,
+                updated_at=row.updated_at.isoformat() if row.updated_at else None,
+            )
+
+    def list_accounts(self):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialAccountRecord
+
+        with SessionLocal() as session:
+            ids = [row.account_id for row in session.query(SocialAccountRecord).all()]
+        return [account for account_id in ids if (account := self.get_account(account_id)) is not None]
+
     def save_job(self, job: DistributionJob) -> DistributionJob:
         from scripts.db.engine import SessionLocal
         from scripts.db.models import DistributionJobRecord
@@ -211,7 +291,7 @@ class DatabaseStore:
             row = session.get(DistributionJobRecord, job.job_id)
             fields = {
                 "content_package_id": job.content_package_id,
-                "integration_id": job.integration_id,
+                "integration_id": job.account_id,
                 "action": job.action,
                 "status": job.status,
                 "idempotency_key": job.idempotency_key,
@@ -262,10 +342,12 @@ class DatabaseStore:
             row = session.get(PublicationRecord, publication.publication_id)
             fields = {
                 "distribution_job_id": publication.distribution_job_id,
-                "integration_id": publication.integration_id,
+                "integration_id": publication.account_id,
                 "provider": publication.provider,
                 "provider_post_id": publication.provider_post_id,
                 "platform_object_id": publication.platform_object_id,
+                "platform": publication.platform,
+                "account_id": publication.account_id,
                 "external_url": publication.external_url,
                 "status": publication.status,
                 "published_at": publication.published_at,
@@ -414,7 +496,7 @@ class DatabaseStore:
 def _job_from_payload(payload: dict[str, Any]) -> DistributionJob:
     variant_payload = dict(payload.get("variant") or {})
     variant = ContentVariant(
-        integration_id=str(variant_payload.get("integration_id") or payload.get("integration_id") or ""),
+        account_id=str(variant_payload.get("account_id") or variant_payload.get("integration_id") or payload.get("account_id") or payload.get("integration_id") or ""),
         body=str(variant_payload.get("body") or ""),
         media=tuple(variant_payload.get("media") or ()),
         metadata=dict(variant_payload.get("metadata") or {}),
@@ -429,7 +511,7 @@ def _job_from_payload(payload: dict[str, Any]) -> DistributionJob:
     return DistributionJob(
         job_id=str(payload.get("job_id") or ""),
         content_package_id=str(payload.get("content_package_id") or ""),
-        integration_id=str(payload.get("integration_id") or ""),
+        account_id=str(payload.get("account_id") or payload.get("integration_id") or ""),
         variant=variant,
         action=str(payload.get("action") or "publish"),
         scheduled_at=payload.get("scheduled_at"),
@@ -451,7 +533,7 @@ def _job_from_record(row: Any) -> DistributionJob:
     return _job_from_payload({
         "job_id": row.job_id,
         "content_package_id": row.content_package_id,
-        "integration_id": row.integration_id,
+        "account_id": getattr(row, "account_id", None) or row.integration_id,
         "variant": row.variant,
         "action": row.action,
         "scheduled_at": row.scheduled_at.isoformat() if row.scheduled_at else None,
@@ -484,9 +566,11 @@ def _attempt_from_record(row: Any) -> DistributionAttempt:
 def _publication_from_record(row: Any) -> Publication:
     return Publication(
         publication_id=row.publication_id, distribution_job_id=row.distribution_job_id,
-        integration_id=row.integration_id, provider=row.provider,
+        account_id=getattr(row, "account_id", None) or row.integration_id, provider=row.provider,
         provider_post_id=row.provider_post_id, platform_object_id=row.platform_object_id,
         status=row.status, published_at=row.published_at.isoformat() if row.published_at else None,
         external_url=row.external_url, content_package_id=row.content_package_id,
         request_id=row.request_id,
+        platform=getattr(row, "platform", "") or "",
+        created_at=row.created_at.isoformat() if getattr(row, "created_at", None) else None,
     )

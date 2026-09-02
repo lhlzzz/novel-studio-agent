@@ -1,0 +1,1 @@
+CLAIMED = {'text': False, 'image': False, 'video': True, 'carousel': False, 'story': False, 'reel': False, 'thread': False, 'publish': True, 'schedule': False, 'analytics': True, 'media_upload': True}

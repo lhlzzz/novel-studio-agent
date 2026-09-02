@@ -8,6 +8,7 @@ from typing import Any
 def snapshot() -> dict[str, Any]:
     from agents.registry import list_agents
     from integrations.registry.loader import load_registry
+    from social.accounts.manager import SocialAccountManager
     from intelligence.router import credential_state
 
     agents = []
@@ -39,11 +40,17 @@ def snapshot() -> dict[str, Any]:
     }
     research = credential_state()
     creative = _creative()
+    accounts = []
+    try:
+        for account in SocialAccountManager().list_accounts():
+            accounts.append({"id": account.account_id, "provider": account.provider, "platform": account.platform, "status": account.status, "enabled": account.enabled})
+    except Exception:
+        accounts = [item for item in integrations if item["enabled"]]
     providers = sorted({item["provider"] for item in integrations} | set(creative.get("providers") or []))
     return {
         "agents": agents,
         "integrations": integrations,
-        "accounts": [item for item in integrations if item["enabled"]],
+        "accounts": accounts,
         "providers": providers,
         "jobs": database.get("jobs", []),
         "failures": database.get("failures", []),
@@ -85,7 +92,7 @@ def _creative() -> dict[str, Any]:
             "tasks": [item for run in store.list_runs() for item in store.list_tasks(run.run_id)],
             "assets": store.list_assets(),
             "judges": [{"name": "vision", "ready": ready, "reason": reason}],
-            "providers": ["lechuang", "postiz"],
+            "providers": ["lechuang"],
         }
     except Exception as exc:
         return {"runs": [], "tasks": [], "assets": [], "judges": [{"name": "vision", "ready": False, "reason": str(exc)}], "providers": ["lechuang"]}

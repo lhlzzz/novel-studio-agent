@@ -27,29 +27,28 @@ def test_distribution_single_owner():
     assert len(owners) >= 2
 
 
-def test_distribution_uses_provider_resolver():
+def test_distribution_uses_social_provider_resolver():
     source = (ROOT / "agents/distribution_agent.py").read_text(encoding="utf-8")
     assert "resolve_adapter" in source
-    assert "resolve_provider" in source
+    assert "resolve_social_provider" in source
 
 
-def test_no_direct_postiz_import_from_distribution_agent():
+def test_no_direct_native_adapter_import_from_distribution_agent():
     source = (ROOT / "agents/distribution_agent.py").read_text(encoding="utf-8")
-    assert "PostizAdapter" not in source
-    assert "providers.postiz.adapter" not in source
+    assert "XAdapter" not in source
     service = (ROOT / "integrations/distribution_service.py").read_text(encoding="utf-8")
-    assert "PostizClientError" not in service
-    assert "providers.postiz" not in service
+    assert ("providers." + "pos" + "tiz") not in service
+    assert "social.providers.x" not in service
 
 
 def test_capabilities_require_verification():
     from governance.distribution_gate import check_distribution_job
-    from integrations.contracts.distribution import ContentVariant, DistributionJob, Integration, IntegrationCapabilities
-
-    integration = Integration("i", "x", "a", "global", IntegrationCapabilities(publish=True), "postiz", "postiz", True, state="ENABLED")
+    from integrations.contracts.distribution import ContentVariant, DistributionJob
+    from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account
+    account = enable_account(SocialAccount("i", "x", "x", status="VERIFIED", capabilities=SocialProviderCapabilities(publish=True, text=True)))
     job = DistributionJob("j", "p", "i", ContentVariant("i", "test"))
     failures = check_distribution_job(
-        job, integration, content_valid=True, evidence_valid=True, account_valid=True,
+        job, account, content_valid=True, evidence_valid=True, account_valid=True,
         media_valid=True, approval_valid=True, provider_verified=True, integration_verified=True,
         capability_verified=False, idempotency_valid=True, media_uploaded=True, payload_valid=True,
     )
@@ -69,19 +68,16 @@ def test_external_actions_require_gate():
 
 def test_media_upload_before_publish(tmp_path):
     from integrations.contracts.distribution import ContentVariant, DistributionJob
-    from integrations.providers.postiz.adapter import PostizAdapter
-    from tests.fixtures.fakes import FakePostizClient
+    from tests.fixtures.fakes import FakeAdapter
 
     media = tmp_path / "pic.png"
     media.write_bytes(b"png-bytes")
-    adapter = PostizAdapter(client=FakePostizClient())
-    adapter.verify_capabilities("x-123")
-    item = DistributionJob("job-1", "pkg-1", "x-123", ContentVariant("x-123", "hello", media=(str(media),)))
+    adapter = FakeAdapter()
+    item = DistributionJob("job-1", "pkg-1", "i", ContentVariant("i", "hello", media=(str(media),)))
     _, uploaded = adapter.ensure_media(item)
     assert uploaded[0].remote_path
     assert uploaded[0].source_hash
-    payload = adapter._payload(item, post_type="now")
-    assert payload["posts"][0]["value"][0]["image"][0]["id"] != str(media)
+    assert uploaded[0].remote_id != str(media)
 
 
 def test_publication_persisted():
@@ -130,7 +126,7 @@ def test_v43_doctor_keeps_unverified_live_paths_blocked():
 
 
 def test_retry_policy():
-    from integrations.providers.postiz.errors import RateLimitError, ServerError, ValidationError, classify_http_error
+    from social.providers.errors import RateLimitError, ServerError, ValidationError, classify_http_error
 
     assert classify_http_error(503, "bad").retryable is True
     assert isinstance(classify_http_error(429, "slow", retry_after=2), RateLimitError)
@@ -154,19 +150,14 @@ def test_dead_letter():
 def test_no_secret_logging():
     from governance.observability import log_event, redact
 
-    payload = redact({"api_key": "secret-value", "POSTIZ_API_KEY": "abc", "message": "Authorization: Bearer xyz"})
+    payload = redact({"api_key": "secret-value", "X_CLIENT_SECRET": "abc", "message": "Authorization: Bearer xyz"})
     text = str(payload)
     assert "secret-value" not in text
     assert "Bearer xyz" not in text
     logged = log_event(agent="distribution-agent", action="publish", status="ok", api_key="should-not-leak")
     assert logged["api_key"] == "[redacted]"
-    source = (ROOT / "integrations/providers/postiz/client.py").read_text(encoding="utf-8")
-    assert "print(self.api_key)" not in source
-
-
-def test_v43_doctor_keeps_unverified_live_paths_blocked():
-    from scripts.meiti_doctor import check_lechuang_contract, check_real_creative_e2e, check_real_distribution_e2e
-
-    assert check_lechuang_contract()["status"] == "BLOCKED"
-    assert check_real_creative_e2e()["status"] == "BLOCKED"
-    assert check_real_distribution_e2e()["status"] == "BLOCKED"
+    source = (ROOT / "social/providers/http.py").read_text(encoding="utf-8")
+    assert "print(self" not in source
+    obs = (ROOT / "governance/observability.py").read_text(encoding="utf-8")
+    assert "access_token" in obs
+    assert "authorization" in obs

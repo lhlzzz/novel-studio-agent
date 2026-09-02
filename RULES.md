@@ -1,4 +1,4 @@
-# Meiti V4.2 Rules
+# Meiti V4.4 Rules
 
 Meiti is the single owner of the AI Creator Operating System.
 Platforms are integrations and adapters only; they are never agents,
@@ -42,7 +42,14 @@ workspaces, or independent business databases.
 36. Technical QA is local; AI Judge requires a vision provider.
 37. ContentFitJudge is not ContentPolicyGate.
 38. Creative code never imports distribution adapters.
+39. Social platforms are native integrations.
+40. No third-party social scheduler is required.
+41. Meiti owns social account metadata.
+42. Provider credentials never enter business tables.
+43. Social providers only publish and manage accounts.
+44. Creative providers only generate media.
 
-Lechuang is a generation provider. Postiz is a distribution provider.
-Meiti owns business intelligence, content, memory, strategy, commerce,
-analytics, gates, and creative workflows.
+Lechuang is a generation provider. Native social adapters publish to X,
+Instagram, YouTube, TikTok, and LinkedIn. Meiti owns business intelligence,
+content, memory, strategy, commerce, analytics, gates, accounts, and
+creative workflows.

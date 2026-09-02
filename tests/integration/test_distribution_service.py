@@ -22,6 +22,7 @@ def test_service_requires_gate_before_external_publish():
 def test_service_returns_external_id_after_gate_passes():
     adapter = FakeAdapter()
     publication = DistributionService(adapter).execute(_job(), gate_check=lambda job: True)
-    assert publication.provider_post_id == "postiz-post-1"
+    assert publication.provider_post_id == "x-post-1"
     assert publication.platform_object_id == "x-status-1"
+    assert publication.account_id == "i"
     assert adapter.published is True

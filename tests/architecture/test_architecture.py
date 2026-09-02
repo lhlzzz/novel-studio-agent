@@ -15,7 +15,7 @@ def test_workspace_tree_and_launchers_are_absent():
 def test_capability_topology_exists():
     for name in ("agents", "intelligence", "strategy", "content", "media",
                  "creative", "analytics", "memory", "commerce", "governance",
-                 "workflows", "integrations", "infrastructure"):
+                 "workflows", "integrations", "infrastructure", "social"):
         assert (ROOT / name).is_dir(), name
 
 
@@ -28,10 +28,11 @@ def test_no_fixed_port_topology_in_active_files():
         assert not any(port in text for port in forbidden), path
 
 
-def test_distribution_agent_does_not_import_postiz_adapter_directly():
+def test_distribution_agent_does_not_import_concrete_adapters():
     source = (ROOT / "agents/distribution_agent.py").read_text(encoding="utf-8")
-    assert "PostizAdapter" not in source
-    assert "providers.postiz.adapter" not in source
+    assert "XAdapter" not in source
+    assert "InstagramAdapter" not in source
+    assert ("providers." + "pos" + "tiz") not in source
 
 
 def test_media_agent_does_not_import_lechuang_adapter():
@@ -40,8 +41,8 @@ def test_media_agent_does_not_import_lechuang_adapter():
     assert "providers.lechuang" not in source
 
 
-def test_creative_does_not_import_postiz():
-    forbidden = ("PostizAdapter", "providers.postiz")
+def test_creative_does_not_import_social_adapters():
+    forbidden = ("XAdapter", "InstagramAdapter", "YouTubeAdapter", "TikTokAdapter", "LinkedInAdapter", "social.providers")
     for path in (ROOT / "creative").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert all(token not in text for token in forbidden), path

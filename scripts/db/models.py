@@ -415,6 +415,55 @@ class ContentVariantRecord(Base):
     )
 
 
+
+class SocialAccountRecord(Base):
+    """Native social account metadata. Tokens live in the runtime secret store."""
+
+    __tablename__ = "social_accounts"
+
+    account_id = Column(String(255), primary_key=True)
+    provider = Column(String(120), nullable=False)
+    platform = Column(String(120), nullable=False)
+    username = Column(Text, nullable=False, default="")
+    display_name = Column(Text, nullable=False, default="")
+    avatar_url = Column(Text, nullable=False, default="")
+    status = Column(String(40), nullable=False, default="PENDING")
+    capabilities = Column(JSONB, nullable=False, default=dict)
+    credential_ref = Column(String(255), nullable=False, default="")
+    provider_account_id = Column(String(255), nullable=False, default="")
+    region = Column(String(80), nullable=False, default="global")
+    last_verified_at = Column(DateTime)
+    blocked_reason = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED')",
+            name="ck_meiti_social_account_status",
+        ),
+        Index("idx_meiti_social_accounts_provider", "provider"),
+        Index("idx_meiti_social_accounts_status", "status"),
+    )
+
+
+class DerivedAssetRecord(Base):
+    """Platform-specific derived media. Original MediaAsset is immutable."""
+
+    __tablename__ = "derived_assets"
+
+    derived_asset_id = Column(String(255), primary_key=True)
+    source_asset_id = Column(String(255), nullable=False)
+    target_platform = Column(String(80), nullable=False)
+    transformation = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_derived_assets_source", "source_asset_id"),
+        Index("idx_meiti_derived_assets_platform", "target_platform"),
+    )
+
+
 class IntegrationRecord(Base):
     """Runtime-verified provider account, distinct from provider registration."""
 
@@ -516,6 +565,8 @@ class PublicationRecord(Base):
     published_at = Column(DateTime)
     content_package_id = Column(String(255), nullable=False)
     request_id = Column(String(255), nullable=False, default="")
+    platform = Column(String(120), nullable=False, default="")
+    account_id = Column(String(255), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

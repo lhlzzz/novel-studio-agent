@@ -8,22 +8,22 @@ from integrations.distribution_service import DistributionService
 from integrations.persistence import InMemoryStore
 from memory.retrieval import retrieve
 from services.workers.analytics_worker import run_once
-from tests.e2e.fake_postiz import FakePostizAdapter
+from tests.e2e.fake_x import FakeXAdapter
 
 
 def test_mock_package_to_memory_loop():
-    adapter = FakePostizAdapter()
+    adapter = FakeXAdapter()
     store = InMemoryStore()
     package = ContentPackage(
         "pkg-e2e",
-        "MEITI V3 POSTIZ E2E TEST",
+        "MEITI V4 NATIVE SOCIAL E2E TEST",
         "publish body",
         hook="stop guessing distribution",
         topic="distribution",
         brand_id="brand-a",
         campaign_id="camp-e2e",
     )
-    variant = build_variant(package, integration_id="x-test", platform="x")
+    variant = build_variant(package, account_id="x-test", platform="x")
     job = DistributionJob(
         "job-e2e",
         package.package_id,
@@ -34,7 +34,7 @@ def test_mock_package_to_memory_loop():
         campaign_id=package.campaign_id,
     )
     failures = check_distribution_job(
-        job, adapter.integration, content_valid=True, evidence_valid=True, account_valid=True,
+        job, adapter.account, content_valid=True, evidence_valid=True, account_valid=True,
         media_valid=True, approval_valid=True, provider_verified=True, integration_verified=True,
         capability_verified=True, idempotency_valid=True, media_uploaded=True, payload_valid=True,
     )

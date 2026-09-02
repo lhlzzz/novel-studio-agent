@@ -109,12 +109,6 @@
       "skillPath": "skills/post-writer-sms/SKILL.md",
       "computedHash": "33e7e04f23d2e3e31bd8d10a42c508d6260db7218ab51fc3965bc03fff5d9582"
     },
-    "postiz": {
-      "source": "gitroomhq/postiz-agent",
-      "sourceType": "github",
-      "skillPath": "SKILL.md",
-      "computedHash": "660f448f1910526239b63329ae6ac6314f809be39ecac4fe31307ba92cd1974d"
-    },
     "product-demand-research": {
       "source": "ScrapeCreators/social-media-research-skills",
       "sourceType": "github",

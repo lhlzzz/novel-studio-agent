@@ -1,11 +1,11 @@
 """Fail-closed checks for DistributionJob admission."""
 
-from integrations.contracts.distribution import DistributionJob, Integration
+from integrations.contracts.distribution import DistributionJob
 
 
 def check_distribution_job(
     job: DistributionJob,
-    integration: Integration,
+    account,
     *,
     content_valid: bool,
     evidence_valid: bool,
@@ -14,6 +14,7 @@ def check_distribution_job(
     approval_valid: bool,
     provider_verified: bool = False,
     integration_verified: bool = False,
+    account_verified: bool = False,
     capability_verified: bool = False,
     idempotency_valid: bool = False,
     media_uploaded: bool = False,
@@ -26,18 +27,27 @@ def check_distribution_job(
         failures.append("evidence invalid")
     if not account_valid:
         failures.append("account invalid")
-    if not integration.enabled:
-        failures.append("integration disabled")
+    enabled = bool(getattr(account, "enabled", False) or getattr(account, "status", "") == "ENABLED")
+    if not enabled:
+        failures.append("account disabled")
     if not media_valid:
         failures.append("media invalid")
     if not approval_valid:
         failures.append("approval invalid")
-    if job.integration_id != integration.id:
-        failures.append("integration mismatch")
+    account_id = getattr(account, "id", None) or getattr(account, "account_id", "")
+    if job.account_id != account_id:
+        failures.append("account mismatch")
     if not provider_verified:
         failures.append("provider unverified")
-    if not integration_verified:
-        failures.append("integration unverified")
+    verified = bool(
+        account_verified
+        or integration_verified
+        or getattr(account, "verified", False)
+        or getattr(account, "status", "") in {"VERIFIED", "ENABLED"}
+        or getattr(account, "state", "") in {"VERIFIED", "ENABLED"}
+    )
+    if not verified:
+        failures.append("account not verified")
     if not capability_verified:
         failures.append("capability unverified")
     if not idempotency_valid:

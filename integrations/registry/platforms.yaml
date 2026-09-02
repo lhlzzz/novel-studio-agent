@@ -1,42 +1,47 @@
 providers:
-  postiz:
-    id: postiz
-    region: global
-    adapter: postiz
-    distribution: postiz
-    capabilities: {publish: true, schedule: true, analytics: true, media: true, media_upload: true}
-    # Provider metadata is present; enable only after runtime/API verification.
-    enabled: false
   x:
     id: x
+    platform: x
     region: global
-    adapter: postiz
-    distribution: postiz
-    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    adapter: x
+    distribution: native
+    capabilities: {text: true, image: true, video: true, thread: true, publish: true, media_upload: true, analytics: true, schedule: false, carousel: false, story: false, reel: false}
     enabled: false
   instagram:
     id: instagram
+    platform: instagram
     region: global
-    adapter: postiz
-    distribution: postiz
-    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    adapter: instagram
+    distribution: native
+    capabilities: {text: false, image: true, video: true, reel: true, carousel: true, story: true, publish: true, media_upload: true, analytics: true, schedule: false, thread: false}
     enabled: false
   youtube:
     id: youtube
+    platform: youtube
     region: global
-    adapter: postiz
-    distribution: postiz
-    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    adapter: youtube
+    distribution: native
+    capabilities: {video: true, publish: true, media_upload: true, analytics: true, text: false, image: false, carousel: false, story: false, reel: false, thread: false, schedule: false}
     enabled: false
   tiktok:
     id: tiktok
+    platform: tiktok
     region: global
-    adapter: postiz
-    distribution: postiz
-    capabilities: {publish: true, schedule: true, analytics: true, media_upload: true}
+    adapter: tiktok
+    distribution: native
+    capabilities: {video: true, publish: true, media_upload: true, analytics: true, text: false, image: false, carousel: false, story: false, reel: false, thread: false, schedule: false}
+    enabled: false
+  linkedin:
+    id: linkedin
+    platform: linkedin
+    region: global
+    adapter: linkedin
+    distribution: native
+    capabilities: {text: true, image: true, video: true, publish: true, media_upload: true, analytics: true, carousel: false, story: false, reel: false, thread: false, schedule: false}
     enabled: false
   xiaohongshu:
     id: xiaohongshu
+    platform: xiaohongshu
     region: cn
     adapter: xiaohongshu
     distribution: custom
@@ -44,6 +49,7 @@ providers:
     enabled: false
   douyin:
     id: douyin
+    platform: douyin
     region: cn
     adapter: douyin
     distribution: custom
@@ -51,6 +57,7 @@ providers:
     enabled: false
   kuaishou:
     id: kuaishou
+    platform: kuaishou
     region: cn
     adapter: kuaishou
     distribution: custom
@@ -58,6 +65,7 @@ providers:
     enabled: false
   shipinghao:
     id: shipinghao
+    platform: shipinghao
     region: cn
     adapter: shipinghao
     distribution: custom
@@ -65,6 +73,7 @@ providers:
     enabled: false
   xianyu:
     id: xianyu
+    platform: xianyu
     region: cn
     adapter: xianyu
     distribution: custom

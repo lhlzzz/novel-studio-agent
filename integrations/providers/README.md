@@ -1,3 +1,4 @@
 # Integration Providers
 
-Provider metadata belongs here when it is not adapter implementation code.
+Social execution backends live in `social/providers/`. This package resolves
+them without letting agents import concrete adapters.

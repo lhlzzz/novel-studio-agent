@@ -1,7 +1,6 @@
-# Meiti V4.2 Decisions
+# Meiti V4.4 Decisions
 
 - **2026-08-26:** Platform is an integration, not an agent or workspace.
-- **2026-08-26:** Meiti owns business data; Postiz owns distribution infrastructure.
 - **2026-08-28:** ProviderResolver is the only distribution routing mechanism.
 - **2026-08-29:** ContentPackage, Campaign, Publication, MediaUploadResult,
   and DistributionAttempt are first-class.
@@ -14,10 +13,9 @@
 - **2026-09-01:** Default people/lifestyle path is image -> image QA -> image-to-video.
 - **2026-09-01:** Generation assets are immutable and content-addressed by sha256.
 - **2026-09-01:** Judge returns score/decision/reason and never publishes.
-
 - **2026-09-01:** Creative runtime is durable: PostgreSQL CreativeRun/Task, worker lease, resume, replay from workflow snapshot.
-- **2026-09-01:** Per-node provider binding. Immutable assets. sha256 identity. Async worker.
-
-- **2026-09-01:** V4.3 production activation does not guess the Lechuang HTTP contract. Typed Meiti-side request/response objects exist; live calls stay BLOCKED until official endpoints are extracted.
-- **2026-09-01:** AI Gateway Vision Provider is independent of Lechuang. Invalid or missing gateway credentials fail closed.
+- **2026-09-01:** V4.3 production activation does not guess the Lechuang HTTP contract.
+- **2026-09-01:** AI Gateway Vision Provider is independent of Lechuang.
 - **2026-09-01:** Research artifacts are first-class and never written as ContentPackage.
+- **2026-09-02:** Meiti owns native social accounts. Third-party social schedulers
+  are not part of the runtime. Credentials are stored by credential_ref only.
