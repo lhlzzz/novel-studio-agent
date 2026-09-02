@@ -4,10 +4,10 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from integrations.contracts.distribution import CapabilityRecord
 from social.accounts.models import SocialAccount, SocialProviderCapabilities
+from social.handoff.export import materialize_handoff_export
 from social.handoff.models import XHSHandoff
 from social.media_policy import validate_job
 from social.providers.base import BaseCNAdapter
@@ -15,7 +15,7 @@ from social.providers.errors import CapabilityUnsupported, ValidationError
 from social.providers.xiaohongshu.auth import XiaohongshuAuth
 from social.providers.xiaohongshu.capabilities import CLAIMED
 from social.providers.xiaohongshu.client import XiaohongshuClient
-from social.providers.xiaohongshu.contract import DIRECT_PUBLISH_AVAILABLE, SHARE_IMAGE_MAX, SHARE_IMAGE_MIN
+from social.providers.xiaohongshu.contract import DIRECT_PUBLISH_AVAILABLE, OAUTH_ARCHITECTURE_SUPPORTED, SHARE_IMAGE_MAX, SHARE_IMAGE_MIN, WRITE_NOTES_AVAILABLE
 from social.providers.xiaohongshu.schemas import XHSNotePackage
 
 
@@ -59,30 +59,48 @@ class XiaohongshuAdapter(BaseCNAdapter):
         return list(self._accounts.values())
 
     def verify_capabilities(self, account_id: str) -> SocialProviderCapabilities:
+        from integrations.contracts.distribution import make_capability
         now = _utcnow()
         records = dict(SocialProviderCapabilities.from_claimed(CLAIMED, verified=False).records)
-        records["handoff"] = CapabilityRecord(
-            name="handoff",
+        records["handoff"] = make_capability(
+            "handoff",
             supported=True,
-            verified=True,
-            verified_at=now,
+            authorized=True,
+            contract_verified=True,
+            live_verified=True,
             method="handoff_export",
-            verification_method="handoff_export",
             evidence={"surface": "client_share_sdk", "direct_publish": False, "verified_at": now},
+            verified_at=now,
         )
         records["publish"] = CapabilityRecord(
             name="publish",
             supported=False,
             verified=False,
-            method="official_server_unavailable",
-            evidence={"reason": "official server-side publish is not available"},
+            authorized=False,
+            contract_verified=False,
+            live_verified=False,
+            method="write_notes_unverified",
+            evidence={"reason": "write_notes is not live-verified", "oauth_architecture": OAUTH_ARCHITECTURE_SUPPORTED, "write_notes": WRITE_NOTES_AVAILABLE},
         )
         records["direct_publish"] = CapabilityRecord(
             name="direct_publish",
-            supported=DIRECT_PUBLISH_AVAILABLE,
+            supported=bool(WRITE_NOTES_AVAILABLE and DIRECT_PUBLISH_AVAILABLE),
             verified=False,
-            method="official_server_unavailable",
-            evidence={"reason": "official server-side publish is not available"},
+            authorized=False,
+            contract_verified=False,
+            live_verified=False,
+            method="write_notes_unverified",
+            evidence={"reason": "direct note publish requires write_notes + official publish API", "oauth_architecture": OAUTH_ARCHITECTURE_SUPPORTED},
+        )
+        records["oauth"] = CapabilityRecord(
+            name="oauth",
+            supported=OAUTH_ARCHITECTURE_SUPPORTED,
+            verified=False,
+            authorized=False,
+            contract_verified=False,
+            live_verified=False,
+            method="architecture_supported",
+            evidence={"architecture_supported": True, "contract_verified": False},
         )
         records["image"] = CapabilityRecord(
             name="image",
@@ -149,21 +167,15 @@ class XiaohongshuAdapter(BaseCNAdapter):
 
     def handoff_to_xhs(self, job) -> dict[str, Any]:
         note = self.prepare_note(job)
-        handoff_id = f"xhs-handoff-{uuid4().hex[:12]}"
-        export_path = ""
-        root = os.getenv("MEITI_XHS_HANDOFF_DIR", "").strip()
+        handoff_id = f"xhs-handoff-{job.job_id}"
         package = note.as_export()
-        if root:
-            directory = Path(root)
-            directory.mkdir(parents=True, exist_ok=True)
-            export_path = str(directory / f"{handoff_id}.json")
-            Path(export_path).write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
         handoff = XHSHandoff(
             handoff_id=handoff_id,
             account_id=job.account_id,
             content_package_id=job.content_package_id,
             status="READY_FOR_XHS",
-            export_path=export_path,
+            export_path="",
+            export_status="PENDING",
             content_type=note.content_type,
             title=note.title,
             content=note.content,
@@ -179,7 +191,8 @@ class XiaohongshuAdapter(BaseCNAdapter):
             "handoff_id": handoff_id,
             "kind": "handoff",
             "status": "READY_FOR_XHS",
-            "export_path": export_path,
+            "export_path": "",
+            "export_status": "PENDING",
             "created_at": handoff.created_at,
             "package": package,
             "content_type": note.content_type,
@@ -197,7 +210,7 @@ class XiaohongshuAdapter(BaseCNAdapter):
             return self.publish_direct(job)
         return self.handoff_to_xhs(job)
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
         raise CapabilityUnsupported("Xiaohongshu remote status is NOT_APPLICABLE; handoff is not a publication")
 
     def analytics(self, publication) -> dict[str, Any | None]:

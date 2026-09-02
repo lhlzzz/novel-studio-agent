@@ -6,7 +6,7 @@ CLAIMED = {
     "listing": True,
     "listing_edit": True,
     "listing_delete": True,
-    "media_upload": True,
+    "media_upload": False,
     "analytics": True,
     "schedule": False,
     "handoff": False,

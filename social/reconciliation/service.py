@@ -48,8 +48,7 @@ class SocialReconciliationService:
 
     def reconcile(self, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(job_id)
-        getter = getattr(self.store, "get_handoff_by_job", None)
-        handoff = getter(job_id) if callable(getter) else None
+        handoff = self.store.get_handoff_by_job(job_id)
         if handoff is not None:
             return {
                 "job_id": job_id,
@@ -58,10 +57,32 @@ class SocialReconciliationService:
                 "handoff_id": handoff.handoff_id,
                 "handoff_status": handoff.status,
             }
+        listing = self.store.get_listing_by_job(job_id)
+        if listing is not None:
+            if not job or not job.provider:
+                return {"job_id": job_id, "status": "UNKNOWN", "reason": "listing job provider missing"}
+            raw = self.adapter.get_status(listing.provider_item_id, provider_object_type="listing")
+            from commerce.xianyu import map_listing_status, transition_listing
+            mapped = map_listing_status(str((raw or {}).get("status") or ""))
+            if mapped != listing.status:
+                try:
+                    listing = transition_listing(listing, mapped)
+                except Exception:
+                    listing = listing
+                self.store.save_listing(listing)
+            return {
+                "job_id": job_id,
+                "status": listing.status,
+                "provider_object_type": "listing",
+                "provider_item_id": listing.provider_item_id,
+                "raw": raw,
+            }
         publication = self.store.get_publication(job_id)
         if publication is None:
             return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication missing"}
-        raw = self.adapter.get_status(publication.resolved_provider_post_id())
+        if not publication.provider:
+            return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication provider missing"}
+        raw = self.adapter.get_status(publication.resolved_provider_post_id(), provider_object_type=publication.provider_object_type or "publication")
         updated = self.reconcile_publication(publication, raw if isinstance(raw, dict) else {})
         self.store.save_publication(updated)
         if job is not None and job.status != updated.status:

@@ -36,6 +36,7 @@ JOB_STATES = (
     "UNKNOWN",
     "FAILED_PERMANENT",
     "RECONCILING",
+    "PROCESSING",
 )
 
 JOB_TRANSITIONS = {
@@ -46,7 +47,8 @@ JOB_TRANSITIONS = {
     "SUBMITTING": {"SUBMITTED", "FAILED", "RETRYING", "UNKNOWN", "BLOCKED", "PUBLISHING"},
     "SUBMITTED": {"SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "UNKNOWN", "RECONCILING"},
     "SCHEDULED": {"READY", "PUBLISHING", "CANCELLED", "FAILED", "UNKNOWN", "BLOCKED"},
-    "PUBLISHING": {"PUBLISHED", "FAILED", "UNKNOWN"},
+    "PUBLISHING": {"PUBLISHED", "FAILED", "UNKNOWN", "PROCESSING"},
+    "PROCESSING": {"PUBLISHED", "FAILED", "UNKNOWN", "RECONCILING", "PUBLISHING"},
     "PUBLISHED": set(),
     "FAILED": {"RETRYING", "FAILED_PERMANENT", "CANCELLED", "UNKNOWN"},
     "RETRYING": {"SUBMITTING", "FAILED_PERMANENT", "UNKNOWN"},
@@ -62,6 +64,9 @@ class CapabilityRecord:
     name: str
     supported: bool = False
     verified: bool = False
+    authorized: bool = False
+    contract_verified: bool = False
+    live_verified: bool = False
     verified_at: str | None = None
     method: str = "unverified"
     verification_method: str = ""
@@ -70,11 +75,39 @@ class CapabilityRecord:
 
     @property
     def allowed(self) -> bool:
-        return self.supported and self.verified
+        if self.live_verified:
+            return bool(self.supported)
+        return bool(self.supported and self.contract_verified and self.authorized)
 
     @property
     def verification(self) -> str:
         return self.verification_method or self.method
+
+
+def make_capability(
+    name: str,
+    *,
+    supported: bool,
+    authorized: bool = False,
+    contract_verified: bool = False,
+    live_verified: bool = False,
+    method: str = "unverified",
+    evidence: dict[str, Any] | None = None,
+    verified_at: str | None = None,
+) -> "CapabilityRecord":
+    closed = bool(supported and authorized and contract_verified)
+    return CapabilityRecord(
+        name=name,
+        supported=supported,
+        authorized=authorized,
+        contract_verified=contract_verified,
+        live_verified=live_verified,
+        verified=closed,
+        verified_at=verified_at if closed or live_verified else None,
+        method=method,
+        verification_method=method,
+        evidence=dict(evidence or {}),
+    )
 
 
 @dataclass(frozen=True)
@@ -208,6 +241,7 @@ class DistributionAttempt:
     distribution_job_id: str = ""
     provider: str = ""
     integration_id: str = ""
+    provider_object_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.attempt_id:
@@ -365,3 +399,41 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
     if state not in usable and not enabled:
         errors.append("account is not enabled")
     return errors
+
+
+@dataclass(frozen=True)
+class PublicationOutcome:
+    publication: Publication
+    job: DistributionJob
+    request_id: str = ""
+    provider_request_id: str | None = None
+    provider_object_id: str = ""
+    kind: str = "publication"
+
+    def __getattr__(self, name: str):
+        return getattr(self.publication, name)
+
+
+@dataclass(frozen=True)
+class HandoffOutcome:
+    handoff: Any
+    job: DistributionJob
+    request_id: str = ""
+    kind: str = "handoff"
+
+    def __getattr__(self, name: str):
+        return getattr(self.handoff, name)
+
+
+@dataclass(frozen=True)
+class ListingOutcome:
+    listing: Any
+    job: DistributionJob
+    request_id: str = ""
+    provider_request_id: str | None = None
+    provider_object_id: str = ""
+    kind: str = "listing"
+
+
+DistributionOutcome = PublicationOutcome | HandoffOutcome | ListingOutcome
+

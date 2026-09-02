@@ -31,7 +31,6 @@ class DouyinClient:
             query={"open_id": open_id},
             data=data,
             content_type="application/octet-stream",
-            retry=True,
             **ctx,
         )
 
@@ -43,7 +42,6 @@ class DouyinClient:
             query={"open_id": open_id},
             data=data,
             content_type="application/octet-stream",
-            retry=True,
             **ctx,
         )
 

@@ -1,0 +1,95 @@
+{
+  "version": "4.4.4",
+  "timestamp": "2026-09-02T18:59:20.883234+00:00",
+  "real_e2e": false,
+  "status": "BLOCKED_EXTERNAL",
+  "providers": {
+    "xiaohongshu": {
+      "provider": "xiaohongshu",
+      "timestamp": "2026-09-02T18:59:20.883234+00:00",
+      "account_id": "redacted",
+      "capabilities_verified": [
+        "handoff"
+      ],
+      "upload_verified": false,
+      "publish_verified": false,
+      "remote_object_id": "",
+      "remote_status": "HANDOFF_ONLY",
+      "reconciled": false,
+      "analytics_verified": false,
+      "status": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "douyin": {
+      "provider": "douyin",
+      "timestamp": "2026-09-02T18:59:20.883234+00:00",
+      "account_id": "redacted",
+      "capabilities_verified": [],
+      "upload_verified": false,
+      "publish_verified": false,
+      "remote_object_id": "",
+      "remote_status": "BLOCKED_EXTERNAL",
+      "reconciled": false,
+      "analytics_verified": false,
+      "status": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "kuaishou": {
+      "provider": "kuaishou",
+      "timestamp": "2026-09-02T18:59:20.883234+00:00",
+      "account_id": "redacted",
+      "capabilities_verified": [],
+      "upload_verified": false,
+      "publish_verified": false,
+      "remote_object_id": "",
+      "remote_status": "BLOCKED_EXTERNAL",
+      "reconciled": false,
+      "analytics_verified": false,
+      "status": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "xianyu": {
+      "provider": "xianyu",
+      "timestamp": "2026-09-02T18:59:20.883234+00:00",
+      "account_id": "redacted",
+      "capabilities_verified": [],
+      "upload_verified": false,
+      "publish_verified": false,
+      "remote_object_id": "",
+      "remote_status": "BLOCKED_EXTERNAL",
+      "reconciled": false,
+      "analytics_verified": false,
+      "status": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "lechuang": {
+      "provider": "lechuang",
+      "timestamp": "2026-09-02T18:59:20.883234+00:00",
+      "account_id": "redacted",
+      "capabilities_verified": [],
+      "upload_verified": false,
+      "publish_verified": false,
+      "remote_object_id": "",
+      "remote_status": "BLOCKED_EXTERNAL",
+      "reconciled": false,
+      "analytics_verified": false,
+      "status": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    }
+  },
+  "creative": {
+    "workflow": "",
+    "provider": "",
+    "image_asset_id": "",
+    "video_asset_id": "",
+    "judge": "blocked",
+    "reason": "no real creative E2E evidence"
+  },
+  "distribution": {
+    "provider": "",
+    "account_id": "",
+    "remote_post_id": "",
+    "status": "blocked",
+    "reason": "no real CN social E2E evidence"
+  }
+}

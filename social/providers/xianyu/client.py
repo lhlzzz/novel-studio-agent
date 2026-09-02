@@ -43,6 +43,8 @@ class XianyuClient:
         return self.call(METHODS["user_info"], session, {}, **ctx)
 
     def media_upload(self, session: str, url: str, **ctx: str) -> Any:
+        if not str(url).startswith("https://"):
+            raise ValueError("Xianyu media.upload accepts hosted HTTPS URLs only")
         return self.call(METHODS["media_upload"], session, {"url": url}, **ctx)
 
     def item_publish(self, session: str, item: dict[str, Any], **ctx: str) -> Any:

@@ -53,11 +53,14 @@ class XHSHandoff:
     updated_at: str = ""
     expires_at: str | None = None
     distribution_job_id: str = ""
+    export_status: str = "PENDING"
     package: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.status not in HANDOFF_STATES:
             raise ValueError(f"invalid handoff status: {self.status}")
+        if self.export_status not in {"PENDING", "READY", "FAILED"}:
+            raise ValueError(f"invalid export_status: {self.export_status}")
         if not self.created_at:
             object.__setattr__(self, "created_at", _utcnow())
         if not self.updated_at:

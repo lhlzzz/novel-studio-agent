@@ -18,7 +18,7 @@ from integrations.contracts.distribution import (
     validate_common_payload,
 )
 from social.accounts.models import SocialAccount, SocialProviderCapabilities
-from social.auth.secrets import default_secret_store
+from social.auth.secrets import UnconfiguredSecretStore
 from social.providers.errors import AuthenticationError, ValidationError
 from social.providers.http import SocialHttpClient
 
@@ -43,7 +43,7 @@ class BaseSocialAdapter:
 
     def __init__(self, *, client: SocialHttpClient | None = None, secrets: Any | None = None) -> None:
         self.client = client or SocialHttpClient(provider=self.provider, base_url=self.api_base)
-        self.secrets = secrets or default_secret_store()
+        self.secrets = secrets if secrets is not None else UnconfiguredSecretStore()
         self._accounts: dict[str, SocialAccount] = {}
         self.rate_limit = self.client.rate_limit
 
@@ -53,18 +53,9 @@ class BaseSocialAdapter:
         env_secret = os.getenv(f"{self.provider.upper()}_CLIENT_SECRET", "").strip()
         payload: dict[str, Any] = {}
         if account and account.credential_ref:
-            record = self.secrets.get_record(account.credential_ref) if hasattr(self.secrets, "get_record") else None
+            record = self.secrets.get_record(account.credential_ref)
             if record is not None:
-                if record.expired() and record.refresh_token and not getattr(self, "_refreshed_once", False):
-                    auth = getattr(self, "auth", None)
-                    refresh = getattr(auth, "refresh", None)
-                    if callable(refresh):
-                        self._refreshed_once = True
-                        refreshed = refresh(record.refresh_token)
-                        record = self.secrets.replace(account.credential_ref, refreshed)
-                    else:
-                        raise TokenExpired(f"{self.provider} access_token expired")
-                elif record.expired():
+                if record.expired():
                     raise TokenExpired(f"{self.provider} access_token expired")
                 payload.update(record.to_payload())
             else:
@@ -77,6 +68,10 @@ class BaseSocialAdapter:
         if token:
             payload.setdefault("access_token", token)
         return payload
+
+    def ensure_valid_credentials(self, account: SocialAccount) -> dict[str, Any]:
+        """Read-only check. Refresh is owned by SocialAccountManager.refresh_account."""
+        return self._credentials(account)
 
     def _auth_headers(self, account: SocialAccount | None = None) -> dict[str, str]:
         creds = self._credentials(account)
@@ -230,8 +225,9 @@ class BaseSocialAdapter:
             size=len(data),
             provider=self.provider,
             remote_id=str(remote.get("id") or remote.get("media_id") or ""),
-            remote_path=str(remote.get("url") or remote.get("path") or ""),
+            remote_path=str(remote.get("url") or remote.get("path") or remote.get("upload_token") or ""),
             uploaded_at=_utcnow(),
+            account_id=account_id,
         )
 
     def _upload_bytes(self, data: bytes, *, mime_type: str, filename: str, account_id: str, idempotency_key: str) -> dict[str, Any]:
@@ -245,7 +241,7 @@ class BaseSocialAdapter:
             raise ValidationError(f"{self.provider} native schedule is unsupported; use Meiti scheduler")
         return self.publish(job)
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
         raise ValidationError(f"{self.provider} status is BLOCKED until credentials exist")
 
     def delete(self, provider_post_id: str) -> dict[str, Any]:

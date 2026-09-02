@@ -14,7 +14,11 @@
 - **2026-09-03 V4.4.3:** XHS handoff is a first-class `XHSHandoff`, never a
   Publication. XHS accounts are `HANDOFF_READY`, not `AUTHENTICATED`.
   Production constructors require an explicit store and secret store.
-  OAuth state is persisted and consumed once. Refresh preserves refresh_token
-  when the provider omits a new one. Capability records carry evidence.
-  DistributionJob.provider/platform are canonical. Scheduler claims with a
-  durable lease and never calls adapter.schedule().
+- **2026-09-03 V4.4.4:** Production closure. Distribution returns
+  PublicationOutcome | HandoffOutcome | ListingOutcome. Xianyu listing is a
+  commerce entity persisted by DistributionService, not the adapter. Xianyu
+  local-bytes upload stays unsupported until a verified contract exists.
+  Capability records are layered. `_credentials()` is read-only. Refresh is
+  account-scoped. Media uploads are keyed by source_hash+provider+account_id.
+  request_id, provider_request_id, and provider_object_id are distinct.
+  Missing external credentials are BLOCKED_EXTERNAL, never PASS.

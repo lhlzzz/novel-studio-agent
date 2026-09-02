@@ -1,6 +1,6 @@
-# Meiti V4.4.3 Handoff
+# Meiti V4.4.4 Handoff
 
-Branch `main`. Baseline `5a57bc2`.
+Branch `main`. Production closure of V4.4.3 CN social runtime.
 
 ```text
 Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
@@ -10,6 +10,7 @@ Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
 ```
 
 SocialRuntime.production() is the unique production composition root.
-XHS publish returns READY_FOR_XHS and persists XHSHandoff.
-Xianyu requires explicit commerce intent and Jushita.
+XHS publish returns HandoffOutcome and persists one XHSHandoff per job.
+Xianyu returns ListingOutcome. Publication is only for native social posts.
+Refresh is account-scoped and is not hidden inside `_credentials()`.
 Lechuang remains BLOCKED_EXTERNAL without an official contract.

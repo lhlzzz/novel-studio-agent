@@ -107,7 +107,7 @@ def policy_for(platform: str) -> PlatformMediaPolicy | None:
 
 
 def validate_job(job: DistributionJob, *, platform: str | None = None) -> list[str]:
-    platform = platform or str((job.variant.metadata or {}).get("platform") or "")
+    platform = platform or job.platform or ""
     policy = policy_for(platform)
     if policy is None:
         return []

@@ -139,8 +139,10 @@ class KuaishouVariantBuilder:
 
 class XianyuListingBuilder:
     def build(self, package: ContentPackage, *, account_id: str) -> XianyuListingVariant:
-        if str(package.commerce_intent or "none") in {"", "none"}:
-            raise ValueError("Xianyu listing requires explicit commerce intent")
+        from commerce.models import CommerceDecision
+        decision = CommerceDecision(intent=str(package.commerce_intent or "none"), source="content_package")
+        if not decision.allows_listing():
+            raise ValueError("Xianyu listing requires an explicit CommerceDecision")
         variant = _apply_policy(build_variant(package, account_id=account_id, platform="xianyu"), "xianyu")
         metadata = dict(variant.metadata or {})
         metadata.setdefault("listing", {

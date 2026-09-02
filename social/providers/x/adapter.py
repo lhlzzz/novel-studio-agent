@@ -122,7 +122,7 @@ class XAdapter(BaseSocialAdapter):
             "url": f"https://x.com/i/web/status/{tweet.id}",
         }
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
         headers = self._auth_headers()
         if not headers:
             raise AuthenticationError("X status is BLOCKED: access token missing")

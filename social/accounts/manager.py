@@ -34,7 +34,7 @@ class SocialAccountManager:
         self.oauth_states = oauth_states or OAuthStateStore(secrets)
 
     def list_accounts(self, *, platform: str | None = None, provider: str | None = None, region: str | None = None) -> list[SocialAccount]:
-        accounts = list(getattr(self.store, "list_accounts", lambda: [])())
+        accounts = list(self.store.list_accounts())
         if platform:
             accounts = [item for item in accounts if item.platform == platform]
         if provider:
@@ -44,7 +44,7 @@ class SocialAccountManager:
         return accounts
 
     def get_account(self, account_id: str) -> SocialAccount:
-        account = getattr(self.store, "get_account", lambda _id: None)(account_id)
+        account = self.store.get_account(account_id)
         if account is None:
             raise KeyError(account_id)
         return account
@@ -192,7 +192,10 @@ class SocialAccountManager:
         record = self.secrets.get_record(account.credential_ref)
         if record is None or not record.refresh_token:
             return self.save(self._to_expired(account, "refresh_token missing"))
+        previous = account.status
         try:
+            if "REFRESHING" in ACCOUNT_TRANSITIONS.get(account.status, set()):
+                account = self.save(transition_account(account, "REFRESHING"))
             new_record = refresh(record.refresh_token)
         except Exception as exc:
             return self.save(self._to_expired(account, str(exc)))
@@ -203,16 +206,15 @@ class SocialAccountManager:
             blocked_reason=None,
             updated_at=_utcnow(),
         ))
-        if current.status == "ENABLED":
-            current = self.save(transition_account(current, "VERIFIED"))
-            current = self.save(transition_account(current, "VERIFYING"))
-        elif current.status == "DEGRADED":
-            current = self.save(transition_account(current, "VERIFIED"))
+        if current.status == "REFRESHING":
             current = self.save(transition_account(current, "VERIFYING"))
         elif current.status in {"VERIFIED", "AUTHENTICATED"}:
             current = self.save(transition_account(current, "VERIFYING"))
-        verified = self.verify_account(account_id, adapter=implementation)
-        if verified.status == "VERIFIED" and account.status == "ENABLED":
+        try:
+            verified = self.verify_account(account_id, adapter=implementation)
+        except Exception as exc:
+            return self.save(transition_account(current, "BLOCKED", blocked_reason=str(exc)))
+        if verified.status == "VERIFIED" and previous == "ENABLED":
             return self.enable_account(verified.account_id)
         return verified
 

@@ -18,6 +18,8 @@ def test_content_package_to_native_x_publication():
     job = DistributionJob(
         "job-e2e", package.package_id, "x-test", variant,
         idempotency_key=make_idempotency_key(package.package_id, "x-test", "publish", None),
+        provider="x",
+        platform="x",
     )
     failures = check_distribution_job(job, adapter.account, adapter=adapter)
     assert failures == []

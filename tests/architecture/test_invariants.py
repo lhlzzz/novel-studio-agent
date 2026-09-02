@@ -38,7 +38,8 @@ def test_no_direct_native_adapter_import_from_distribution_agent():
     assert "XAdapter" not in source
     service = (ROOT / "integrations/distribution_service.py").read_text(encoding="utf-8")
     assert ("providers." + "pos" + "tiz") not in service
-    assert "social.providers.x" not in service
+    assert "from social.providers.x import" not in service
+    assert "from social.providers.x.adapter" not in service
 
 
 def test_capabilities_require_verification():

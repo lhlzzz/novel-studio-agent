@@ -34,6 +34,8 @@ def test_mock_package_to_memory_loop():
         idempotency_key=make_idempotency_key(package.package_id, "x-test", "publish", None),
         request_id="req-e2e",
         campaign_id=package.campaign_id,
+        provider="x",
+        platform="x",
     )
     failures = check_distribution_job(job, adapter.account, adapter=adapter)
     assert failures == []

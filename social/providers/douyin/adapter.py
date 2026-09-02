@@ -100,29 +100,31 @@ class DouyinAdapter(BaseCNAdapter):
             method="official_endpoint_probe",
             evidence={"endpoint": USERINFO_URL, "verified_at": now},
         )
-        records["publish"] = CapabilityRecord(
-            name="publish", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
-            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
-            evidence={"scope": "video.create", "endpoint": CREATE_VIDEO, "verified_at": now if publish_ok else None},
+        from integrations.contracts.distribution import make_capability
+        records["publish"] = make_capability(
+            "publish", supported=True, authorized=publish_ok, contract_verified=True, live_verified=False,
+            method="official_scope" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoint": CREATE_VIDEO, "pkce": False},
+            verified_at=now if publish_ok else None,
         )
-        records["video"] = CapabilityRecord(
-            name="video", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
-            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+        records["video"] = make_capability(
+            "video", supported=True, authorized=publish_ok, contract_verified=True, live_verified=False,
+            method="official_scope" if publish_ok else "scope_missing",
             evidence={"scope": "video.create", "endpoint": CREATE_VIDEO},
         )
-        records["image"] = CapabilityRecord(
-            name="image", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
-            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
-            evidence={"scope": "video.create", "endpoint": CREATE_IMAGE_TEXT},
+        records["image"] = make_capability(
+            "image", supported=True, authorized=publish_ok, contract_verified=True, live_verified=False,
+            method="official_scope" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoint": CREATE_IMAGE_TEXT, "distinct_from": "video"},
         )
-        records["media_upload"] = CapabilityRecord(
-            name="media_upload", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
-            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+        records["media_upload"] = make_capability(
+            "media_upload", supported=True, authorized=publish_ok, contract_verified=True, live_verified=False,
+            method="official_scope" if publish_ok else "scope_missing",
             evidence={"scope": "video.create", "endpoints": [UPLOAD_VIDEO, UPLOAD_IMAGE]},
         )
-        records["analytics"] = CapabilityRecord(
-            name="analytics", supported=True, verified=data_ok, verified_at=now if data_ok else None,
-            method="official_scope_and_endpoint_probe" if data_ok else "scope_missing",
+        records["analytics"] = make_capability(
+            "analytics", supported=True, authorized=data_ok, contract_verified=True, live_verified=False,
+            method="official_scope" if data_ok else "scope_missing",
             evidence={"scope": "video.data", "endpoint": VIDEO_DATA},
         )
         return SocialProviderCapabilities.from_records(records)
@@ -185,8 +187,16 @@ class DouyinAdapter(BaseCNAdapter):
             "provider_object_type": object_type,
         }
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
-        creds = self._credentials()
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "video") -> dict[str, Any]:
+        if provider_object_type == "image_post":
+            return {
+                "id": provider_post_id,
+                "status": "NOT_APPLICABLE",
+                "reason": "Douyin image post has no independent status API",
+                "provider_object_type": "image_post",
+            }
+        account = next(iter(self._accounts.values()), None)
+        creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
         open_id = str(creds.get("open_id") or creds.get("provider_account_id") or "")
         if not token:

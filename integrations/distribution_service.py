@@ -11,9 +11,12 @@ from integrations.contracts.distribution import (
     DistributionAdapter,
     DistributionAttempt,
     DistributionJob,
+    HandoffOutcome,
     IllegalJobTransition,
+    ListingOutcome,
     ProviderError,
     Publication,
+    PublicationOutcome,
     make_idempotency_key,
     transition_job,
 )
@@ -41,8 +44,10 @@ class DistributionService:
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
         account = self._account(job)
-        settings = self.adapter.get_settings(account.id)  # type: ignore[attr-defined]
-        errors = self.adapter.validate_payload(job)  # type: ignore[attr-defined]
+        settings = self.adapter.get_settings(account.id)
+        errors = list(self.adapter.validate_payload(job))
+        if not job.provider or not job.platform:
+            errors.append("DistributionJob.provider and platform are required")
         return {
             "status": "BLOCKED" if errors else "READY",
             "account_id": account.id,
@@ -70,13 +75,21 @@ class DistributionService:
         job: DistributionJob,
         *,
         gate_check: Callable[[DistributionJob], bool],
-    ) -> Publication:
+    ) -> PublicationOutcome | HandoffOutcome | ListingOutcome:
+        if not job.provider or not job.platform:
+            raise ExternalActionBlocked("DistributionJob.provider and platform are required")
         job = self._ensure_key(job)
         existing = self.store.get_job_by_idempotency(job.idempotency_key or "")
         if existing is not None:
             publication = self.store.get_publication(existing.job_id)
-            if publication is not None and existing.status in {"SUBMITTED", "SCHEDULED", "PUBLISHING", "PUBLISHED"}:
-                return publication
+            if publication is not None and existing.status in {"SUBMITTED", "SCHEDULED", "PUBLISHING", "PUBLISHED", "PROCESSING"}:
+                return PublicationOutcome(publication=publication, job=existing, request_id=existing.request_id, provider_object_id=publication.provider_post_id)
+            handoff = self.store.get_handoff_by_job(existing.job_id)
+            if handoff is not None:
+                return HandoffOutcome(handoff=handoff, job=existing, request_id=existing.request_id)
+            listing = self.store.get_listing_by_job(existing.job_id)
+            if listing is not None:
+                return ListingOutcome(listing=listing, job=existing, request_id=existing.request_id, provider_object_id=getattr(listing, "provider_item_id", ""))
             job = existing
         started = _utcnow()
         attempt_no = job.attempt_count + 1
@@ -96,19 +109,16 @@ class DistributionService:
                 self.store.save_job(job)
                 self._record_attempt(job, attempt_no, started, "blocked", "gate_blocked", "publish gate is not approved")
                 raise ExternalActionBlocked("publish gate is not approved")
-            ensure_media = getattr(self.adapter, "ensure_media", None)
-            if callable(ensure_media):
-                job, _uploaded = ensure_media(job)
-            elif job.variant.media:
-                upload = getattr(self.adapter, "upload_media", None)
-                if not callable(upload):
-                    raise ExternalActionBlocked("media must be uploaded before publish")
+            if job.provider != "xiaohongshu":
+                job = self._ensure_media(job)
             job = transition_job(job, "SUBMITTING", last_attempt_at=_utcnow(), attempt_count=attempt_no)
             self.store.save_job(job)
             result = self.adapter.publish(job)
-            from social.handoff.models import XHSHandoff, is_handoff_result
-            if is_handoff_result(result):
+            from social.handoff.models import is_handoff_result
+            if is_handoff_result(result) or str(result.get("kind") or "") == "handoff":
                 return self._persist_handoff(job, result, attempt_no, started)
+            if str(result.get("kind") or result.get("provider_object_type") or "") == "listing":
+                return self._persist_listing(job, result, attempt_no, started)
         except IllegalJobTransition as exc:
             job = replace(job, status="FAILED_PERMANENT", error_code="illegal_transition", error_message=str(exc))
             self.store.save_job(job)
@@ -118,7 +128,8 @@ class DistributionService:
             raise
         except Exception as exc:
             retryable = bool(getattr(exc, "retryable", False))
-            status = "RETRYING" if retryable else "FAILED_PERMANENT"
+            unknown = bool(getattr(exc, "unknown", False))
+            status = "UNKNOWN" if unknown else ("RETRYING" if retryable else "FAILED_PERMANENT")
             if status == "RETRYING" and attempt_no >= 3:
                 status = "FAILED_PERMANENT"
             job = replace(
@@ -136,40 +147,38 @@ class DistributionService:
                 wrapped.retryable = retryable
                 raise wrapped from exc
             raise
-        post_id = str(result.get("id") or result.get("postId") or result.get("post_id") or "")
-        if not post_id:
-            job = replace(job, status="FAILED", error_code="missing_provider_post_id", provider_response=result, attempt_count=attempt_no)
+        object_id = str(result.get("provider_object_id") or result.get("post_id") or result.get("id") or "")
+        if not object_id:
+            job = replace(job, status="FAILED", error_code="missing_provider_object_id", provider_response=result, attempt_count=attempt_no)
             self.store.save_job(job)
-            self._record_attempt(job, attempt_no, started, "failed", "missing_provider_post_id", "provider response did not contain an external post id", result)
-            raise ExternalActionBlocked("provider response did not contain an external post id")
+            self._record_attempt(job, attempt_no, started, "failed", "missing_provider_object_id", "provider response did not contain an external object id", result)
+            raise ExternalActionBlocked("provider response did not contain an external object id")
         account = self._account(job)
         platform_object_id = result.get("external_id") or result.get("externalId") or result.get("platform_object_id")
         remote_status = str(result.get("status") or "SUBMITTED").upper()
-        if remote_status in {"HANDOFF_REQUIRED", "READY_FOR_XHS"}:
-            status = "SUBMITTED"
-            publication_status = "HANDOFF_REQUIRED"
-        elif remote_status in {"PUBLISHED"}:
+        if remote_status in {"PUBLISHED"}:
             status = "SUBMITTED"
             publication_status = "SUBMITTED"
         else:
             status = "SUBMITTED"
             publication_status = remote_status if remote_status in {"SUBMITTED", "PROCESSING", "UNKNOWN"} else "SUBMITTED"
+        provider_request_id = result.get("provider_request_id")
         job = transition_job(job, status, provider_response=result)
         self.store.save_job(job)
         publication = Publication(
             distribution_job_id=job.job_id,
             account_id=account.id,
-            provider=job.provider or getattr(account, "provider", ""),
-            provider_post_id=post_id,
+            provider=job.provider,
+            provider_post_id=object_id,
             platform_object_id=str(platform_object_id) if platform_object_id is not None else None,
             status=publication_status,
             published_at=result.get("published_at"),
             external_url=result.get("url") or result.get("releaseURL") or result.get("external_url"),
             content_package_id=job.content_package_id,
             request_id=job.request_id,
-            platform=job.platform or getattr(account, "platform", "") or getattr(account, "provider", ""),
+            platform=job.platform,
             created_at=_utcnow(),
-            provider_object_type=str(result.get("provider_object_type") or ""),
+            provider_object_type=str(result.get("provider_object_type") or "publication"),
         )
         try:
             self.store.save_publication(publication)
@@ -186,7 +195,7 @@ class DistributionService:
                 agent="distribution-agent",
                 action="publication_persistence",
                 job_id=job.job_id,
-                provider=getattr(account, 'provider', ''),
+                provider=job.provider,
                 integration_id=account.id,
                 status="INCONSISTENT",
                 error_code="publication_persistence_failed",
@@ -195,24 +204,74 @@ class DistributionService:
             raise PublicationPersistenceError(
                 "provider action succeeded but Publication persistence failed"
             ) from exc
-        self._record_attempt(job, attempt_no, started, "success", None, None, {"id": post_id, "status": publication.status})
+        self._record_attempt(
+            job,
+            attempt_no,
+            started,
+            "success",
+            None,
+            None,
+            {"id": object_id, "status": publication.status},
+            provider_request_id=provider_request_id,
+            provider_object_id=object_id,
+        )
         log_event(
             agent="distribution-agent",
             action=job.action,
             job_id=job.job_id,
-            provider=getattr(account, 'provider', ''),
+            provider=job.provider,
             integration_id=account.id,
             status=publication.status,
             request_id=job.request_id,
         )
-        return publication
+        return PublicationOutcome(
+            publication=publication,
+            job=job,
+            request_id=job.request_id,
+            provider_request_id=str(provider_request_id) if provider_request_id else None,
+            provider_object_id=object_id,
+        )
+
+    def _ensure_media(self, job: DistributionJob) -> DistributionJob:
+        uploaded = []
+        for path in job.variant.media:
+            digest = _hash_path(path)
+            existing = self.store.get_media(digest, job.provider, job.account_id) if digest else None
+            if existing is not None and existing.status == "uploaded" and existing.remote_id:
+                uploaded.append(existing)
+                continue
+            result = self.adapter.upload_media(path, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id)
+            result = replace(result, account_id=job.account_id, provider=job.provider)
+            self.store.save_media(result)
+            uploaded.append(result)
+        if not job.variant.media:
+            return job
+        metadata = dict(job.variant.metadata or {})
+        metadata["uploaded_media"] = [
+            {
+                "source_hash": item.source_hash,
+                "source_path": item.source_path,
+                "mime_type": item.mime_type,
+                "size": item.size,
+                "remote_id": item.remote_id,
+                "remote_path": item.remote_path,
+                "uploaded_at": item.uploaded_at,
+            }
+            for item in uploaded
+        ]
+        return replace(job, variant=replace(job.variant, metadata=metadata))
 
     def _persist_handoff(self, job, result, attempt_no: int, started: str):
         from social.handoff.models import XHSHandoff
+        from social.handoff.export import materialize_handoff_export
 
-        handoff_id = str(result.get("handoff_id") or "")
-        if not handoff_id:
-            raise ExternalActionBlocked("XHS handoff did not return handoff_id")
+        existing = self.store.get_handoff_by_job(job.job_id)
+        if existing is not None:
+            job = transition_job(job, "SUBMITTED", provider_response=result) if job.status == "SUBMITTING" else job
+            self.store.save_job(job)
+            self._record_attempt(job, attempt_no, started, "handoff", None, None, {"handoff_id": existing.handoff_id, "status": existing.status})
+            return HandoffOutcome(handoff=existing, job=job, request_id=job.request_id)
+        handoff_id = str(result.get("handoff_id") or f"xhs-handoff-{job.job_id}")
         package = result.get("package") if isinstance(result.get("package"), dict) else {}
         account = self._account(job)
         job = transition_job(job, "SUBMITTED", provider_response=result)
@@ -222,7 +281,8 @@ class DistributionService:
             account_id=account.id,
             content_package_id=job.content_package_id,
             status="READY_FOR_XHS",
-            export_path=str(result.get("export_path") or ""),
+            export_path="",
+            export_status="PENDING",
             content_type=str(package.get("content_type") or result.get("content_type") or ""),
             title=str(package.get("title") or ""),
             content=str(package.get("content") or ""),
@@ -233,27 +293,92 @@ class DistributionService:
             distribution_job_id=job.job_id,
             package=dict(package),
         )
-        saver = getattr(self.store, "save_handoff", None)
-        if not callable(saver):
-            raise ExternalActionBlocked("store does not persist XHSHandoff")
-        saver(handoff)
-        self._record_attempt(job, attempt_no, started, "handoff", None, None, {"handoff_id": handoff_id, "status": handoff.status})
+        self.store.save_handoff(handoff)
+        try:
+            exported = materialize_handoff_export(handoff)
+            self.store.save_handoff(exported)
+            handoff = exported
+        except Exception as exc:
+            from dataclasses import replace as _replace
+            failed = _replace(handoff, export_status="FAILED")
+            self.store.save_handoff(failed)
+            raise ExternalActionBlocked(f"XHS handoff export failed: {exc}") from exc
+        self._record_attempt(job, attempt_no, started, "handoff", None, None, {"handoff_id": handoff.handoff_id, "status": handoff.status})
         log_event(
             agent="distribution-agent",
             action="handoff",
             job_id=job.job_id,
-            provider=getattr(account, "provider", "xiaohongshu"),
+            provider=job.provider,
             integration_id=account.id,
             status=handoff.status,
             request_id=job.request_id,
         )
-        return handoff
+        return HandoffOutcome(handoff=handoff, job=job, request_id=job.request_id)
+
+    def _persist_listing(self, job, result, attempt_no: int, started: str):
+        from commerce.xianyu import XianyuListing
+
+        existing = self.store.get_listing_by_job(job.job_id)
+        if existing is not None:
+            job = transition_job(job, "SUBMITTED", provider_response=result) if job.status == "SUBMITTING" else job
+            self.store.save_job(job)
+            return ListingOutcome(listing=existing, job=job, request_id=job.request_id, provider_object_id=existing.provider_item_id)
+        payload = result.get("listing") if isinstance(result.get("listing"), dict) else {}
+        object_id = str(result.get("provider_object_id") or result.get("id") or "")
+        account = self._account(job)
+        job = transition_job(job, "SUBMITTED", provider_response=result)
+        self.store.save_job(job)
+        listing = XianyuListing(
+            listing_id=f"xianyu-listing-{object_id}",
+            account_id=account.id,
+            title=str(payload.get("title") or job.variant.title or ""),
+            description=str(payload.get("description") or job.variant.body or ""),
+            price=str(payload.get("price") or ""),
+            quantity=int(payload.get("quantity") or 1),
+            category_id=str(payload.get("category_id") or ""),
+            images=tuple(payload.get("images") or ()),
+            condition=str(payload.get("condition") or "new"),
+            location=str(payload.get("location") or ""),
+            shipping=dict(payload.get("shipping") or {}),
+            attributes=dict(payload.get("attributes") or {}),
+            commerce_intent="explicit",
+            status="PROCESSING",
+            provider_item_id=object_id,
+            distribution_job_id=job.job_id,
+            content_package_id=job.content_package_id,
+            provider_response=dict(result),
+        )
+        self.store.save_listing(listing)
+        self._record_attempt(
+            job,
+            attempt_no,
+            started,
+            "listing",
+            None,
+            None,
+            {"listing_id": listing.listing_id, "provider_item_id": object_id},
+            provider_request_id=result.get("provider_request_id"),
+            provider_object_id=object_id,
+        )
+        log_event(
+            agent="distribution-agent",
+            action="listing",
+            job_id=job.job_id,
+            provider=job.provider,
+            integration_id=account.id,
+            status=listing.status,
+            request_id=job.request_id,
+        )
+        return ListingOutcome(
+            listing=listing,
+            job=job,
+            request_id=job.request_id,
+            provider_request_id=result.get("provider_request_id"),
+            provider_object_id=object_id,
+        )
 
     def _account(self, job: DistributionJob):
-        get_account = getattr(self.adapter, "get_account", None)
-        if callable(get_account):
-            return get_account(job.account_id)
-        return self.adapter.get_integration(job.account_id)  # type: ignore[attr-defined]
+        return self.adapter.get_account(job.account_id)
 
     def _record_attempt(
         self,
@@ -264,11 +389,11 @@ class DistributionService:
         error_code: str | None,
         error_message: str | None,
         response_summary: dict[str, Any] | None = None,
+        *,
+        provider_request_id: str | None = None,
+        provider_object_id: str | None = None,
     ) -> None:
-        save = getattr(self.store, "save_attempt", None)
-        if not callable(save):
-            return
-        save(
+        self.store.save_attempt(
             DistributionAttempt(
                 job_id=job.job_id,
                 attempt_no=attempt_no,
@@ -277,10 +402,20 @@ class DistributionService:
                 status=status,
                 error_code=error_code,
                 error_message=error_message,
-                provider_request_id=(job.provider_response or {}).get("id") if isinstance(job.provider_response, dict) else None,
+                provider_request_id=str(provider_request_id) if provider_request_id else None,
+                provider_object_id=str(provider_object_id) if provider_object_id else None,
                 response_summary=response_summary,
                 request_id=job.request_id,
-                provider=str(getattr(self.adapter, "provider", "")),
+                provider=job.provider,
                 integration_id=job.account_id,
             )
         )
+
+
+def _hash_path(path: str) -> str:
+    import hashlib
+    from pathlib import Path
+    file_path = Path(path)
+    if not file_path.exists():
+        return hashlib.sha256(path.encode("utf-8")).hexdigest()
+    return hashlib.sha256(file_path.read_bytes()).hexdigest()

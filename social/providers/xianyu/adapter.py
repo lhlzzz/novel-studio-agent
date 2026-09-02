@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from integrations.contracts.distribution import CapabilityRecord
+from integrations.contracts.distribution import make_capability
 from social.accounts.models import SocialAccount, SocialProviderCapabilities
 from social.auth.credentials import CredentialRecord
 from social.media_policy import validate_job
@@ -12,6 +12,12 @@ from social.providers.errors import AuthenticationError, CapabilityUnsupported, 
 from social.providers.xianyu.auth import XianyuAuth
 from social.providers.xianyu.capabilities import CLAIMED
 from social.providers.xianyu.client import XianyuClient
+from social.providers.xianyu.contract import (
+    CONTRACT_VERIFIED,
+    MEDIA_UPLOAD_BYTES_CONTRACT_VERIFIED,
+    METHODS,
+    ROUTER,
+)
 from social.providers.xianyu.schemas import item_from_payload, map_status, user_from_payload
 
 
@@ -86,22 +92,32 @@ class XianyuAdapter(BaseCNAdapter):
     def verify_capabilities(self, account_id: str) -> SocialProviderCapabilities:
         account = self.get_account(account_id)
         creds = self._credentials(account)
-        token = str(creds.get("access_token") or "")
+        token = bool(str(creds.get("access_token") or ""))
         jushita = self.jushita_ready()
-        method = "official_endpoint_probe" if jushita and token else "jushita_required"
-        records = {
-            name: CapabilityRecord(
-                name=name,
+        authorized = bool(jushita and token)
+        records = {}
+        for name, value in CLAIMED.items():
+            if name == "media_upload":
+                records[name] = make_capability(
+                    name,
+                    supported=False,
+                    authorized=False,
+                    contract_verified=MEDIA_UPLOAD_BYTES_CONTRACT_VERIFIED,
+                    live_verified=False,
+                    method="unverified_bytes_contract",
+                    evidence={"mode": "url", "method": METHODS["media_upload"], "reason": "local bytes upload is not contract-verified"},
+                )
+                continue
+            listing_names = {"listing", "listing_edit", "listing_delete", "image"}
+            records[name] = make_capability(
+                name,
                 supported=bool(value),
-                verified=bool(value and jushita and token and name in {"listing", "listing_edit", "listing_delete", "media_upload", "image"}),
-                method=method,
-                evidence={"deployment_mode": self.deployment_mode, "jushita": jushita},
+                authorized=authorized if name in listing_names or name == "analytics" else False,
+                contract_verified=bool(value and CONTRACT_VERIFIED),
+                live_verified=False,
+                method="official_endpoint" if jushita and token else "jushita_required",
+                evidence={"deployment_mode": self.deployment_mode, "jushita": jushita, "router": ROUTER, "method": METHODS.get("item_publish")},
             )
-            for name, value in CLAIMED.items()
-        }
-        if not jushita:
-            for name in ("listing", "listing_edit", "listing_delete", "media_upload"):
-                records[name] = CapabilityRecord(name=name, supported=True, verified=False, method="jushita_required", evidence={"deployment_mode": self.deployment_mode})
         return SocialProviderCapabilities.from_records(records)
 
     def _validate_platform(self, job, account) -> list[str]:
@@ -110,14 +126,67 @@ class XianyuAdapter(BaseCNAdapter):
             errors.append("xianyu production listing requires deployment_mode=JUSHITA")
         return errors
 
+    def _upload_bytes(self, data: bytes, *, mime_type: str, filename: str, account_id: str, idempotency_key: str) -> dict[str, Any]:
+        raise CapabilityUnsupported(
+            "Xianyu local-bytes media upload is BLOCKED: official alibaba.idle.isv.media.upload is URL-based and bytes upload is not contract-verified"
+        )
+
+    def upload_media(self, source_path: str, *, account_id: str = "", idempotency_key: str = ""):
+        if str(source_path).startswith("https://"):
+            account = self.get_account(account_id) if account_id else None
+            creds = self._credentials(account)
+            token = str(creds.get("access_token") or "")
+            if not token:
+                raise AuthenticationError("Xianyu media upload is BLOCKED: access token missing")
+            result = self.xy_client.media_upload(token, source_path, account_id=account_id, idempotency_key=idempotency_key)
+            data = result if isinstance(result, dict) else {}
+            media_id = str(data.get("media_id") or data.get("id") or ((data.get("data") or {}) if isinstance(data.get("data"), dict) else {}).get("media_id") or "")
+            if not media_id:
+                raise ValidationError("Xianyu media.upload did not return media_id")
+            from integrations.contracts.distribution import MediaUploadResult
+            from datetime import datetime, timezone
+            return MediaUploadResult(
+                source_hash=media_id,
+                source_path=source_path,
+                mime_type="image/*",
+                size=0,
+                provider="xianyu",
+                remote_id=media_id,
+                remote_path=media_id,
+                uploaded_at=datetime.now(timezone.utc).isoformat(),
+                account_id=account_id,
+            )
+        raise CapabilityUnsupported(
+            "Xianyu local-bytes media upload is BLOCKED until a verified bytes contract exists"
+        )
+
     def publish(self, job) -> dict[str, Any]:
         if not self.jushita_ready():
             raise CapabilityUnsupported("Xianyu listing publish is BLOCKED until deployment_mode=JUSHITA")
+        from commerce.models import CommerceDecision
         listing = (job.variant.metadata or {}).get("listing") or {}
-        if (job.variant.metadata or {}).get("commerce_intent", listing.get("commerce_intent") or "none") in {"", "none"} and not listing:
+        intent = CommerceDecision(
+            intent=str((job.variant.metadata or {}).get("commerce_intent") or listing.get("commerce_intent") or "none"),
+            source="distribution_job",
+        )
+        if not intent.allows_listing():
             raise PolicyBlocked("Xianyu listing requires explicit commerce intent")
-        if not listing.get("title") or listing.get("price") in {None, ""} or not listing.get("category_id"):
+        title = str(listing.get("title") or job.variant.title or "")
+        price = listing.get("price")
+        category_id = str(listing.get("category_id") or "")
+        quantity = listing.get("quantity") if listing.get("quantity") not in {None, ""} else 1
+        if not title or price in {None, ""} or not category_id:
             raise ValidationError("Xianyu listing requires title, price, and category_id")
+        try:
+            if float(price) <= 0:
+                raise ValidationError("Xianyu listing price must be > 0")
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Xianyu listing price must be > 0") from exc
+        try:
+            if int(quantity) < 1:
+                raise ValidationError("Xianyu listing quantity must be >= 1")
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Xianyu listing quantity must be >= 1") from exc
         account = self.get_account(job.account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
@@ -128,45 +197,55 @@ class XianyuAdapter(BaseCNAdapter):
         if any(item.startswith("/") or item.startswith(".") for item in images):
             raise ValidationError("Xianyu listing images must be remote media identifiers")
         payload = {
-            "title": listing.get("title") or job.variant.title,
+            "title": title,
             "desc": listing.get("description") or job.variant.body,
-            "price": str(listing.get("price")),
-            "quantity": str(listing.get("quantity") or 1),
-            "category_id": listing.get("category_id"),
+            "price": str(price),
+            "quantity": str(int(quantity)),
+            "category_id": category_id,
             "images": ",".join(images),
         }
-        result = self.xy_client.item_publish(token, payload, request_id=job.request_id, distribution_job_id=job.job_id, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id)
+        result = self.xy_client.item_publish(
+            token,
+            payload,
+            request_id=job.request_id,
+            distribution_job_id=job.job_id,
+            account_id=job.account_id,
+            idempotency_key=job.idempotency_key or job.job_id,
+        )
         item = item_from_payload(result if isinstance(result, dict) else {})
         if not item.item_id:
             raise PublishError("Xianyu item.publish did not return item_id; success is not online")
-        from commerce.xianyu import XianyuListingPackage
-        listing_pkg = XianyuListingPackage(
-            listing_id=f"xianyu-listing-{item.item_id}",
-            account_id=job.account_id,
-            title=str(payload.get("title") or ""),
-            description=str(payload.get("desc") or ""),
-            price=str(payload.get("price") or ""),
-            quantity=int(payload.get("quantity") or 1),
-            category_id=str(payload.get("category_id") or ""),
-            images=tuple(images),
-            commerce_intent="explicit",
-            metadata={"provider_item_id": item.item_id, "content_package_id": job.content_package_id, "status": "REVIEWING"},
-        )
-        saver = getattr(getattr(self, "store", None), "save_listing", None)
-        if callable(saver):
-            saver(listing_pkg)
         return {
+            "kind": "listing",
             "id": item.item_id,
+            "provider_object_id": item.item_id,
+            "provider_request_id": str((result or {}).get("request_id") or "") or None,
             "external_id": item.item_id,
             "status": "processing",
             "provider_object_type": "listing",
-            "listing_id": listing_pkg.listing_id,
+            "listing": {
+                "title": payload["title"],
+                "description": str(payload.get("desc") or ""),
+                "price": payload["price"],
+                "quantity": int(payload["quantity"]),
+                "category_id": payload["category_id"],
+                "images": images,
+                "condition": str(listing.get("condition") or "new"),
+                "location": str(listing.get("location") or ""),
+                "shipping": dict(listing.get("shipping") or {}),
+                "attributes": dict(listing.get("attributes") or {}),
+                "commerce_intent": "explicit",
+                "content_package_id": job.content_package_id,
+            },
         }
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "listing") -> dict[str, Any]:
+        if provider_object_type and provider_object_type != "listing":
+            return {"id": provider_post_id, "status": "NOT_APPLICABLE", "provider_object_type": provider_object_type}
         if not self.jushita_ready():
             return {"id": provider_post_id, "status": "unknown", "reason": "JUSHITA required", "provider_object_type": "listing"}
-        creds = self._credentials()
+        account = next(iter(self._accounts.values()), None)
+        creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
         result = self.xy_client.item_query(token, provider_post_id)
         item = item_from_payload(result if isinstance(result, dict) else {})

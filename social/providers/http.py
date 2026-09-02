@@ -53,6 +53,7 @@ class SocialHttpClient:
         retry: bool | None = None,
         extra_headers: dict[str, str] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
+        multipart: bool = False,
     ) -> Any:
         request_id = request_id or new_request_id()
         url = path if absolute or path.startswith("http") else f"{self.base_url}{path}"
@@ -62,12 +63,12 @@ class SocialHttpClient:
         hdrs = {key: value for key, value in (headers or {}).items() if value}
         if extra_headers:
             hdrs.update({key: value for key, value in extra_headers.items() if value})
-        hdrs.setdefault("User-Agent", "MeitiSocial/4.4.3")
+        hdrs.setdefault("User-Agent", "MeitiSocial/4.4.4")
         hdrs["X-Request-Id"] = request_id
         if idempotency_key:
             hdrs.setdefault("Idempotency-Key", idempotency_key)
-        if files:
-            payload, content = _encode_multipart(json_body if isinstance(json_body, dict) else {}, files)
+        if files is not None or multipart:
+            payload, content = _encode_multipart(json_body if isinstance(json_body, dict) else {}, files or {})
             hdrs["Content-Type"] = content
         elif json_body is not None:
             payload = json.dumps(json_body).encode("utf-8")
@@ -189,18 +190,31 @@ def _safe_path(path: str) -> str:
     return parsed.path or path
 
 
-def _encode_multipart(fields: dict[str, Any], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
-    boundary = f"meiti{int(time.time() * 1000)}"
+def _encode_multipart(fields: dict[str, Any], files: dict[str, tuple[str, bytes, str] | tuple[str, bytes, str] | Any]) -> tuple[bytes, str]:
+    import uuid
+    boundary = f"meiti{uuid.uuid4().hex}"
     chunks: list[bytes] = []
     for key, value in (fields or {}).items():
         if value is None:
             continue
-        chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
-    for key, (filename, data, mime) in files.items():
+        chunks.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8")
+        )
+    for key, item in (files or {}).items():
+        if item is None:
+            continue
+        if len(item) == 3:
+            filename, data, mime = item
+        else:
+            filename, data = item[0], item[1]
+            mime = "application/octet-stream"
+        filename = str(filename or "file")
+        mime = str(mime or "application/octet-stream")
+        disposition = f'form-data; name="{key}"; filename="{filename}"'
         header = (
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"; filename=\"{filename}\"\r\n"
+            f"--{boundary}\r\nContent-Disposition: {disposition}\r\n"
             f"Content-Type: {mime}\r\n\r\n"
         ).encode("utf-8")
-        chunks.append(header + data + b"\r\n")
+        chunks.append(header + (data or b"") + b"\r\n")
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"

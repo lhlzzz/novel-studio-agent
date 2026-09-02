@@ -112,7 +112,7 @@ class FakeAdapter:
     def validate_payload(self, job):
         return []
 
-    def upload_media(self, source_path: str) -> MediaUploadResult:
+    def upload_media(self, source_path: str, *, account_id: str = "", idempotency_key: str = "") -> MediaUploadResult:
         return MediaUploadResult(
             source_hash="abc",
             source_path=source_path,
@@ -137,6 +137,8 @@ class FakeAdapter:
         self.published = True
         result = {
             "id": "x-post-1",
+            "provider_object_id": "x-post-1",
+            "provider_request_id": "x-req-1",
             "externalId": "x-status-1",
             "status": "queued",
             "url": "https://x.com/i/web/status/x-post-1",
@@ -147,7 +149,7 @@ class FakeAdapter:
     def schedule(self, job):
         return self.publish(job)
 
-    def get_status(self, provider_post_id):
+    def get_status(self, provider_post_id, *, provider_object_type: str = "publication"):
         return {"id": provider_post_id, "status": "published"}
 
     def cancel(self, provider_post_id):
@@ -164,4 +166,4 @@ class FakeAdapter:
 
 
 def job() -> DistributionJob:
-    return DistributionJob("job-1", "test-package-001", "i", ContentVariant("i", "test"))
+    return DistributionJob("job-1", "test-package-001", "i", ContentVariant("i", "test"), provider="x", platform="x", idempotency_key="k")

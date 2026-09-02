@@ -85,10 +85,11 @@ class KuaishouAdapter(BaseCNAdapter):
         scope_ok = all(name in scope_set for name in REQUIRED_SCOPES) if scope_set else False
         records = {name: CapabilityRecord(name=name, supported=bool(value), verified=False, method="unverified") for name, value in CLAIMED.items()}
         records["user_info"] = CapabilityRecord(name="user_info", supported=True, verified=user_ok, verified_at=now, method="official_endpoint_probe", evidence={"endpoint": USER_INFO})
-        records["publish"] = CapabilityRecord(name="publish", supported=True, verified=scope_ok, verified_at=now if scope_ok else None, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH})
-        records["video"] = CapabilityRecord(name="video", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH})
-        records["media_upload"] = CapabilityRecord(name="media_upload", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": START_UPLOAD})
-        records["analytics"] = CapabilityRecord(name="analytics", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PHOTO_INFO})
+        from integrations.contracts.distribution import make_capability
+        records["publish"] = make_capability("publish", supported=True, authorized=scope_ok, contract_verified=True, live_verified=False, method="official_scope" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH}, verified_at=now if scope_ok else None)
+        records["video"] = make_capability("video", supported=True, authorized=scope_ok, contract_verified=True, live_verified=False, method="official_scope" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH})
+        records["media_upload"] = make_capability("media_upload", supported=True, authorized=scope_ok, contract_verified=True, live_verified=False, method="official_scope" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": START_UPLOAD})
+        records["analytics"] = make_capability("analytics", supported=True, authorized=scope_ok, contract_verified=True, live_verified=False, method="official_scope" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PHOTO_INFO})
         return SocialProviderCapabilities.from_records(records)
 
     def _validate_platform(self, job, account) -> list[str]:
@@ -109,8 +110,8 @@ class KuaishouAdapter(BaseCNAdapter):
         endpoint = str((data_obj or {}).get("endpoint") or (started or {}).get("endpoint") or "")
         if not upload_token or not endpoint:
             raise MediaUploadError("Kuaishou start_upload did not return upload_token and endpoint")
-        if endpoint.startswith("http://") and "kuaishou" not in endpoint:
-            raise MediaUploadError("Kuaishou upload endpoint must be the runtime value from start_upload")
+        if not endpoint.startswith("https://"):
+            raise MediaUploadError("Kuaishou upload endpoint must be the HTTPS runtime value from start_upload")
         from social.providers.kuaishou.contract import WHOLE_FILE_LIMIT
         if len(data) > WHOLE_FILE_LIMIT:
             self.ks_client.upload_file_chunked(endpoint, upload_token, data, account_id=account_id, idempotency_key=idempotency_key)
@@ -166,8 +167,9 @@ class KuaishouAdapter(BaseCNAdapter):
             "provider_object_type": "photo",
         }
 
-    def get_status(self, provider_post_id: str) -> dict[str, Any]:
-        creds = self._credentials()
+    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
+        account = next(iter(self._accounts.values()), None)
+        creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
         if not token:
             raise AuthenticationError("Kuaishou status is BLOCKED: access token missing")

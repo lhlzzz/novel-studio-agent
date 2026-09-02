@@ -34,18 +34,13 @@ def _evidence(check: str, ok: bool, **extra: Any) -> dict[str, Any]:
 
 def _account_from(job: DistributionJob, *, adapter: Any, store: Any | None) -> SocialAccount | None:
     if store is not None:
-        getter = getattr(store, "get_account", None)
-        if callable(getter):
-            account = getter(job.account_id)
-            if account is not None:
-                return account
-    getter = getattr(adapter, "get_account", None)
-    if callable(getter):
-        try:
-            return getter(job.account_id)
-        except KeyError:
-            return None
-    return None
+        account = store.get_account(job.account_id)
+        if account is not None:
+            return account
+    try:
+        return adapter.get_account(job.account_id)
+    except KeyError:
+        return None
 
 
 def _credential_usable(account: SocialAccount, *, adapter: Any) -> tuple[bool, str]:
@@ -73,11 +68,6 @@ def _approval_valid(job: DistributionJob, *, store: Any | None) -> bool:
     metadata = job.variant.metadata or {}
     if str(metadata.get("approval") or metadata.get("approval_status") or "").lower() == "approved":
         return True
-    if store is None:
-        return False
-    getter = getattr(store, "get_approval", None)
-    if callable(getter):
-        return str(getter(job.job_id) or "").lower() == "approved"
     return False
 
 
@@ -194,7 +184,7 @@ def admit(
         if callable(validate):
             payload_errors = list(validate(job) or [])
         from social.media_policy import validate_job
-        platform = job.platform or account.platform or (job.variant.metadata or {}).get("platform")
+        platform = job.platform or account.platform
         policy_errors = validate_job(job, platform=platform)
     else:
         policy_errors = []

@@ -38,10 +38,7 @@ class MeitiScheduler:
         return executed
 
     def claim(self, *, worker_id: str, now: datetime | None = None, lease_seconds: int = 60) -> DistributionJob | None:
-        claim = getattr(self.store, "claim_due_job", None)
-        if not callable(claim):
-            raise RuntimeError("store does not implement claim_due_job")
-        return claim(worker_id=worker_id, now=now, lease_seconds=lease_seconds)
+        return self.store.claim_due_job(worker_id=worker_id, now=now, lease_seconds=lease_seconds)
 
     def execute_claimed(self, job: DistributionJob) -> Any:
         from agents.distribution_agent import DistributionAgent
@@ -58,9 +55,12 @@ class MeitiScheduler:
         existing = self.store.get_publication(job.job_id)
         if existing is not None:
             return existing
-        handoff = getattr(self.store, "get_handoff_by_job", lambda _id: None)(job.job_id)
+        handoff = self.store.get_handoff_by_job(job.job_id)
         if handoff is not None:
             return handoff
+        listing = self.store.get_listing_by_job(job.job_id)
+        if listing is not None:
+            return listing
         return agent.execute(job)
 
 

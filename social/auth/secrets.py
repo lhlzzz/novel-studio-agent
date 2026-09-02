@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -34,22 +35,20 @@ class RuntimeSecretStore:
         ref = ref or record.credential_ref or f"secret:{secrets.token_hex(16)}"
         stored = record.replace() if record.credential_ref == ref else CredentialRecord.from_payload(record.to_payload(), provider=record.provider, ref=ref)
         path = self._path(ref)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(stored.to_payload()), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        tmp.replace(path)
-        os.chmod(path, 0o600)
+        payload = stored.to_payload()
+        payload.setdefault("provider", stored.provider)
+        payload.setdefault("provider_account_id", stored.provider_account_id)
+        payload.setdefault("created_at", stored.created_at)
+        payload.setdefault("updated_at", stored.updated_at)
+        payload.setdefault("expires_at", stored.expires_at)
+        self._write_atomic(path, payload)
         return ref
 
     def put_json(self, payload: dict[str, Any], *, ref: str) -> str:
         if not ref:
             raise SecretStoreError("json secret ref is required")
         path = self._path(ref)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        tmp.replace(path)
-        os.chmod(path, 0o600)
+        self._write_atomic(path, payload)
         return ref
 
     def get_json(self, ref: str) -> dict[str, Any] | None:
@@ -131,9 +130,21 @@ class RuntimeSecretStore:
         except Exception as exc:
             return {"ok": False, "reason": str(exc), **evidence}
 
+    def _write_atomic(self, path: Path, payload: dict[str, Any]) -> None:
+        tmp = path.with_name(path.name + ".tmp")
+        if tmp.exists():
+            tmp.unlink()
+        with tmp.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+
     def _path(self, ref: str) -> Path:
-        safe = ref.replace("/", "_").replace("..", "_")
-        return self.root / f"{safe}.json"
+        digest = hashlib.sha256(str(ref).encode("utf-8")).hexdigest()
+        return self.root / f"{digest}.json"
 
 
 def production_secret_store() -> RuntimeSecretStore:

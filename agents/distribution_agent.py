@@ -98,7 +98,9 @@ class DistributionAgent:
         return adapter.list_integrations()
 
     def get_capabilities(self, account_id: str):
-        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
+        if not self.adapter and not self.provider_name:
+            raise RuntimeError("provider is required")
+        adapter = self.adapter or self._adapter_for(self.provider_name)
         return resolve_capability(account_id, "publish", adapter=adapter)
 
     def select_provider(self, platform: str) -> SocialAccount:
@@ -172,18 +174,21 @@ class DistributionAgent:
         return self.store.save_job(job)
 
     def validate(self, job: DistributionJob) -> list[str]:
-        adapter = self._adapter_for(job.provider or self.provider_name or job.platform)
+        if not job.provider:
+            raise RuntimeError("DistributionJob.provider is required")
+        adapter = self._adapter_for(job.provider)
         return adapter.validate_payload(job)
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
-        adapter = self.adapter or self._adapter_for(job.provider or self.provider_name or job.platform)
+        if not job.provider:
+            raise RuntimeError("DistributionJob.provider is required")
+        adapter = self.adapter or self._adapter_for(job.provider)
         return self._service(adapter).dry_run(job)
 
     def execute(self, job: DistributionJob):
-        platform = job.provider or job.platform or self.provider_name or ((job.variant.metadata or {}).get("platform") if job.variant.metadata else None)
-        if not platform:
-            raise RuntimeError("DistributionJob.provider is required")
-        adapter = self.adapter or self._adapter_for(platform)
+        if not job.provider or not job.platform:
+            raise RuntimeError("DistributionJob.provider and platform are required")
+        adapter = self.adapter or self._adapter_for(job.provider)
 
         def gate_check(candidate: DistributionJob) -> bool:
             decision = admit_distribution_job(candidate, adapter=adapter, store=self.store)
@@ -225,8 +230,9 @@ class DistributionAgent:
         from social.reconciliation.service import reconcile_distribution_job
 
         job = self.store.get_job(job_id)
-        provider = self.provider_name or (job.provider if job is not None else None)
-        adapter = self.adapter or self._adapter_for(provider or "douyin")
+        if job is None or not job.provider:
+            raise RuntimeError("DistributionJob.provider is required")
+        adapter = self.adapter or self._adapter_for(job.provider)
         return reconcile_distribution_job(job_id, adapter=adapter, store=self.store)
 
     def sync_analytics(

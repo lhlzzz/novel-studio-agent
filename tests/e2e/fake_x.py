@@ -82,7 +82,7 @@ class FakeXAdapter:
     def prepare_publish(self, job):
         return {"status": "prepared"}
 
-    def upload_media(self, source_path: str) -> MediaUploadResult:
+    def upload_media(self, source_path: str, *, account_id: str = "", idempotency_key: str = "") -> MediaUploadResult:
         return MediaUploadResult(
             source_hash="abc",
             source_path=source_path,
@@ -112,7 +112,7 @@ class FakeXAdapter:
         self.posts[result["id"]] = result
         return result
 
-    def get_status(self, provider_post_id):
+    def get_status(self, provider_post_id, *, provider_object_type: str = "publication"):
         return self.posts.get(provider_post_id, {"id": provider_post_id, "status": "UNKNOWN"})
 
     def get_analytics(self, provider_post_id):

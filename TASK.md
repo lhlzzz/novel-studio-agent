@@ -1,20 +1,17 @@
-# Meiti V4.4 Task
+# Meiti V4.4.4 Task
 
-**GOAL:** Operate Meiti as one AI Creator Operating System with research,
-strategy, creative workflows, judged generation, native social accounts,
-governed distribution, and shared memory.
+**GOAL:** Code-layer production closure for CN social + Lechuang. Architecture,
+persistence, state machines, security, CI, and doctor semantics PASS. Live
+provider E2E stays BLOCKED_EXTERNAL without real credentials.
 
-**VERIFY:** Creative templates resolve, mock workflow runtime produces a
-ContentPackage, native social distribution fail-closes without a verified
-account, and doctor reports honest BLOCKED for missing live credentials.
+**VERIFY:** pytest, architecture tests, social_doctor, meiti_doctor. External
+credential absence is BLOCKED_EXTERNAL, not CI failure.
 
 ## Current boundary
 
 - Research remains read-only intelligence and is unavailable without credentials.
-- Creative live generation: BLOCKED until Lechuang API contract + key.
-- AI Judge: BLOCKED until a verified vision provider exists.
-- Distribution live publish: BLOCKED until native OAuth + verified account.
-- Mock creative and mock distribution are CI-safe.
-- Domestic social networks remain registered and disabled.
-- Automatic DM/comment/like/follow is out of scope.
-- Content first. Product is optional and only when Strategy sets commerce intent.
+- Creative live generation: BLOCKED_EXTERNAL until Lechuang API contract + key.
+- AI Judge: BLOCKED_EXTERNAL until a verified vision provider exists.
+- Distribution live publish: BLOCKED_EXTERNAL until native OAuth + verified account.
+- XHS remains HANDOFF_READY until write_notes is live-verified.
+- Content first. Product is optional and only when CommerceDecision is explicit.

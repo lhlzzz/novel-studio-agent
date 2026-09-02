@@ -32,7 +32,7 @@ class JobStore(Protocol):
     def get_publication(self, job_id: str) -> Publication | None: ...
     def list_jobs(self, statuses: tuple[str, ...] | None = None) -> list[DistributionJob]: ...
     def save_media(self, result: MediaUploadResult) -> MediaUploadResult: ...
-    def get_media(self, sha256: str) -> MediaUploadResult | None: ...
+    def get_media(self, sha256: str, provider: str, account_id: str) -> MediaUploadResult | None: ...
     def save_attempt(self, attempt: DistributionAttempt) -> DistributionAttempt: ...
     def list_attempts(self, job_id: str) -> list[DistributionAttempt]: ...
     def save_content_package(self, package: ContentPackage) -> ContentPackage: ...
@@ -42,6 +42,12 @@ class JobStore(Protocol):
     def get_account(self, account_id: str) -> Any | None: ...
     def list_accounts(self) -> list[Any]: ...
     def claim_due_job(self, *, worker_id: str, now=None, lease_seconds: int = 60): ...
+    def save_handoff(self, handoff: Any) -> Any: ...
+    def get_handoff(self, handoff_id: str) -> Any | None: ...
+    def get_handoff_by_job(self, job_id: str) -> Any | None: ...
+    def save_listing(self, listing: Any) -> Any: ...
+    def get_listing(self, listing_id: str) -> Any | None: ...
+    def get_listing_by_job(self, job_id: str) -> Any | None: ...
 
 
 @dataclass
@@ -56,6 +62,7 @@ class InMemoryStore:
     integrations: dict[str, Any] = field(default_factory=dict)
     accounts: dict[str, Any] = field(default_factory=dict)
     handoffs: dict[str, Any] = field(default_factory=dict)
+    listings: dict[str, Any] = field(default_factory=dict)
     _claim_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def save_job(self, job: DistributionJob) -> DistributionJob:
@@ -88,11 +95,15 @@ class InMemoryStore:
         return jobs
 
     def save_media(self, result: MediaUploadResult) -> MediaUploadResult:
+        key = f"{result.source_hash}:{result.provider}:{result.account_id}"
         if result.source_hash:
+            self.media[key] = result
             self.media[result.source_hash] = result
         return result
 
-    def get_media(self, sha256: str) -> MediaUploadResult | None:
+    def get_media(self, sha256: str, provider: str = "", account_id: str = "") -> MediaUploadResult | None:
+        if provider or account_id:
+            return self.media.get(f"{sha256}:{provider}:{account_id}")
         return self.media.get(sha256)
 
     def save_attempt(self, attempt: DistributionAttempt) -> DistributionAttempt:
@@ -178,15 +189,23 @@ class InMemoryStore:
         return None
 
     def save_listing(self, listing):
-        listings = getattr(self, "listings", None)
-        if listings is None:
-            self.listings = {}
-            listings = self.listings
-        listings[listing.listing_id] = listing
+        self.listings[listing.listing_id] = listing
+        job_id = getattr(listing, "distribution_job_id", "") or ""
+        if job_id:
+            self.listings[f"job:{job_id}"] = listing
         return listing
 
     def get_listing(self, listing_id: str):
-        return getattr(self, "listings", {}).get(listing_id)
+        return self.listings.get(listing_id)
+
+    def get_listing_by_job(self, job_id: str):
+        found = self.listings.get(f"job:{job_id}")
+        if found is not None:
+            return found
+        for item in self.listings.values():
+            if getattr(item, "distribution_job_id", "") == job_id:
+                return item
+        return None
 
     def save_derived_asset(self, record):
         self.media[f"derived:{record.derived_asset_id}"] = record
@@ -375,7 +394,7 @@ class DatabaseStore:
         media = list(getattr(listing, "media_assets", None) or getattr(listing, "images", ()) or [])
         fields = {
             "account_id": getattr(listing, "account_id"),
-            "provider_item_id": getattr(listing, "provider_item_id", "") or "",
+            "provider_item_id": getattr(listing, "provider_item_id", "") or (listing.metadata.get("provider_item_id") if getattr(listing, "metadata", None) else "") or "",
             "title": getattr(listing, "title", "") or "",
             "description": getattr(listing, "description", "") or "",
             "price": str(getattr(listing, "price", "") or ""),
@@ -383,6 +402,13 @@ class DatabaseStore:
             "media_assets": media,
             "status": getattr(listing, "status", "DRAFT") or "DRAFT",
             "provider_response": dict(getattr(listing, "provider_response", None) or {}),
+            "quantity": int(getattr(listing, "quantity", 1) or 1),
+            "content_package_id": getattr(listing, "content_package_id", "") or "",
+            "distribution_job_id": getattr(listing, "distribution_job_id", "") or "",
+            "condition": getattr(listing, "condition", "new") or "new",
+            "location": getattr(listing, "location", "") or "",
+            "shipping": dict(getattr(listing, "shipping", None) or {}),
+            "attributes": dict(getattr(listing, "attributes", None) or {}),
         }
         with SessionLocal() as session:
             row = session.get(XianyuListingRecord, listing_id)
@@ -397,26 +423,41 @@ class DatabaseStore:
     def get_listing(self, listing_id: str):
         from scripts.db.engine import SessionLocal
         from scripts.db.models import XianyuListingRecord
-        from commerce.xianyu import XianyuListingPackage
+        from commerce.xianyu import XianyuListing
 
         with SessionLocal() as session:
             row = session.get(XianyuListingRecord, listing_id)
             if row is None:
                 return None
-            return XianyuListingPackage(
+            from commerce.xianyu import XianyuListing
+            return XianyuListing(
                 listing_id=row.listing_id,
                 account_id=row.account_id,
                 title=row.title,
                 description=row.description,
                 price=row.price,
+                quantity=int(getattr(row, "quantity", 1) or 1),
                 category_id=row.category_id,
                 images=tuple(row.media_assets or ()),
-                metadata={
-                    "provider_item_id": row.provider_item_id,
-                    "status": row.status,
-                    "provider_response": row.provider_response,
-                },
+                status=row.status,
+                provider_item_id=row.provider_item_id or "",
+                content_package_id=getattr(row, "content_package_id", "") or "",
+                distribution_job_id=getattr(row, "distribution_job_id", "") or "",
+                condition=getattr(row, "condition", "new") or "new",
+                location=getattr(row, "location", "") or "",
+                shipping=dict(getattr(row, "shipping", None) or {}),
+                attributes=dict(getattr(row, "attributes", None) or {}),
+                provider_response=dict(row.provider_response or {}),
+                commerce_intent="explicit",
             )
+
+    def get_listing_by_job(self, job_id: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import XianyuListingRecord
+        with SessionLocal() as session:
+            row = session.query(XianyuListingRecord).filter_by(distribution_job_id=job_id).one_or_none()
+            listing_id = row.listing_id if row is not None else None
+        return self.get_listing(listing_id) if listing_id else None
 
     def save_handoff(self, handoff):
         from scripts.db.engine import SessionLocal
@@ -430,6 +471,7 @@ class DatabaseStore:
             "status": handoff.status,
             "export_path": getattr(handoff, "export_path", "") or "",
             "distribution_job_id": getattr(handoff, "distribution_job_id", "") or "",
+            "export_status": getattr(handoff, "export_status", "PENDING") or "PENDING",
             "package": dict(getattr(handoff, "package", None) or {}),
             "expires_at": _as_datetime(getattr(handoff, "expires_at", None)),
         }
@@ -600,12 +642,18 @@ class DatabaseStore:
         from scripts.db.models import MediaUploadRecord
 
         with SessionLocal() as session:
-            row = session.get(MediaUploadRecord, result.source_hash)
+            row = (
+                session.query(MediaUploadRecord)
+                .filter_by(source_hash=result.source_hash, provider=result.provider, account_id=result.account_id or "")
+                .one_or_none()
+            )
             fields = {
                 "source_path": result.source_path,
                 "mime_type": result.mime_type,
                 "size": result.size,
                 "provider": result.provider,
+                "account_id": result.account_id or "",
+                "integration_id": result.account_id or "",
                 "remote_media_id": result.remote_id,
                 "remote_media_path": result.remote_path,
                 "status": result.status,
@@ -620,18 +668,24 @@ class DatabaseStore:
             session.commit()
         return result
 
-    def get_media(self, sha256: str) -> MediaUploadResult | None:
+    def get_media(self, sha256: str, provider: str = "", account_id: str = "") -> MediaUploadResult | None:
         from scripts.db.engine import SessionLocal
         from scripts.db.models import MediaUploadRecord
 
         with SessionLocal() as session:
-            row = session.get(MediaUploadRecord, sha256)
+            query = session.query(MediaUploadRecord).filter_by(source_hash=sha256)
+            if provider:
+                query = query.filter_by(provider=provider)
+            if account_id:
+                query = query.filter_by(account_id=account_id)
+            row = query.one_or_none()
             if row is None:
                 return None
             return MediaUploadResult(
                 source_hash=row.source_hash, source_path=row.source_path, mime_type=row.mime_type,
                 size=row.size, provider=row.provider, remote_id=row.remote_media_id,
                 remote_path=row.remote_media_path, uploaded_at=row.uploaded_at.isoformat(), status=row.status,
+                account_id=getattr(row, "account_id", "") or "",
             )
 
     def save_attempt(self, attempt: DistributionAttempt) -> DistributionAttempt:
@@ -651,6 +705,7 @@ class DatabaseStore:
                 "error_code": attempt.error_code,
                 "error_message": attempt.error_message,
                 "provider_request_id": attempt.provider_request_id,
+                "provider_object_id": attempt.provider_object_id,
                 "response_summary": attempt.response_summary,
                 "request_id": attempt.request_id,
                 "provider": attempt.provider,
@@ -683,21 +738,17 @@ class DatabaseStore:
         now = now or datetime.now(timezone.utc)
         naive = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
         lease_until = naive + timedelta(seconds=lease_seconds)
+        from sqlalchemy import or_
         with SessionLocal() as session:
-            query = session.query(DistributionJobRecord).filter(DistributionJobRecord.status.in_(("SCHEDULED", "READY")))
-            try:
-                query = query.with_for_update(skip_locked=True)
-            except Exception:
-                pass
-            rows = query.order_by(DistributionJobRecord.scheduled_at.nullsfirst(), DistributionJobRecord.job_id).all()
-            chosen = None
-            for row in rows:
-                if row.scheduled_at and row.scheduled_at > naive:
-                    continue
-                if row.lease_until and row.lease_until > naive and row.worker_id not in {None, "", worker_id}:
-                    continue
-                chosen = row
-                break
+            query = (
+                session.query(DistributionJobRecord)
+                .filter(DistributionJobRecord.status.in_(("SCHEDULED", "READY")))
+                .filter(or_(DistributionJobRecord.scheduled_at.is_(None), DistributionJobRecord.scheduled_at <= naive))
+                .filter(or_(DistributionJobRecord.lease_until.is_(None), DistributionJobRecord.lease_until <= naive, DistributionJobRecord.worker_id.in_([None, "", worker_id])))
+                .order_by(DistributionJobRecord.scheduled_at.nullsfirst(), DistributionJobRecord.job_id)
+                .with_for_update(skip_locked=True)
+            )
+            chosen = query.first()
             if chosen is None:
                 return None
             chosen.worker_id = worker_id
@@ -819,6 +870,7 @@ def _attempt_from_record(row: Any) -> DistributionAttempt:
         status=row.status, error_code=row.error_code, error_message=row.error_message,
         provider_request_id=row.provider_request_id, response_summary=row.response_summary,
         request_id=row.request_id, provider=row.provider, integration_id=row.integration_id,
+        provider_object_id=getattr(row, "provider_object_id", None),
     )
 
 
@@ -849,6 +901,7 @@ def _handoff_from_record(row):
         platform=row.platform,
         status=row.status,
         export_path=row.export_path or "",
+        export_status=getattr(row, "export_status", "PENDING") or "PENDING",
         distribution_job_id=row.distribution_job_id or "",
         package=package,
         content_type=str(package.get("content_type") or ""),

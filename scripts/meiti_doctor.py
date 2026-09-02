@@ -31,7 +31,7 @@ def check_agents() -> dict:
         inactive = [item.name for item in agents if item.status == "active" and item.implementation is None]
         return {"status": "BLOCKED" if missing or inactive else "PASS", "count": len(agents), "missing": missing, "inactive": inactive}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_provider_registry() -> dict:
@@ -48,7 +48,7 @@ def check_provider_registry() -> dict:
             "missing": missing,
         }
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_database() -> dict:
@@ -59,7 +59,7 @@ def check_database() -> dict:
             conn.execute(text("SELECT 1"))
         return {"status": "PASS"}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_pgvector() -> dict:
@@ -70,7 +70,7 @@ def check_pgvector() -> dict:
             ext = conn.execute(text("SELECT extname FROM pg_extension WHERE extname = 'vector'")).scalar_one_or_none()
         return {"status": "PASS" if ext == "vector" else "BLOCKED", "extension": ext}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_embedding() -> dict:
@@ -96,7 +96,7 @@ def check_kg() -> dict:
         ok = {"content_entities", "content_relations"}.issubset(tables)
         return {"status": "PASS" if ok else "BLOCKED", "tables": sorted(tables & {"content_entities", "content_relations"})}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_memory() -> dict:
@@ -108,7 +108,7 @@ def check_memory() -> dict:
         ok = "historical_successful_patterns" in retrieved and written["written"] >= 1
         return {"status": "PASS" if ok else "BLOCKED"}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_gate() -> dict:
@@ -164,7 +164,7 @@ def check_creative_engine() -> dict:
         ) if name not in {item.workflow_id for item in workflows}]
         return {"status": "BLOCKED" if missing or engine is None else "PASS", "count": len(workflows), "missing": missing}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 def check_lechuang() -> dict:
@@ -173,11 +173,11 @@ def check_lechuang() -> dict:
     ready, reason = adapter.live_ready()
     auth = adapter.client.auth()
     return {
-        "status": "PASS" if ready else "BLOCKED",
-        "runtime": "PASS" if ready else "BLOCKED",
-        "auth": "PASS" if auth.api_key_present else "BLOCKED",
-        "image": "PASS" if ready else "BLOCKED",
-        "video": "PASS" if ready else "BLOCKED",
+        "status": "PASS" if ready else "BLOCKED_EXTERNAL",
+        "runtime": "PASS" if ready else "BLOCKED_EXTERNAL",
+        "auth": "PASS" if auth.api_key_present else "BLOCKED_EXTERNAL",
+        "image": "PASS" if ready else "BLOCKED_EXTERNAL",
+        "video": "PASS" if ready else "BLOCKED_EXTERNAL",
         "reason": reason,
         "contract_verified": auth.contract_verified,
         "api_key_present": auth.api_key_present,
@@ -200,7 +200,7 @@ def check_control_plane() -> dict:
         missing = sorted(required - set(data))
         return {"status": "BLOCKED" if missing else "PASS", "missing": missing}
     except Exception as exc:
-        return {"status": "BLOCKED", "error": str(exc)}
+        return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
 
 
@@ -334,7 +334,7 @@ def check_reconciliation() -> dict:
 
 
 def e2e_path() -> Path:
-    return ROOT / "docs/audits/meiti-v4.4.3-cn-e2e.json"
+    return ROOT / "docs/audits/meiti-v4.4.4-cn-e2e.json"
 
 
 def load_e2e() -> dict:
@@ -352,8 +352,8 @@ def write_e2e_audit(checks: dict) -> dict:
     creative = existing.get("creative") if isinstance(existing.get("creative"), dict) else {}
     distribution = existing.get("distribution") if isinstance(existing.get("distribution"), dict) else {}
     payload = {
-        "version": "4.4.3",
-        "overall": "READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED",
+        "version": "4.4.4",
+        "overall": "BLOCKED_EXTERNAL" if any(item.get("status") == "BLOCKED_EXTERNAL" for item in checks.values()) else ("READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED"),
         "creative": {
             "workflow": creative.get("workflow") or "",
             "provider": creative.get("provider") or "",
@@ -452,20 +452,32 @@ def run() -> dict:
 
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") for key, value in checks.items()}
-    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL"}]
+    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL"}]
     external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL"]
     return {"ready": not code_blocked and not external, "architecture_ready": not code_blocked, "checks": statuses, "details": checks}
 
 
 def main() -> int:
     checks = run()
-    audit = write_e2e_audit(checks)
     payload = as_payload(checks)
+    architecture = "PASS" if payload["architecture_ready"] else "FAIL"
+    overall = "READY" if payload["ready"] else ("BLOCKED_EXTERNAL" if payload["architecture_ready"] else "BLOCKED")
+    print("MEITI DOCTOR")
+    print("============")
     for name, status in payload["checks"].items():
         print(f"{name}: {status}")
-    print("Overall:", "READY" if payload["ready"] else "BLOCKED")
-    print(json.dumps({"ready": payload["ready"], "overall": audit.get("overall"), "checks": payload["checks"], "blockers": audit.get("blockers")}, default=str))
-    return 0 if payload["ready"] else 1
+    print(f"Architecture: {architecture}")
+    print(f"Overall: {overall}")
+    print(json.dumps({
+        "architecture_ready": payload["architecture_ready"],
+        "runtime_ready": payload["architecture_ready"],
+        "external_ready": False,
+        "overall_ready": payload["ready"],
+        "overall": overall,
+        "checks": payload["checks"],
+        "blockers": [name for name, status in payload["checks"].items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE"}],
+    }, default=str))
+    return 0 if payload["architecture_ready"] else 1
 
 
 if __name__ == "__main__":

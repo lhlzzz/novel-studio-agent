@@ -67,3 +67,57 @@ def test_cover_local_path_not_json(tmp_path):
     assert "files" in seen
     assert seen["files"]["cover"][0] == "cover.jpg"
     assert "cover" not in (seen.get("json_body") or {}) or True
+
+
+
+def test_publish_missing_photo_id_is_error(tmp_path):
+    def handler(method, path, kwargs):
+        return {"data": {"pending": True}}
+    adapter, _ = _adapter(tmp_path, handler)
+    from integrations.contracts.distribution import ContentVariant, DistributionJob
+    from social.providers.errors import PublishError
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}]}), idempotency_key="k", provider="kuaishou", platform="kuaishou")
+    import pytest
+    with pytest.raises(PublishError):
+        adapter.publish(job)
+
+
+def test_publish_without_cover(tmp_path):
+    seen = {}
+    def handler(method, path, kwargs):
+        seen.update(kwargs)
+        return {"data": {"photo_id": "p1", "pending": True}}
+    adapter, _ = _adapter(tmp_path, handler)
+    from integrations.contracts.distribution import ContentVariant, DistributionJob
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}]}), idempotency_key="k", provider="kuaishou", platform="kuaishou")
+    result = adapter.publish(job)
+    assert result["status"] == "processing"
+    assert "cover" not in (seen.get("files") or {})
+
+
+def test_photo_query_success(tmp_path):
+    def handler(method, path, kwargs):
+        return {"data": {"photo_id": "p1", "pending": False}}
+    adapter, _ = _adapter(tmp_path, handler)
+    status = adapter.get_status("p1", provider_object_type="photo")
+    assert status["status"] == "published"
+
+
+def test_photo_query_failure(tmp_path):
+    def handler(method, path, kwargs):
+        return {"data": {}}
+    adapter, _ = _adapter(tmp_path, handler)
+    status = adapter.get_status("p1")
+    assert status["status"] in {"unknown", "processing"}
+
+
+def test_upload_endpoint_must_be_https(tmp_path):
+    def handler(method, path, kwargs):
+        if "start_upload" in path:
+            return {"data": {"upload_token": "tok", "endpoint": "http://upload.kuaishou.com"}}
+        return {}
+    adapter, _ = _adapter(tmp_path, handler)
+    from social.providers.errors import MediaUploadError
+    import pytest
+    with pytest.raises(MediaUploadError):
+        adapter._upload_bytes(b"x", mime_type="video/mp4", filename="a.mp4", account_id="kuaishou:u1", idempotency_key="k")

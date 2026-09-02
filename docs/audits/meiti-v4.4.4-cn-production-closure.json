@@ -1,0 +1,27 @@
+{
+  "commit": "4521d30360964a75723762bce5851be4a38f0882",
+  "version": "4.4.4",
+  "timestamp": "2026-09-02T18:59:28.057708+00:00",
+  "architecture": "PASS",
+  "runtime": "PASS",
+  "security": "PASS",
+  "xhs": "HANDOFF_READY",
+  "douyin": "BLOCKED_EXTERNAL",
+  "kuaishou": "BLOCKED_EXTERNAL",
+  "xianyu": "BLOCKED_EXTERNAL",
+  "lechuang": "BLOCKED_EXTERNAL",
+  "database": "PASS",
+  "scheduler": "PASS",
+  "idempotency": "PASS",
+  "reconciliation": "PASS",
+  "analytics": "PASS",
+  "tests": "238 passed, 1 skipped",
+  "real_e2e": false,
+  "blockers": [
+    "No live Douyin OAuth credentials",
+    "No live Kuaishou OAuth credentials",
+    "No Jushita deployment or Xianyu ISV credentials",
+    "XHS write_notes / direct publish not live-verified",
+    "Lechuang official HTTP contract and API key missing"
+  ]
+}

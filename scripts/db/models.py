@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import JSON as SA_JSON
 from sqlalchemy.dialects.postgresql import JSONB
@@ -443,7 +444,7 @@ class SocialAccountRecord(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFYING','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED','TARGET_ONLY','HANDOFF_READY','IDENTITY_UNVERIFIED')",
+            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFYING','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED','TARGET_ONLY','HANDOFF_READY','IDENTITY_UNVERIFIED','REFRESHING')",
             name="ck_meiti_social_account_status",
         ),
         Index("idx_meiti_social_accounts_provider", "provider"),
@@ -463,6 +464,7 @@ class SocialHandoffRecord(Base):
     content_package_id = Column(String(255), nullable=False, default="")
     status = Column(String(40), nullable=False, default="READY_FOR_XHS")
     export_path = Column(Text, nullable=False, default="")
+    export_status = Column(String(40), nullable=False, default="PENDING")
     distribution_job_id = Column(String(255), nullable=False, default="")
     package = Column(JSONB, nullable=False, default=dict)
     expires_at = Column(DateTime)
@@ -475,7 +477,8 @@ class SocialHandoffRecord(Base):
             name="ck_meiti_social_handoff_status",
         ),
         Index("idx_meiti_social_handoffs_account", "account_id"),
-        Index("idx_meiti_social_handoffs_job", "distribution_job_id"),
+        Index("uq_meiti_social_handoffs_job", "distribution_job_id", unique=True, postgresql_where=text("distribution_job_id <> ''")),
+        CheckConstraint("export_status IN ('PENDING','READY','FAILED')", name="ck_meiti_social_handoff_export_status"),
     )
 
 
@@ -554,7 +557,7 @@ class DistributionJobRecord(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('DRAFT','VALIDATING','BLOCKED','READY','SUBMITTING','SUBMITTED','SCHEDULED','PUBLISHING','PUBLISHED','FAILED','RETRYING','CANCELLED','UNKNOWN','FAILED_PERMANENT','RECONCILING')",
+            "status IN ('DRAFT','VALIDATING','BLOCKED','READY','SUBMITTING','SUBMITTED','SCHEDULED','PUBLISHING','PUBLISHED','FAILED','RETRYING','CANCELLED','UNKNOWN','FAILED_PERMANENT','RECONCILING','PROCESSING')",
             name="ck_meiti_distribution_job_status",
         ),
         Index("idx_meiti_distribution_jobs_status", "status"),
@@ -578,6 +581,7 @@ class DistributionAttemptRecord(Base):
     error_code = Column(String(120))
     error_message = Column(Text)
     provider_request_id = Column(String(255))
+    provider_object_id = Column(String(255))
     response_summary = Column(JSONB)
     request_id = Column(String(255), nullable=False, default="")
 
@@ -625,7 +629,8 @@ class MediaUploadRecord(Base):
     source_path = Column(Text, nullable=False)
     mime_type = Column(String(120), nullable=False)
     size = Column(Integer, nullable=False)
-    provider = Column(String(120), nullable=False)
+    provider = Column(String(120), primary_key=True)
+    account_id = Column(String(255), primary_key=True, default="")
     integration_id = Column(String(255), nullable=False, default="")
     remote_media_id = Column(String(255), nullable=False)
     remote_media_path = Column(Text, nullable=False)
@@ -658,12 +663,23 @@ class XianyuListingRecord(Base):
     provider_response = Column(JSONB, nullable=False, default=dict)
     quantity = Column(Integer, nullable=False, default=1)
     content_package_id = Column(String(255), nullable=False, default="")
+    distribution_job_id = Column(String(255), nullable=False, default="")
+    condition = Column(String(40), nullable=False, default="new")
+    location = Column(Text, nullable=False, default="")
+    shipping = Column(JSONB, nullable=False, default=dict)
+    attributes = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','SUBMITTING','PROCESSING','ONLINE','FAILED','REMOVED','UNKNOWN')",
+            name="ck_meiti_xianyu_listing_status",
+        ),
+        Index("uq_meiti_xianyu_listings_job", "distribution_job_id", unique=True, postgresql_where=text("distribution_job_id <> ''")),
         Index("idx_meiti_xianyu_listings_account", "account_id"),
         Index("idx_meiti_xianyu_listings_status", "status"),
+        Index("idx_meiti_xianyu_listings_item", "provider_item_id"),
     )
 
 class MetricSnapshotRecord(Base):
