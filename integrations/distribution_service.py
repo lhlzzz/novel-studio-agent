@@ -17,7 +17,7 @@ from integrations.contracts.distribution import (
     make_idempotency_key,
     transition_job,
 )
-from integrations.persistence import InMemoryStore, JobStore
+from integrations.persistence import JobStore
 
 
 class ExternalActionBlocked(RuntimeError):
@@ -33,9 +33,11 @@ def _utcnow() -> str:
 
 
 class DistributionService:
-    def __init__(self, adapter: DistributionAdapter, store: JobStore | None = None) -> None:
+    def __init__(self, adapter: DistributionAdapter, store: JobStore) -> None:
+        if store is None:
+            raise ValueError("DistributionService requires an explicit store")
         self.adapter = adapter
-        self.store = store or InMemoryStore()
+        self.store = store
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
         account = self._account(job)
@@ -104,6 +106,9 @@ class DistributionService:
             job = transition_job(job, "SUBMITTING", last_attempt_at=_utcnow(), attempt_count=attempt_no)
             self.store.save_job(job)
             result = self.adapter.publish(job)
+            from social.handoff.models import XHSHandoff, is_handoff_result
+            if is_handoff_result(result):
+                return self._persist_handoff(job, result, attempt_no, started)
         except IllegalJobTransition as exc:
             job = replace(job, status="FAILED_PERMANENT", error_code="illegal_transition", error_message=str(exc))
             self.store.save_job(job)
@@ -147,14 +152,14 @@ class DistributionService:
             status = "SUBMITTED"
             publication_status = "SUBMITTED"
         else:
-            status = "SUBMITTED" if job.status == "SUBMITTING" else "SUBMITTED"
-            publication_status = remote_status if remote_status in {"SUBMITTED", "PROCESSING", "UNKNOWN", "HANDOFF_REQUIRED"} else "SUBMITTED"
+            status = "SUBMITTED"
+            publication_status = remote_status if remote_status in {"SUBMITTED", "PROCESSING", "UNKNOWN"} else "SUBMITTED"
         job = transition_job(job, status, provider_response=result)
         self.store.save_job(job)
         publication = Publication(
             distribution_job_id=job.job_id,
             account_id=account.id,
-            provider=getattr(account, "provider", ""),
+            provider=job.provider or getattr(account, "provider", ""),
             provider_post_id=post_id,
             platform_object_id=str(platform_object_id) if platform_object_id is not None else None,
             status=publication_status,
@@ -162,7 +167,7 @@ class DistributionService:
             external_url=result.get("url") or result.get("releaseURL") or result.get("external_url"),
             content_package_id=job.content_package_id,
             request_id=job.request_id,
-            platform=getattr(account, "platform", "") or getattr(account, "provider", ""),
+            platform=job.platform or getattr(account, "platform", "") or getattr(account, "provider", ""),
             created_at=_utcnow(),
             provider_object_type=str(result.get("provider_object_type") or ""),
         )
@@ -201,6 +206,48 @@ class DistributionService:
             request_id=job.request_id,
         )
         return publication
+
+    def _persist_handoff(self, job, result, attempt_no: int, started: str):
+        from social.handoff.models import XHSHandoff
+
+        handoff_id = str(result.get("handoff_id") or "")
+        if not handoff_id:
+            raise ExternalActionBlocked("XHS handoff did not return handoff_id")
+        package = result.get("package") if isinstance(result.get("package"), dict) else {}
+        account = self._account(job)
+        job = transition_job(job, "SUBMITTED", provider_response=result)
+        self.store.save_job(job)
+        handoff = XHSHandoff(
+            handoff_id=handoff_id,
+            account_id=account.id,
+            content_package_id=job.content_package_id,
+            status="READY_FOR_XHS",
+            export_path=str(result.get("export_path") or ""),
+            content_type=str(package.get("content_type") or result.get("content_type") or ""),
+            title=str(package.get("title") or ""),
+            content=str(package.get("content") or ""),
+            hashtags=tuple(package.get("hashtags") or ()),
+            images=tuple(package.get("images") or ()),
+            video=package.get("video"),
+            cover=package.get("cover"),
+            distribution_job_id=job.job_id,
+            package=dict(package),
+        )
+        saver = getattr(self.store, "save_handoff", None)
+        if not callable(saver):
+            raise ExternalActionBlocked("store does not persist XHSHandoff")
+        saver(handoff)
+        self._record_attempt(job, attempt_no, started, "handoff", None, None, {"handoff_id": handoff_id, "status": handoff.status})
+        log_event(
+            agent="distribution-agent",
+            action="handoff",
+            job_id=job.job_id,
+            provider=getattr(account, "provider", "xiaohongshu"),
+            integration_id=account.id,
+            status=handoff.status,
+            request_id=job.request_id,
+        )
+        return handoff
 
     def _account(self, job: DistributionJob):
         get_account = getattr(self.adapter, "get_account", None)

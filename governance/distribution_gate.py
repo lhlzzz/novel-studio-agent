@@ -14,7 +14,6 @@ def check_distribution_job(
     *,
     adapter: Any | None = None,
     store: Any | None = None,
-    **_ignored: Any,
 ) -> list[str]:
     decision = admit_distribution_job(job, account=account, adapter=adapter, store=store)
     return list(decision.reasons)

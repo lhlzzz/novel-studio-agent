@@ -1,3 +1,3 @@
-from social.providers.xiaohongshu.adapter import XiaohongshuAdapter, XHSAdapter
+from social.providers.xiaohongshu.adapter import XiaohongshuAdapter
 
-__all__ = ["XiaohongshuAdapter", "XHSAdapter"]
+__all__ = ["XiaohongshuAdapter"]

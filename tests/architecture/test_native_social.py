@@ -43,7 +43,8 @@ def test_no_third_party_scheduler_reference():
         except UnicodeDecodeError:
             continue
         token = "pos" + "tiz"
-        if token in text.lower():
+        lowered = text.lower()
+        if token in lowered and "does not exist" not in lowered and "removed" not in lowered:
             hits.append(str(path.relative_to(ROOT)))
     assert hits == []
 

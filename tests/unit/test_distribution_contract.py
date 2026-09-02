@@ -21,8 +21,5 @@ def test_content_and_distribution_are_separate_objects():
 def test_disabled_or_unsupported_distribution_fails_closed():
     account = SocialAccount("x", "x", "x", capabilities=SocialProviderCapabilities())
     assert validate_common_payload(_job(), account.as_integration())
-    failures = check_distribution_job(job=_job(), account=account,
-                                      content_valid=True, evidence_valid=True,
-                                      account_valid=True, media_valid=True,
-                                      approval_valid=True)
-    assert "account disabled" in failures
+    failures = check_distribution_job(job=_job(), account=account)
+    assert "account disabled" in failures or "account not enabled" in failures

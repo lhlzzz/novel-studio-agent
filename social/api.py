@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from social.accounts.manager import SocialAccountManager
-from social.providers.resolver import resolve_social_provider
+from social.runtime.container import SocialRuntime
 
 
 class SocialAccountAPI:
-    def __init__(self, manager: SocialAccountManager | None = None) -> None:
-        self.manager = manager or SocialAccountManager()
+    def __init__(self, manager=None, *, runtime: SocialRuntime | None = None) -> None:
+        if manager is None and runtime is None:
+            raise ValueError("SocialAccountAPI requires SocialRuntime")
+        self.manager = manager or runtime.manager
 
     def list_accounts(self):
         return self.manager.list_accounts()
@@ -32,20 +33,23 @@ class SocialAccountAPI:
 
 
 class DistributionAPI:
-    def __init__(self, agent: Any | None = None) -> None:
+    def __init__(self, agent: Any | None = None, *, runtime: SocialRuntime | None = None) -> None:
         self.agent = agent
+        self.runtime = runtime
 
     def _agent(self):
         if self.agent is None:
-            from agents.distribution_agent import DistributionAgent
-            self.agent = DistributionAgent()
+            runtime = self.runtime
+            if runtime is None:
+                raise ValueError("DistributionAPI requires SocialRuntime")
+            self.agent = runtime.agent()
         return self.agent
 
-    def publish(self, job, **gate: bool):
-        return self._agent().execute(job, **gate)
+    def publish(self, job):
+        return self._agent().execute(job)
 
-    def schedule(self, job, **gate: bool):
-        return self._agent().schedule(job, **gate)
+    def schedule(self, job):
+        return self._agent().schedule(job)
 
     def cancel(self, job_id: str):
         return self._agent().cancel(job_id)

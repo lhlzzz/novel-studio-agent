@@ -9,6 +9,7 @@ from social.providers.douyin.contract import (
     CREATE_VIDEO,
     INIT_PART,
     UPLOAD_PART,
+    UPLOAD_IMAGE,
     UPLOAD_VIDEO,
     VIDEO_DATA,
 )
@@ -30,6 +31,19 @@ class DouyinClient:
             query={"open_id": open_id},
             data=data,
             content_type="application/octet-stream",
+            retry=True,
+            **ctx,
+        )
+
+    def upload_image(self, access_token: str, open_id: str, data: bytes, **ctx: str) -> Any:
+        return self.http.request(
+            "POST",
+            UPLOAD_IMAGE,
+            headers=self._headers(access_token),
+            query={"open_id": open_id},
+            data=data,
+            content_type="application/octet-stream",
+            retry=True,
             **ctx,
         )
 

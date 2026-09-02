@@ -434,16 +434,48 @@ class SocialAccountRecord(Base):
     region = Column(String(80), nullable=False, default="global")
     last_verified_at = Column(DateTime)
     blocked_reason = Column(Text)
+    revoke_attempted = Column(Integer, nullable=False, default=0)
+    remote_revoked = Column(Integer, nullable=False, default=0)
+    remote_revoke_supported = Column(Integer)
+    revoke_error = Column(Text)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFYING','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED')",
+            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFYING','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED','TARGET_ONLY','HANDOFF_READY','IDENTITY_UNVERIFIED')",
             name="ck_meiti_social_account_status",
         ),
         Index("idx_meiti_social_accounts_provider", "provider"),
         Index("idx_meiti_social_accounts_status", "status"),
+    )
+
+
+class SocialHandoffRecord(Base):
+    """XHS handoff is not a Publication."""
+
+    __tablename__ = "social_handoffs"
+
+    handoff_id = Column(String(255), primary_key=True)
+    provider = Column(String(120), nullable=False, default="xiaohongshu")
+    platform = Column(String(120), nullable=False, default="xiaohongshu")
+    account_id = Column(String(255), nullable=False)
+    content_package_id = Column(String(255), nullable=False, default="")
+    status = Column(String(40), nullable=False, default="READY_FOR_XHS")
+    export_path = Column(Text, nullable=False, default="")
+    distribution_job_id = Column(String(255), nullable=False, default="")
+    package = Column(JSONB, nullable=False, default=dict)
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('READY_FOR_XHS','OPENED','SUBMITTED','PUBLISHED','EXPIRED','CANCELLED')",
+            name="ck_meiti_social_handoff_status",
+        ),
+        Index("idx_meiti_social_handoffs_account", "account_id"),
+        Index("idx_meiti_social_handoffs_job", "distribution_job_id"),
     )
 
 
@@ -515,6 +547,8 @@ class DistributionJobRecord(Base):
     lease_until = Column(DateTime)
     worker_id = Column(String(255))
     claimed_at = Column(DateTime)
+    provider = Column(String(120), nullable=False, default="")
+    platform = Column(String(120), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -622,6 +656,8 @@ class XianyuListingRecord(Base):
     media_assets = Column(JSONB, nullable=False, default=list)
     status = Column(String(40), nullable=False, default="DRAFT")
     provider_response = Column(JSONB, nullable=False, default=dict)
+    quantity = Column(Integer, nullable=False, default=1)
+    content_package_id = Column(String(255), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

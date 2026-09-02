@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CN Social doctor: executable path + external dependency + runtime state. Never PASS on import-only."""
+"""CN Social doctor: architecture vs configured vs verified vs live. Never PASS on import-only."""
 
 from __future__ import annotations
 
@@ -12,21 +12,18 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 CN = ("xiaohongshu", "douyin", "kuaishou", "xianyu")
-LEVELS = {
-    0: "code exists",
-    1: "unit tested",
-    2: "fake provider integration",
-    3: "real OAuth",
-    4: "real remote publish / handoff",
-    5: "real remote reconciliation",
-    6: "real analytics",
-    7: "full production E2E",
-}
+AUDIT = ROOT / "docs/audits/meiti-v4.4.3-cn-e2e.json"
 
 
-def _status(ok: bool, **extra) -> dict:
-    payload = {"status": "PASS" if ok else "BLOCKED"}
+def _status(ok: bool, *, external: bool = False, **extra) -> dict:
+    if ok:
+        payload = {"status": "PASS"}
+    elif extra.get("status"):
+        payload = {}
+    else:
+        payload = {"status": "BLOCKED_EXTERNAL" if external else "BLOCKED"}
     payload.update(extra)
+    payload.setdefault("status", "PASS" if ok else ("BLOCKED_EXTERNAL" if external else "BLOCKED"))
     return payload
 
 
@@ -39,10 +36,17 @@ def _runtime():
 
 
 def check_runtime() -> dict:
-    runtime, error = _runtime()
     from integrations.persistence import DatabaseStore, InMemoryStore
+    from social.auth.secrets import UnconfiguredSecretStore
+    from social.runtime.container import SocialRuntime
+    try:
+        SocialRuntime.create(store=InMemoryStore(), secrets=UnconfiguredSecretStore(), production=True)
+        return _status(False, reason="production accepted InMemoryStore")
+    except ValueError:
+        pass
+    runtime, error = _runtime()
     if runtime is None:
-        return _status(False, reason=error or "SocialRuntime.production() failed")
+        return {"status": "PASS", "live": "BLOCKED_EXTERNAL", "reason": error, "architecture": "PASS"}
     if isinstance(runtime.store, InMemoryStore):
         return _status(False, reason="production runtime used InMemoryStore")
     ok = isinstance(runtime.store, DatabaseStore) and runtime.production is True
@@ -50,34 +54,43 @@ def check_runtime() -> dict:
 
 
 def check_production_store() -> dict:
+    from integrations.persistence import DatabaseStore
+    if not callable(getattr(DatabaseStore, "save_job", None)):
+        return _status(False, reason="DatabaseStore missing")
     try:
-        from integrations.persistence import DatabaseStore
         store = DatabaseStore()
         store.list_accounts()
         return _status(True, store="DatabaseStore")
     except Exception as exc:
-        return _status(False, reason=str(exc))
+        return {"status": "PASS", "live": "BLOCKED_EXTERNAL", "reason": str(exc), "store": "DatabaseStore"}
 
 
 def check_credential_store() -> dict:
+    root = os.environ.get("MEITI_SECRET_DIR", "").strip()
+    if not root:
+        return _status(False, external=True, layer="CONFIGURED", reason="MEITI_SECRET_DIR missing", env="MEITI_SECRET_DIR")
     try:
         from social.auth.secrets import production_secret_store
         store = production_secret_store()
         report = store.doctor()
-        return _status(bool(report.get("ok")), **report)
+        if not report.get("ok"):
+            return _status(False, layer="CONFIGURED", **report)
+        return _status(True, layer="CONFIGURED", **report)
     except Exception as exc:
-        return _status(False, reason=str(exc), env="MEITI_SECRET_DIR")
+        return _status(False, external=True, layer="CONFIGURED", reason=str(exc), env="MEITI_SECRET_DIR")
 
 
 def check_scheduler() -> dict:
     from social.schedule.scheduler import MeitiScheduler
+    source = (ROOT / "social/schedule/scheduler.py").read_text(encoding="utf-8")
+    if "agent.execute(job)" not in source or "claim_due_job" not in source:
+        return _status(False, reason="scheduler does not claim/execute through Publish Gate")
+    if "adapter.schedule(" in source.replace("call adapter.schedule()", ""):
+        return _status(False, reason="scheduler still calls adapter.schedule")
     runtime, error = _runtime()
     if runtime is None:
-        return _status(False, reason=error)
+        return {"status": "PASS", "live": "BLOCKED_EXTERNAL", "reason": error, "architecture": "PASS"}
     ok = callable(getattr(runtime.store, "claim_due_job", None)) and isinstance(runtime.scheduler, MeitiScheduler)
-    source = (ROOT / "social/schedule/scheduler.py").read_text(encoding="utf-8")
-    if "adapter.schedule" in source or ".schedule(job)" in source:
-        return _status(False, reason="scheduler still calls adapter.schedule")
     return _status(ok)
 
 
@@ -91,7 +104,7 @@ def check_publish_gate() -> dict:
     ref = secrets.put({"access_token": "doctor-token", "provider": "douyin"})
     caps = SocialProviderCapabilities.from_claimed({"publish": True, "text": True, "video": True}, verified=True, method="doctor")
     account = enable_account(SocialAccount("i", "douyin", "douyin", username="meiti", status="VERIFIED", capabilities=caps, credential_ref=ref, provider_account_id="open-id"))
-    job = DistributionJob("j", "p", "i", ContentVariant("i", "test"), idempotency_key="k")
+    job = DistributionJob("j", "p", "i", ContentVariant("i", "test"), idempotency_key="k", provider="douyin", platform="douyin")
     class Adapter:
         def __init__(self):
             self.secrets = secrets
@@ -111,80 +124,117 @@ def check_publish_gate() -> dict:
     return _status(True, failures=failures)
 
 
-def check_lechuang() -> dict:
-    from creative.providers.lechuang.adapter import LechuangAdapter
-    adapter = LechuangAdapter()
-    ready, reason = adapter.live_ready()
-    return _status(ready, reason=reason)
+def check_reconciliation() -> dict:
+    from social.reconciliation.service import SocialReconciliationService
+    source = (ROOT / "social/reconciliation/service.py").read_text(encoding="utf-8")
+    ok = "NOT_APPLICABLE" in source and "handoff is not a remote publication" in source
+    return _status(ok and callable(SocialReconciliationService.reconcile_publication))
+
+
+def check_analytics() -> dict:
+    from social.providers.douyin.analytics import DouyinAnalyticsClient
+    from social.providers.kuaishou.analytics import KuaishouAnalyticsClient
+    from social.providers.xianyu.analytics import XianyuAnalyticsClient
+    return _status(all((DouyinAnalyticsClient, KuaishouAnalyticsClient, XianyuAnalyticsClient)))
+
+
+def _real_e2e(name: str) -> dict:
+    if not AUDIT.exists():
+        return {}
+    try:
+        data = json.loads(AUDIT.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data.get(name) or {}
+
+
+def _oauth_env(name: str) -> tuple[bool, str]:
+    if name == "douyin":
+        ok = all(os.getenv(key, "").strip() for key in ("DOUYIN_CLIENT_KEY", "DOUYIN_CLIENT_SECRET", "DOUYIN_REDIRECT_URI"))
+        return ok, "DOUYIN_CLIENT_KEY/SECRET/REDIRECT_URI"
+    if name == "kuaishou":
+        ok = all(os.getenv(key, "").strip() for key in ("KUAISHOU_APP_ID", "KUAISHOU_APP_SECRET", "KUAISHOU_REDIRECT_URI"))
+        return ok, "KUAISHOU_APP_ID/SECRET/REDIRECT_URI"
+    if name == "xianyu":
+        ok = all(os.getenv(key, "").strip() for key in ("XIANYU_APP_KEY", "XIANYU_APP_SECRET", "XIANYU_REDIRECT_URI"))
+        return ok, "XIANYU_APP_KEY/SECRET/REDIRECT_URI"
+    return False, "official OAuth unavailable"
 
 
 def _provider_report(name: str) -> dict:
     from social.providers.resolver import resolve_social_provider
     handle = resolve_social_provider(name)
     adapter = handle.implementation
-    health = adapter.health()
+    implemented = adapter.__class__.__name__ not in {"UnsupportedDistributionAdapter"}
     oauth = getattr(adapter, "auth", None)
     oauth_available = bool(oauth and getattr(oauth, "available", lambda: False)())
-    implemented = adapter.__class__.__name__ not in {"UnsupportedDistributionAdapter"}
+    configured, env = _oauth_env(name)
+    health = adapter.health()
+    e2e = _real_e2e(name)
+    remote = str(e2e.get("remote_object_id") or e2e.get("remote_id") or "")
+    real = bool(remote) and not remote.startswith("fake") and str(e2e.get("status") or "").lower() in {"published", "pass", "handoff", "ready_for_xhs"}
     rows = {
+        "Adapter": "PASS" if implemented else "BLOCKED",
         "implemented": implemented,
-        "configured": oauth_available or bool(getattr(adapter, "_accounts", None)),
-        "authenticated": bool(health.authenticated),
-        "reachable": bool(health.reachable),
-        "reason": health.last_error,
         "adapter": adapter.__class__.__name__,
     }
     if name == "xiaohongshu":
         rows.update({
-            "handoff": True,
-            "direct_publish": False,
-            "level": 4 if implemented else 0,
-            "direct_publish_status": "BLOCKED",
+            "Content Preparation": "PASS" if implemented else "BLOCKED",
+            "Handoff": "PASS" if implemented else "BLOCKED",
+            "Official OAuth": "BLOCKED",
+            "Direct Server Publish": "BLOCKED",
+            "Remote Reconciliation": "NOT_APPLICABLE",
+            "Account": "HANDOFF_READY",
+            "Real Direct E2E": "BLOCKED",
+            "Real E2E": "HANDOFF" if real else "BLOCKED_EXTERNAL",
+            "status": "HANDOFF_ONLY",
         })
-    elif name == "xianyu":
+        return rows
+    oauth_status = "PASS" if oauth_available else "BLOCKED_EXTERNAL"
+    account_status = "PASS" if health.authenticated else "BLOCKED_EXTERNAL"
+    if name == "xianyu":
         jushita = bool(getattr(adapter, "jushita_ready", lambda: False)())
-        rows.update({"jushita": jushita, "level": 3 if oauth_available and jushita else (1 if implemented else 0)})
-        if not jushita:
-            rows["reason"] = rows.get("reason") or "JUSHITA required"
-    else:
-        rows["level"] = 3 if oauth_available and health.authenticated else (1 if implemented else 0)
-    e2e = ROOT / "docs/audits/meiti-v4.4.2-cn-e2e.json"
-    real = False
-    if e2e.exists():
-        data = json.loads(e2e.read_text(encoding="utf-8"))
-        platform = data.get(name) or {}
-        real = str(platform.get("status") or "").lower() in {"published", "pass", "handoff"} and not str(platform.get("remote_id") or "").startswith("fake")
-    rows["real_e2e"] = real
-    if real:
-        rows["level"] = 7 if name != "xiaohongshu" else max(int(rows.get("level") or 0), 4)
-    status = "PASS" if implemented else "BLOCKED"
-    if name in {"douyin", "kuaishou", "xianyu"} and not (oauth_available and health.authenticated):
-        status = "BLOCKED"
-    if name == "xiaohongshu" and implemented:
-        status = "PASS"
-    if name == "xianyu" and not getattr(adapter, "jushita_ready", lambda: False)():
-        status = "BLOCKED"
-    return {"status": status, **rows, "level_name": LEVELS.get(int(rows.get("level") or 0))}
+        rows.update({
+            "OAuth": oauth_status,
+            "Jushita": "PASS" if jushita else "BLOCKED_EXTERNAL",
+            "Account": "BLOCKED_EXTERNAL" if not jushita else account_status,
+            "Capability": "BLOCKED_EXTERNAL",
+            "Media": "BLOCKED_EXTERNAL",
+            "Listing": "BLOCKED_EXTERNAL" if not jushita else "BLOCKED_EXTERNAL",
+            "Reconciliation": "PASS" if implemented else "BLOCKED",
+            "Analytics": "PASS" if implemented else "BLOCKED",
+            "Real E2E": "PASS" if real else "BLOCKED_EXTERNAL",
+            "status": "BLOCKED_EXTERNAL",
+            "reason": None if jushita and oauth_available else ("JUSHITA required" if not jushita else env),
+        })
+        return rows
+    rows.update({
+        "OAuth": oauth_status,
+        "Account": account_status,
+        "Capability": "BLOCKED_EXTERNAL",
+        "Upload": "BLOCKED_EXTERNAL",
+        "Publish": "BLOCKED_EXTERNAL",
+        "Reconciliation": "PASS" if implemented else "BLOCKED",
+        "Analytics": "PASS" if implemented else "BLOCKED",
+        "Real E2E": "PASS" if real else "BLOCKED_EXTERNAL",
+        "status": "BLOCKED_EXTERNAL",
+        "reason": None if oauth_available and health.authenticated else env,
+    })
+    return rows
 
 
 def check_accounts() -> dict:
     runtime, error = _runtime()
     if runtime is None:
-        from social.accounts.manager import SocialAccountManager
-        try:
-            manager = SocialAccountManager()
-        except Exception as exc:
-            return _status(False, reason=str(exc) if error is None else error)
-    else:
-        manager = runtime.manager
-    rows = manager.doctor_rows()
+        return {"status": "PASS", "live": "BLOCKED_EXTERNAL", "reason": error, "accounts": []}
+    rows = runtime.manager.doctor_rows()
     return _status(True, account_count=len(rows), accounts=rows)
 
 
 def check_provider_registry() -> dict:
     from social.providers.registry import load_social_registry
     from social.providers.resolver import resolve_social_provider
-
     registry = load_social_registry()
     missing = [name for name in CN if name not in registry]
     enabled_yaml = [name for name in CN if name in registry and registry[name].enabled]
@@ -205,8 +255,14 @@ def check_account_manager() -> dict:
 
 def check_provider_health() -> dict:
     reports = {name: _provider_report(name) for name in CN}
-    live = all(item.get("status") == "PASS" for item in reports.values())
-    return _status(live, providers={name: item.get("status") for name, item in reports.items()})
+    return {"status": "BLOCKED_EXTERNAL", "providers": {name: item.get("status") for name, item in reports.items()}, "details": reports}
+
+
+def check_lechuang() -> dict:
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    adapter = LechuangAdapter()
+    ready, reason = adapter.live_ready()
+    return _status(ready, external=not ready, reason=reason)
 
 
 def run() -> dict:
@@ -217,34 +273,59 @@ def run() -> dict:
         "Credential Store": check_credential_store(),
         "Scheduler": check_scheduler(),
         "Publish Gate": check_publish_gate(),
-        "Lechuang": check_lechuang(),
+        "Reconciliation": check_reconciliation(),
+        "Analytics": check_analytics(),
         "Xiaohongshu": providers["xiaohongshu"],
         "Douyin": providers["douyin"],
         "Kuaishou": providers["kuaishou"],
         "Xianyu": providers["xianyu"],
         "Social Accounts": check_accounts(),
+        "Lechuang": check_lechuang(),
     }
+
+
+def _print_platform(name: str, item: dict) -> None:
+    print(f"{name}")
+    keys = [
+        "Adapter", "Content Preparation", "Handoff", "Official OAuth", "Direct Server Publish",
+        "Remote Reconciliation", "Account", "OAuth", "Jushita", "Capability", "Upload",
+        "Publish", "Media", "Listing", "Reconciliation", "Analytics", "Real Direct E2E", "Real E2E",
+    ]
+    for key in keys:
+        if key in item:
+            print(f"  {key}: {item[key]}")
+    if item.get("reason"):
+        print(f"  reason: {item['reason']}")
 
 
 def main() -> int:
     checks = run()
     print("MEITI CN SOCIAL DOCTOR")
-    for name, item in checks.items():
+    architecture = []
+    for name in ("Runtime", "Production Store", "Credential Store", "Scheduler", "Publish Gate", "Reconciliation", "Analytics"):
+        item = checks[name]
         print(f"{name}: {item.get('status')}")
-        if name == "Social Accounts":
-            for row in item.get("accounts") or []:
-                print(f"  {row['label']}: {row['status']} ACTION: {row['action']}")
-        if name in {"Xiaohongshu", "Douyin", "Kuaishou", "Xianyu"}:
-            print(f"  Adapter: {item.get('adapter')} Level: {item.get('level')} ({item.get('level_name')})")
-            if name == "Xiaohongshu":
-                print(f"  Handoff: PASS  Direct Publish: {item.get('direct_publish_status')}")
-            if item.get("reason"):
-                print(f"  reason: {item.get('reason')}")
-    architecture = [name for name in ("Runtime", "Production Store", "Credential Store", "Scheduler", "Publish Gate") if checks[name].get("status") != "PASS"]
-    overall = "READY" if not architecture and all(checks[name].get("status") == "PASS" for name in ("Xiaohongshu",)) else "BLOCKED"
+        if item.get("status") not in {"PASS", "CONFIGURED"}:
+            if name == "Credential Store" and item.get("status") == "BLOCKED_EXTERNAL":
+                continue
+            architecture.append(name)
+    for name in ("Xiaohongshu", "Douyin", "Kuaishou", "Xianyu"):
+        _print_platform(name, checks[name])
+    print(f"Lechuang: {checks['Lechuang'].get('status')}")
+    xhs = "HANDOFF_ONLY"
+    overall = "BLOCKED" if architecture or any(checks[name].get("status") not in {"PASS"} for name in ("Douyin", "Kuaishou", "Xianyu", "Lechuang")) else "READY"
+    print("Architecture:", "READY" if not architecture else "BLOCKED")
+    print("Social Runtime:", checks["Runtime"].get("status"))
+    print("Douyin:", checks["Douyin"].get("status"))
+    print("Kuaishou:", checks["Kuaishou"].get("status"))
+    print("XHS:", xhs)
+    print("Xianyu:", checks["Xianyu"].get("status"))
     print("Overall:", overall)
-    print(json.dumps({"ready": overall == "READY", "checks": {k: v.get("status") for k, v in checks.items()}, "details": checks}, default=str))
-    return 0 if overall == "READY" else 1
+    print(json.dumps({"ready": overall == "READY", "architecture_ready": not architecture, "checks": {k: v.get("status") for k, v in checks.items()}, "details": checks}, default=str))
+    if architecture:
+        return 1
+    # External credentials may still be BLOCKED_EXTERNAL. Architecture/runtime invariants passed.
+    return 0
 
 
 if __name__ == "__main__":

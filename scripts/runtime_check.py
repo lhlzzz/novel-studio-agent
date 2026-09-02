@@ -14,6 +14,7 @@ from scripts.meiti_doctor import as_payload, run
 
 
 LIVE_KEYS = {
+    "Lechuang",
     "Lechuang Contract",
     "Lechuang Auth",
     "Image Generation",
@@ -25,14 +26,20 @@ LIVE_KEYS = {
     "Social Provider Health",
     "Research",
     "Real Creative E2E",
+    "Real Social E2E",
     "Real Distribution E2E",
+    "Credential",
+    "XHS",
+    "Douyin",
+    "Kuaishou",
+    "Xianyu",
 }
 
 
 def main() -> int:
     payload = as_payload(run())
     statuses = payload["checks"]
-    architecture_ready = all(status == "PASS" for key, status in statuses.items() if key not in LIVE_KEYS)
+    architecture_ready = all(status in {"PASS", "HANDOFF_ONLY", "NOT_APPLICABLE"} for key, status in statuses.items() if key not in LIVE_KEYS)
     live_ready = all(statuses.get(key) == "PASS" for key in LIVE_KEYS)
     out = {
         "ready": architecture_ready and live_ready,

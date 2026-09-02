@@ -18,7 +18,7 @@ from integrations.contracts.distribution import (
     make_idempotency_key,
 )
 from integrations.distribution_service import DistributionService
-from integrations.persistence import InMemoryStore, JobStore
+from integrations.persistence import JobStore
 from social.accounts.manager import SocialAccountManager
 from social.accounts.models import SocialAccount
 from social.providers.resolver import resolve_adapter, resolve_capability, resolve_social_provider
@@ -29,6 +29,7 @@ class DistributionAgent:
 
     name = "distribution-agent"
     owner = "distribution"
+    requires_runtime = True
     capabilities = (
         "list_accounts",
         "get_account",
@@ -54,12 +55,16 @@ class DistributionAgent:
         provider_name: str | None = None,
         secrets: Any | None = None,
     ) -> None:
-        self.store = store or InMemoryStore()
+        if store is None:
+            raise ValueError("DistributionAgent requires an explicit store from SocialRuntime")
+        self.store = store
         self.registry = registry or {}
         self.adapter = adapter
         self.provider_name = provider_name
         self.secrets = secrets
-        self.manager = manager or SocialAccountManager(store=self.store, secrets=secrets)
+        if manager is None:
+            raise ValueError("DistributionAgent requires SocialAccountManager from SocialRuntime")
+        self.manager = manager
         if adapter is not None:
             self.service = DistributionService(adapter, store=self.store)
         else:
@@ -68,7 +73,10 @@ class DistributionAgent:
     def _adapter_for(self, provider: str) -> Any:
         if self.adapter is not None:
             return self.adapter
-        return resolve_social_provider(provider).implementation
+        adapter = resolve_social_provider(provider).implementation
+        if self.secrets is not None:
+            adapter.secrets = self.secrets
+        return adapter
 
     def _service(self, adapter: Any) -> DistributionService:
         if self.adapter is not None and self.service is not None:
@@ -116,7 +124,8 @@ class DistributionAgent:
                 return account
             raise RuntimeError(f"no active verified account for platform={platform}")
         try:
-            return self.manager.select_enabled(platform, account_id=None, provider=self.provider_name)
+            capability = "handoff" if platform in {"xiaohongshu", "xhs"} else "publish"
+            return self.manager.select_enabled(platform, account_id=None, provider=self.provider_name, capability=capability)
         except Exception as exc:
             raise RuntimeError(f"provider is not runtime verified: no active verified account for platform={platform}") from exc
 
@@ -136,8 +145,9 @@ class DistributionAgent:
     ) -> DistributionJob:
         if account_id:
             account = self.manager.get_account(account_id)
-            if account.status != "ENABLED":
-                raise RuntimeError(f"account {account_id} is not ENABLED")
+            allowed = {"HANDOFF_READY"} if (account.provider == "xiaohongshu" or platform in {"xiaohongshu", "xhs"}) else {"ENABLED"}
+            if account.status not in allowed:
+                raise RuntimeError(f"account {account_id} is not {sorted(allowed)}")
         else:
             account = self.select_provider(platform)
         action = "publish"
@@ -154,21 +164,25 @@ class DistributionAgent:
             creator_id=package.creator_id,
             campaign_id=package.campaign_id,
             request_id=request_id or new_request_id(),
+            provider=account.provider,
+            platform=account.platform or platform,
         )
         self.store.save_content_package(package)
         self.store.save_account(account)
         return self.store.save_job(job)
 
     def validate(self, job: DistributionJob) -> list[str]:
-        adapter = self._adapter_for(self.provider_name or "douyin")
+        adapter = self._adapter_for(job.provider or self.provider_name or job.platform)
         return adapter.validate_payload(job)
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
-        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
+        adapter = self.adapter or self._adapter_for(job.provider or self.provider_name or job.platform)
         return self._service(adapter).dry_run(job)
 
-    def execute(self, job: DistributionJob, **_ignored: Any):
-        platform = self.provider_name or ((job.variant.metadata or {}).get("platform") if job.variant.metadata else None) or "douyin"
+    def execute(self, job: DistributionJob):
+        platform = job.provider or job.platform or self.provider_name or ((job.variant.metadata or {}).get("platform") if job.variant.metadata else None)
+        if not platform:
+            raise RuntimeError("DistributionJob.provider is required")
         adapter = self.adapter or self._adapter_for(platform)
 
         def gate_check(candidate: DistributionJob) -> bool:
@@ -178,7 +192,7 @@ class DistributionAgent:
         publishable = job if job.action in {"publish", "scheduled_publish"} else replace(job, action="publish")
         return self._service(adapter).execute(publishable, gate_check=gate_check)
 
-    def schedule(self, job: DistributionJob, **_ignored: Any):
+    def schedule(self, job: DistributionJob):
         from integrations.contracts.distribution import transition_job
         scheduled = replace(job, action="publish", status=job.status)
         if scheduled.status == "DRAFT":
@@ -210,7 +224,9 @@ class DistributionAgent:
     def reconcile(self, job_id: str) -> dict[str, Any]:
         from social.reconciliation.service import reconcile_distribution_job
 
-        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
+        job = self.store.get_job(job_id)
+        provider = self.provider_name or (job.provider if job is not None else None)
+        adapter = self.adapter or self._adapter_for(provider or "douyin")
         return reconcile_distribution_job(job_id, adapter=adapter, store=self.store)
 
     def sync_analytics(

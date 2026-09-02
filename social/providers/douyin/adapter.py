@@ -75,27 +75,56 @@ class DouyinAdapter(BaseCNAdapter):
         return [account]
 
     def verify_capabilities(self, account_id: str) -> SocialProviderCapabilities:
+        from datetime import datetime, timezone
+        from social.providers.douyin.contract import CREATE_IMAGE_TEXT, CREATE_VIDEO, USERINFO_URL, VIDEO_DATA, UPLOAD_IMAGE, UPLOAD_VIDEO
+
         account = self.get_account(account_id)
+        now = datetime.now(timezone.utc).isoformat()
         try:
             token, open_id = self._token(account)
             payload = self.auth.validate(token)
             user = user_from_payload(payload if isinstance(payload, dict) else {})
             if not (user.open_id or open_id):
                 raise AuthenticationError("open_id missing")
+            user_ok = True
         except Exception:
             return SocialProviderCapabilities.from_claimed(CLAIMED, verified=False, method="unverified")
         record = self.secrets.get_record(account.credential_ref) if account.credential_ref else None
         scopes = (record.scopes or record.scope or "") if record is not None else ""
-        publish_ok = all(account_scope in scopes.replace(",", " ").split() for account_scope in REQUIRED_PUBLISH_SCOPES) if scopes else False
-        method = "runtime_probe"
-        records = {
-            name: CapabilityRecord(name=name, supported=bool(value), verified=bool(value and (name != "publish" or publish_ok or name in {"media_upload", "image", "video", "analytics"})), method=method, verification_method=method)
-            for name, value in CLAIMED.items()
-        }
-        if not publish_ok:
-            records["publish"] = CapabilityRecord(name="publish", supported=True, verified=False, method="scope_missing")
-        else:
-            records["publish"] = CapabilityRecord(name="publish", supported=True, verified=True, method=method)
+        scope_set = {item.strip() for item in scopes.replace(",", " ").split() if item.strip()}
+        publish_ok = all(name in scope_set for name in REQUIRED_PUBLISH_SCOPES) if scope_set else False
+        data_ok = "video.data" in scope_set
+        records = {name: CapabilityRecord(name=name, supported=bool(value), verified=False, method="unverified") for name, value in CLAIMED.items()}
+        records["user_info"] = CapabilityRecord(
+            name="user_info", supported=True, verified=user_ok, verified_at=now,
+            method="official_endpoint_probe",
+            evidence={"endpoint": USERINFO_URL, "verified_at": now},
+        )
+        records["publish"] = CapabilityRecord(
+            name="publish", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
+            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoint": CREATE_VIDEO, "verified_at": now if publish_ok else None},
+        )
+        records["video"] = CapabilityRecord(
+            name="video", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
+            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoint": CREATE_VIDEO},
+        )
+        records["image"] = CapabilityRecord(
+            name="image", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
+            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoint": CREATE_IMAGE_TEXT},
+        )
+        records["media_upload"] = CapabilityRecord(
+            name="media_upload", supported=True, verified=publish_ok, verified_at=now if publish_ok else None,
+            method="official_scope_and_endpoint_probe" if publish_ok else "scope_missing",
+            evidence={"scope": "video.create", "endpoints": [UPLOAD_VIDEO, UPLOAD_IMAGE]},
+        )
+        records["analytics"] = CapabilityRecord(
+            name="analytics", supported=True, verified=data_ok, verified_at=now if data_ok else None,
+            method="official_scope_and_endpoint_probe" if data_ok else "scope_missing",
+            evidence={"scope": "video.data", "endpoint": VIDEO_DATA},
+        )
         return SocialProviderCapabilities.from_records(records)
 
     def _validate_platform(self, job, account) -> list[str]:
@@ -105,11 +134,11 @@ class DouyinAdapter(BaseCNAdapter):
         account = self.get_account(account_id) if account_id else None
         token, open_id = self._token(account)
         if mime_type.startswith("image/"):
-            result = self.dy_client.upload_video(token, open_id, data, account_id=account_id, idempotency_key=idempotency_key)
+            result = self.dy_client.upload_image(token, open_id, data, account_id=account_id, idempotency_key=idempotency_key)
             image_id = str(((result.get("data") or result) if isinstance(result, dict) else {}).get("image_id") or ((result.get("data") or {}) if isinstance(result, dict) else {}).get("id") or "")
             if not image_id:
                 raise MediaUploadError("Douyin image upload did not return image_id")
-            return {"id": image_id}
+            return {"id": image_id, "provider_object_type": "image_post"}
         if len(data) <= SMALL_UPLOAD_LIMIT:
             result = self.dy_client.upload_video(token, open_id, data, account_id=account_id, idempotency_key=idempotency_key)
         else:
@@ -143,7 +172,7 @@ class DouyinAdapter(BaseCNAdapter):
         else:
             payload = {"image_list": [{"image_id": item} for item in media_ids], "text": job.variant.body or job.variant.caption or job.variant.title}
             result = self.dy_client.create_image_text(token, open_id, payload, request_id=job.request_id, distribution_job_id=job.job_id, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id)
-            object_type = "video"
+            object_type = "image_post"
         video = video_from_payload(result if isinstance(result, dict) else {})
         item_id = video.item_id or video.video_id
         if not item_id:
@@ -152,7 +181,7 @@ class DouyinAdapter(BaseCNAdapter):
             "id": item_id,
             "post_id": item_id,
             "external_id": video.video_id or item_id,
-            "status": map_status(video.video_status) if video.video_status else "processing",
+            "status": "processing",
             "provider_object_type": object_type,
         }
 
@@ -167,22 +196,18 @@ class DouyinAdapter(BaseCNAdapter):
         items = data.get("list") if isinstance(data, dict) else None
         item = (items or [data or result])[0] if isinstance(items, list) and items else (data or result)
         video = video_from_payload(item if isinstance(item, dict) else {})
-        return {"id": video.item_id or provider_post_id, "status": map_status(video.video_status), "raw": result, "provider_object_type": "video"}
+        status = map_status(video.video_status)
+        if status == "published":
+            mapped = "published"
+        elif status == "failed":
+            mapped = "failed"
+        elif status in {"processing"}:
+            mapped = "processing"
+        else:
+            mapped = "unknown"
+        return {"id": video.item_id or provider_post_id, "status": mapped, "raw": result, "provider_object_type": "video"}
 
     def analytics(self, publication) -> dict[str, Any | None]:
-        try:
-            raw = self.get_status(publication.provider_post_id)
-        except Exception:
-            return {"views": None, "likes": None, "comments": None, "shares": None, "followers_delta": None}
-        item = raw.get("raw") or {}
-        data = item.get("data") if isinstance(item, dict) else {}
-        stats = data.get("list", [{}])[0] if isinstance(data, dict) and isinstance(data.get("list"), list) and data.get("list") else data
-        if not isinstance(stats, dict):
-            stats = {}
-        return {
-            "views": stats.get("play_count") or stats.get("view_count"),
-            "likes": stats.get("digg_count") or stats.get("like_count"),
-            "comments": stats.get("comment_count"),
-            "shares": stats.get("share_count"),
-            "followers_delta": None,
-        }
+        from social.providers.douyin.analytics import DouyinAnalyticsClient
+        token, open_id = self._token(self.get_account(publication.account_id) if publication.account_id else None)
+        return DouyinAnalyticsClient(self.dy_client).fetch(token, open_id, publication.provider_post_id)

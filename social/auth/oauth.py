@@ -79,11 +79,12 @@ class OAuthStateStore:
             "expires_at": (utcnow() + timedelta(seconds=ttl_seconds)).isoformat(),
             "access_token": "",
         }
-        return self.secrets.put(payload, ref=self._ref(start.state))
+        return self.secrets.put_json(payload, ref=self._ref(start.state))
 
     def consume(self, provider: str, state: str) -> dict[str, Any]:
         ref = self._ref(state)
-        payload = self.secrets.get(ref)
+        getter = getattr(self.secrets, "get_json", None)
+        payload = getter(ref) if callable(getter) else None
         if not payload:
             raise AuthenticationError("OAuth state is missing or expired")
         if not states_equal(str(payload.get("state") or ""), state):

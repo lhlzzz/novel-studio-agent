@@ -6,3 +6,6 @@ START_UPLOAD = "/openapi/photo/start_upload"
 PUBLISH = "/openapi/photo/publish"
 USER_INFO = "/openapi/user_info"
 PHOTO_INFO = "/openapi/photo/info"
+
+# Official Kuaishou upload helper: whole-file /api/upload below 10MB; fragment otherwise.
+WHOLE_FILE_LIMIT = 10 * 1024 * 1024

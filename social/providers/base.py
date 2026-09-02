@@ -48,11 +48,27 @@ class BaseSocialAdapter:
         self.rate_limit = self.client.rate_limit
 
     def _credentials(self, account: SocialAccount | None = None) -> dict[str, Any]:
+        from social.providers.errors import TokenExpired
         env_id = os.getenv(f"{self.provider.upper()}_CLIENT_ID", "").strip()
         env_secret = os.getenv(f"{self.provider.upper()}_CLIENT_SECRET", "").strip()
         payload: dict[str, Any] = {}
         if account and account.credential_ref:
-            payload.update(self.secrets.get(account.credential_ref))
+            record = self.secrets.get_record(account.credential_ref) if hasattr(self.secrets, "get_record") else None
+            if record is not None:
+                if record.expired() and record.refresh_token and not getattr(self, "_refreshed_once", False):
+                    auth = getattr(self, "auth", None)
+                    refresh = getattr(auth, "refresh", None)
+                    if callable(refresh):
+                        self._refreshed_once = True
+                        refreshed = refresh(record.refresh_token)
+                        record = self.secrets.replace(account.credential_ref, refreshed)
+                    else:
+                        raise TokenExpired(f"{self.provider} access_token expired")
+                elif record.expired():
+                    raise TokenExpired(f"{self.provider} access_token expired")
+                payload.update(record.to_payload())
+            else:
+                payload.update(self.secrets.get(account.credential_ref) or {})
         if env_id:
             payload.setdefault("client_id", env_id)
         if env_secret:
@@ -252,13 +268,17 @@ class BaseSocialAdapter:
         return self.analytics(publication)
 
     def refresh(self, account: SocialAccount) -> SocialAccount:
-        creds = self._credentials(account)
-        if not creds.get("refresh_token"):
-            raise AuthenticationError(f"{self.provider} refresh is unsupported or refresh_token missing")
-        return account
+        raise AuthenticationError(f"{self.provider} refresh must go through SocialAccountManager.refresh_account")
 
     def revoke(self, account: SocialAccount) -> None:
-        return None
+        auth = getattr(self, "auth", None)
+        revoke = getattr(auth, "revoke", None)
+        if not callable(revoke):
+            from social.auth.oauth import RevokeResult
+            return RevokeResult(remote_revoked=False, unsupported=True, reason=f"{self.provider} has no revoke endpoint")
+        creds = self._credentials(account)
+        token = str(creds.get("access_token") or "")
+        return revoke(token)
 
 
 class BaseCNAdapter(BaseSocialAdapter):

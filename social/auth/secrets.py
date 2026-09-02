@@ -41,6 +41,28 @@ class RuntimeSecretStore:
         os.chmod(path, 0o600)
         return ref
 
+    def put_json(self, payload: dict[str, Any], *, ref: str) -> str:
+        if not ref:
+            raise SecretStoreError("json secret ref is required")
+        path = self._path(ref)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(path)
+        os.chmod(path, 0o600)
+        return ref
+
+    def get_json(self, ref: str) -> dict[str, Any] | None:
+        if not ref:
+            return None
+        path = self._path(ref)
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise SecretStoreError("secret payload is not an object")
+        return payload
+
     def get(self, ref: str) -> dict[str, Any]:
         record = self.get_record(ref)
         return record.to_payload() if record is not None else {}
@@ -131,6 +153,12 @@ class UnconfiguredSecretStore:
 
     def get(self, ref: str) -> dict[str, Any]:
         return {}
+
+    def put_json(self, payload: dict[str, Any], *, ref: str) -> str:
+        raise SecretStoreError("MEITI_SECRET_DIR is required; production services must not default to /tmp")
+
+    def get_json(self, ref: str) -> dict[str, Any] | None:
+        return None
 
     def get_record(self, ref: str) -> CredentialRecord | None:
         return None

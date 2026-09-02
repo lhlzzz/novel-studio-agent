@@ -1,4 +1,4 @@
-"""Unique social composition root. Production never defaults to InMemoryStore."""
+"""Unique social composition root. Production never invents InMemoryStore or fake secrets."""
 
 from __future__ import annotations
 
@@ -31,16 +31,21 @@ class SocialRuntime:
         production: bool = False,
         adapter: Any | None = None,
     ) -> "SocialRuntime":
+        if store is None:
+            raise ValueError("SocialRuntime requires an explicit store")
+        if secrets is None:
+            raise ValueError("SocialRuntime requires an explicit secret store")
         if production and isinstance(store, InMemoryStore):
             raise ValueError("production social runtime cannot use InMemoryStore")
-        manager = SocialAccountManager(store, secrets=secrets)
+        oauth_states = OAuthStateStore(secrets)
+        manager = SocialAccountManager(store, secrets=secrets, oauth_states=oauth_states)
         scheduler = MeitiScheduler(store=store, manager=manager, adapter=adapter)
         return cls(
             store=store,
             secrets=secrets,
             manager=manager,
             scheduler=scheduler,
-            oauth_states=OAuthStateStore(secrets),
+            oauth_states=oauth_states,
             production=production,
         )
 
@@ -48,6 +53,8 @@ class SocialRuntime:
     def production(cls, **kwargs: Any) -> "SocialRuntime":
         store = kwargs.pop("store", None) or DatabaseStore()
         secrets = kwargs.pop("secrets", None) or production_secret_store()
+        if isinstance(store, InMemoryStore):
+            raise ValueError("production social runtime cannot use InMemoryStore")
         return cls.create(store=store, secrets=secrets, production=True, **kwargs)
 
     @classmethod

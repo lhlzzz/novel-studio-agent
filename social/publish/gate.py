@@ -111,16 +111,25 @@ def admit(
         evidence.append(_evidence("account_exists", True, account_id=account.account_id, status=account.status))
         if job.account_id not in {account.account_id, getattr(account, "id", "")}:
             reasons.append("account mismatch")
-        if account.status != "ENABLED":
+        records = account.capabilities.records or {}
+        handoff = records.get("handoff")
+        handoff_only = bool(handoff and handoff.allowed) or account.status in {"HANDOFF_READY", "TARGET_ONLY"}
+        if handoff_only:
+            if account.status not in {"HANDOFF_READY", "TARGET_ONLY"}:
+                reasons.append("account not enabled")
+                reasons.append("account disabled")
+                evidence.append(_evidence("account_enabled", False, status=account.status))
+            else:
+                evidence.append(_evidence("account_enabled", True, status=account.status, mode="handoff"))
+        elif account.status != "ENABLED":
             reasons.append("account not enabled")
             reasons.append("account disabled")
             evidence.append(_evidence("account_enabled", False, status=account.status))
         else:
             evidence.append(_evidence("account_enabled", True))
-        if account.status not in {"VERIFIED", "ENABLED"}:
+        if not handoff_only and account.status not in {"VERIFIED", "ENABLED"}:
             reasons.append("account not verified")
-        handoff = account.capabilities.records.get("handoff") if account.capabilities else None
-        if handoff is not None and handoff.allowed:
+        if handoff_only:
             usable, cred_reason = True, "handoff does not require server credential"
         else:
             usable, cred_reason = _credential_usable(account, adapter=adapter)
@@ -150,7 +159,7 @@ def admit(
         }))
         if not cap_ok:
             reasons.append("capability unverified")
-        if account.status != "ENABLED":
+        if not handoff_only and account.status != "ENABLED":
             if "account not enabled" not in reasons:
                 reasons.append("account not enabled")
 
@@ -184,15 +193,15 @@ def admit(
         validate = getattr(adapter, "validate_payload", None)
         if callable(validate):
             payload_errors = list(validate(job) or [])
-        try:
-            from social.media_policy import validate_job
-            platform = account.platform or (job.variant.metadata or {}).get("platform")
-            payload_errors.extend(validate_job(job, platform=platform))
-        except Exception:
-            pass
+        from social.media_policy import validate_job
+        platform = job.platform or account.platform or (job.variant.metadata or {}).get("platform")
+        policy_errors = validate_job(job, platform=platform)
+    else:
+        policy_errors = []
     evidence.append(_evidence("payload_valid", not payload_errors, errors=payload_errors))
     if payload_errors:
         reasons.append("payload invalid")
+    if policy_errors:
         reasons.append("platform policy invalid")
 
     provider_health = getattr(adapter, "health", None)

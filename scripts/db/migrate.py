@@ -45,6 +45,7 @@ from scripts.db.models import (
     SocialAccountRecord,
     DerivedAssetRecord,
     XianyuListingRecord,
+    SocialHandoffRecord,
 )
 
 PROJECT_NAME = "meiti"
@@ -78,6 +79,7 @@ BASE_TABLE_MODELS = (
     ("characters", CharacterRecord),
     ("judge_results", JudgeResultRecord),
     ("social_accounts", SocialAccountRecord),
+    ("social_handoffs", SocialHandoffRecord),
     ("derived_assets", DerivedAssetRecord),
     ("xianyu_listings", XianyuListingRecord),
 )

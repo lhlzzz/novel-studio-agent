@@ -62,9 +62,13 @@ class KuaishouAdapter(BaseCNAdapter):
         )]
 
     def verify_capabilities(self, account_id: str) -> SocialProviderCapabilities:
+        from datetime import datetime, timezone
+        from social.providers.kuaishou.contract import PHOTO_INFO, PUBLISH, START_UPLOAD, USER_INFO
+
         account = self.get_account(account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
+        now = datetime.now(timezone.utc).isoformat()
         if not token:
             return SocialProviderCapabilities.from_claimed(CLAIMED, verified=False, method="unverified")
         try:
@@ -72,20 +76,19 @@ class KuaishouAdapter(BaseCNAdapter):
             user = user_from_payload(payload if isinstance(payload, dict) else {})
             if not user.user_id:
                 raise AuthenticationError("user_id missing")
+            user_ok = True
         except Exception:
             return SocialProviderCapabilities.from_claimed(CLAIMED, verified=False, method="unverified")
         record = self.secrets.get_record(account.credential_ref) if account.credential_ref else None
         scopes = (record.scopes or record.scope or "") if record is not None else ""
-        scope_ok = all(name in scopes.replace(",", " ").split() for name in REQUIRED_SCOPES) if scopes else False
-        method = "runtime_probe"
-        records = {
-            name: CapabilityRecord(name=name, supported=bool(value), verified=bool(value and name != "publish"), method=method)
-            for name, value in CLAIMED.items()
-        }
-        records["publish"] = CapabilityRecord(name="publish", supported=True, verified=scope_ok, method=method if scope_ok else "scope_missing")
-        records["video"] = CapabilityRecord(name="video", supported=True, verified=True, method=method)
-        records["media_upload"] = CapabilityRecord(name="media_upload", supported=True, verified=True, method=method)
-        records["analytics"] = CapabilityRecord(name="analytics", supported=True, verified=True, method=method)
+        scope_set = {item.strip() for item in scopes.replace(",", " ").split() if item.strip()}
+        scope_ok = all(name in scope_set for name in REQUIRED_SCOPES) if scope_set else False
+        records = {name: CapabilityRecord(name=name, supported=bool(value), verified=False, method="unverified") for name, value in CLAIMED.items()}
+        records["user_info"] = CapabilityRecord(name="user_info", supported=True, verified=user_ok, verified_at=now, method="official_endpoint_probe", evidence={"endpoint": USER_INFO})
+        records["publish"] = CapabilityRecord(name="publish", supported=True, verified=scope_ok, verified_at=now if scope_ok else None, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH})
+        records["video"] = CapabilityRecord(name="video", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PUBLISH})
+        records["media_upload"] = CapabilityRecord(name="media_upload", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": START_UPLOAD})
+        records["analytics"] = CapabilityRecord(name="analytics", supported=True, verified=scope_ok, method="official_scope_and_endpoint_probe" if scope_ok else "scope_missing", evidence={"scope": "user_video_publish", "endpoint": PHOTO_INFO})
         return SocialProviderCapabilities.from_records(records)
 
     def _validate_platform(self, job, account) -> list[str]:
@@ -108,7 +111,8 @@ class KuaishouAdapter(BaseCNAdapter):
             raise MediaUploadError("Kuaishou start_upload did not return upload_token and endpoint")
         if endpoint.startswith("http://") and "kuaishou" not in endpoint:
             raise MediaUploadError("Kuaishou upload endpoint must be the runtime value from start_upload")
-        if len(data) > 8 * 1024 * 1024:
+        from social.providers.kuaishou.contract import WHOLE_FILE_LIMIT
+        if len(data) > WHOLE_FILE_LIMIT:
             self.ks_client.upload_file_chunked(endpoint, upload_token, data, account_id=account_id, idempotency_key=idempotency_key)
         else:
             self.ks_client.upload_file(endpoint, upload_token, data, filename, account_id=account_id, idempotency_key=idempotency_key)
@@ -129,14 +133,23 @@ class KuaishouAdapter(BaseCNAdapter):
             "caption": job.variant.caption or job.variant.body or job.variant.title,
         }
         cover = (job.variant.metadata or {}).get("cover")
+        cover_file = None
         if cover:
-            payload["cover"] = cover
+            from pathlib import Path
+            path = Path(str(cover))
+            if path.exists() and path.is_file():
+                cover_file = (path.name, path.read_bytes(), "image/jpeg")
+            elif str(cover).startswith(("http://", "https://")):
+                payload["cover"] = cover
+            else:
+                raise ValidationError("Kuaishou cover must be an uploaded remote URL or a local file to send as multipart; JSON local paths are blocked")
         if (job.variant.metadata or {}).get("stereo_type"):
             payload["stereo_type"] = (job.variant.metadata or {}).get("stereo_type")
         result = self.ks_client.publish(
             self.app_id,
             token,
             payload,
+            cover_file=cover_file,
             request_id=job.request_id,
             distribution_job_id=job.job_id,
             account_id=job.account_id,
@@ -149,7 +162,7 @@ class KuaishouAdapter(BaseCNAdapter):
             "id": photo.photo_id,
             "post_id": photo.photo_id,
             "external_id": photo.photo_id,
-            "status": map_status(photo),
+            "status": "processing",
             "provider_object_type": "photo",
         }
 
@@ -163,15 +176,7 @@ class KuaishouAdapter(BaseCNAdapter):
         return {"id": photo.photo_id or provider_post_id, "status": map_status(photo), "raw": result, "provider_object_type": "photo"}
 
     def analytics(self, publication) -> dict[str, Any | None]:
-        try:
-            raw = self.get_status(publication.provider_post_id)
-        except Exception:
-            return {"views": None, "likes": None, "comments": None, "shares": None, "followers_delta": None}
-        photo = photo_from_payload(raw.get("raw") if isinstance(raw.get("raw"), dict) else raw)
-        return {
-            "views": photo.view_count,
-            "likes": photo.like_count,
-            "comments": photo.comment_count,
-            "shares": None,
-            "followers_delta": None,
-        }
+        from social.providers.kuaishou.analytics import KuaishouAnalyticsClient
+        creds = self._credentials(self.get_account(publication.account_id) if publication.account_id else None)
+        token = str(creds.get("access_token") or "")
+        return KuaishouAnalyticsClient(self.ks_client, self.app_id).fetch(token, publication.provider_post_id)

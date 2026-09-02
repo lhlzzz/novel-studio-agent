@@ -66,6 +66,7 @@ class CapabilityRecord:
     method: str = "unverified"
     verification_method: str = ""
     surface: str = "both"
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     @property
     def allowed(self) -> bool:
@@ -183,6 +184,8 @@ class DistributionJob:
     lease_until: str | None = None
     worker_id: str | None = None
     claimed_at: str | None = None
+    provider: str = ""
+    platform: str = ""
 
     @property
     def integration_id(self) -> str:
@@ -356,8 +359,9 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
         publishable = caps.verified("publish") or caps.verified("handoff") or caps.verified("listing")
         if not publishable:
             errors.append("publish capability is unverified or unsupported")
-    enabled = bool(getattr(integration, "enabled", False) or getattr(integration, "status", "") == "ENABLED")
     state = str(getattr(integration, "state", None) or getattr(integration, "status", "") or "")
-    if not enabled or state != "ENABLED":
+    usable = {"ENABLED", "HANDOFF_READY"}
+    enabled = bool(getattr(integration, "enabled", False) or state in usable)
+    if state not in usable and not enabled:
         errors.append("account is not enabled")
     return errors

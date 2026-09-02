@@ -89,17 +89,24 @@ def cmd_publish(args: argparse.Namespace) -> int:
     )
     agent = runtime.agent(provider_name=args.platform)
     job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job", account_id=args.account_id)
-    publication = agent.execute(job)
+    result = agent.execute(job)
+    if hasattr(result, "handoff_id"):
+        payload = {
+            "handoff_id": result.handoff_id,
+            "status": result.status,
+            "platform": result.platform,
+            "kind": "handoff",
+        }
+        print("READY_FOR_XHS")
+        print(json.dumps(payload))
+        return 0
     payload = {
-        "publication_id": publication.publication_id,
-        "provider_post_id": publication.provider_post_id,
-        "status": publication.status,
-        "platform": publication.platform,
-        "provider_object_type": publication.provider_object_type,
+        "publication_id": result.publication_id,
+        "provider_post_id": result.provider_post_id,
+        "status": result.status,
+        "platform": result.platform,
+        "provider_object_type": result.provider_object_type,
     }
-    if publication.status == "HANDOFF_REQUIRED":
-        payload["result"] = "HANDOFF_REQUIRED"
-        print("HANDOFF_REQUIRED")
     print(json.dumps(payload))
     return 0
 

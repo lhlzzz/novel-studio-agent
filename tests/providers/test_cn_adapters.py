@@ -28,8 +28,8 @@ def test_xhs_handoff_not_direct_publish(tmp_path):
     assert result["handoff_id"]
     with pytest.raises(CapabilityUnsupported):
         adapter.publish_direct(job)
-    status = adapter.get_status(result["id"])
-    assert status["status"] == "NOT_PUBLISHED"
+    with pytest.raises(CapabilityUnsupported):
+        adapter.get_status(result["handoff_id"])
 
 
 def test_xianyu_blocks_without_jushita(monkeypatch):

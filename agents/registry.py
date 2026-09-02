@@ -41,7 +41,10 @@ def resolve_agent(name: str) -> AgentHandle:
     if not implementation_path:
         raise RuntimeError(f"{name} is registered without an executable implementation")
     cls = _import(str(implementation_path))
-    instance = cls() if callable(cls) else cls
+    if getattr(cls, "requires_runtime", False):
+        instance = cls
+    else:
+        instance = cls() if callable(cls) else cls
     status = str(spec.get("status") or "inactive")
     if status == "active" and instance is None:
         raise RuntimeError(f"{name} is marked active but has no implementation")

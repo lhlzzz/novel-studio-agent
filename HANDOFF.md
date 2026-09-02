@@ -1,15 +1,15 @@
-# Meiti V4.4.2 Handoff
+# Meiti V4.4.3 Handoff
 
-Branch `main`. Baseline `6c6df42`.
+Branch `main`. Baseline `5a57bc2`.
 
 ```text
 Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
--> PublishGate -> DistributionJob -> Douyin/Kuaishou/XHS/Xianyu
--> Publication -> Reconciliation -> Analytics
+-> PublishGate -> DistributionJob
+-> Douyin/Kuaishou Publication or XHS Handoff or Xianyu Listing
+-> Reconciliation -> Analytics
 ```
 
 SocialRuntime.production() is the unique production composition root.
-CLI, doctor, worker, and DistributionAgent must take runtime from there.
-
-XHS publish returns HANDOFF_REQUIRED. Xianyu requires explicit commerce
-intent and Jushita.
+XHS publish returns READY_FOR_XHS and persists XHSHandoff.
+Xianyu requires explicit commerce intent and Jushita.
+Lechuang remains BLOCKED_EXTERNAL without an official contract.

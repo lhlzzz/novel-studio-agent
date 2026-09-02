@@ -1,4 +1,4 @@
-from social.accounts.manager import SocialAccountManager
+from social.runtime.container import SocialRuntime
 from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account
 from tests.e2e.fake_x import FakeXAdapter
 
@@ -9,7 +9,7 @@ def test_account_manager_connect_verify_enable():
         "x-test", "x", "x", username="meiti", status="AUTHENTICATED",
         capabilities=SocialProviderCapabilities.from_claimed({"publish": True, "text": True}, verified=False),
     )
-    manager = SocialAccountManager()
+    manager = SocialRuntime.testing().manager
     connected = manager.connect_account("x", adapter=adapter)
     assert connected.status == "AUTHENTICATED"
     verified = manager.verify_account(connected.account_id, adapter=adapter)

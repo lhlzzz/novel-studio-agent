@@ -1,0 +1,196 @@
+{
+  "version": "4.4.3",
+  "overall": "BLOCKED",
+  "creative": {
+    "workflow": "",
+    "provider": "",
+    "image_asset_id": "",
+    "video_asset_id": "",
+    "judge": "blocked",
+    "reason": "no real creative E2E evidence"
+  },
+  "distribution": {
+    "provider": "",
+    "account_id": "",
+    "remote_post_id": "",
+    "status": "blocked",
+    "reason": "no real CN social E2E evidence"
+  },
+  "reconciliation": {
+    "status": "blocked"
+  },
+  "analytics": {
+    "ingested": false
+  },
+  "memory": {
+    "written": false
+  },
+  "blockers": [
+    {
+      "check": "Credential",
+      "reason": "MEITI_SECRET_DIR missing",
+      "env": "MEITI_SECRET_DIR",
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Lechuang",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Lechuang Contract",
+      "reason": "Official Lechuang request/response schema was not extractable; live calls stay BLOCKED.",
+      "env": "LECHUANG_API_URL",
+      "service": "lechuang",
+      "next": "Extract the official Lechuang HTTP contract from the operator workbench/docs. Do not guess endpoints."
+    },
+    {
+      "check": "Lechuang Auth",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": "LECHUANG_API_KEY",
+      "service": null,
+      "next": "Put a real LECHUANG_API_KEY in the operator environment after the contract is verified."
+    },
+    {
+      "check": "XHS",
+      "reason": null,
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Douyin",
+      "reason": "DOUYIN_CLIENT_KEY/SECRET/REDIRECT_URI",
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Kuaishou",
+      "reason": "KUAISHOU_APP_ID/SECRET/REDIRECT_URI",
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Xianyu",
+      "reason": "JUSHITA required",
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Image Generation",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": "LECHUANG_API_KEY",
+      "service": "lechuang",
+      "next": null
+    },
+    {
+      "check": "Image-to-Image",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": "LECHUANG_API_KEY",
+      "service": "lechuang",
+      "next": null
+    },
+    {
+      "check": "Image-to-Video",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": "LECHUANG_API_KEY",
+      "service": "lechuang",
+      "next": null
+    },
+    {
+      "check": "Video Generation",
+      "reason": "LECHUANG_API_KEY missing",
+      "env": "LECHUANG_API_KEY",
+      "service": "lechuang",
+      "next": null
+    },
+    {
+      "check": "Vision Provider",
+      "reason": "AI_GATEWAY_API_KEY missing",
+      "env": "AI_GATEWAY_API_KEY",
+      "service": "ai-gateway",
+      "next": "Set AI_GATEWAY_API_KEY and AI_GATEWAY_API_URL for the operator AI Gateway. Do not merge this with Lechuang."
+    },
+    {
+      "check": "AI Judge",
+      "reason": "AI_GATEWAY_API_KEY missing",
+      "env": "AI_GATEWAY_API_KEY",
+      "service": "ai-gateway",
+      "next": null
+    },
+    {
+      "check": "Social Provider Health",
+      "reason": null,
+      "env": null,
+      "service": null,
+      "next": null
+    },
+    {
+      "check": "Research",
+      "reason": "SCRAPECREATORS_API_KEY missing",
+      "env": "SCRAPECREATORS_API_KEY",
+      "service": "scrapecreators",
+      "next": "Set SCRAPECREATORS_API_KEY. Research stays BLOCKED until the key exists."
+    },
+    {
+      "check": "Real Creative E2E",
+      "reason": "no real creative E2E evidence",
+      "env": "LECHUANG_API_KEY",
+      "service": "lechuang",
+      "next": "After the Lechuang contract is verified, run one image and one image-to-video workflow and persist real asset IDs."
+    },
+    {
+      "check": "Real Social E2E",
+      "reason": "no real CN social E2E evidence",
+      "env": null,
+      "service": null,
+      "next": "Run MEITI_PRODUCTION_E2E=true with real Douyin/Kuaishou/Xianyu credentials. XHS remains handoff-only."
+    },
+    {
+      "check": "Real Distribution E2E",
+      "reason": "no real CN social E2E evidence",
+      "env": null,
+      "service": null,
+      "next": "Run MEITI_PRODUCTION_E2E=true with real Douyin/Kuaishou/Xianyu credentials. XHS remains handoff-only."
+    }
+  ],
+  "xiaohongshu": {
+    "status": "handoff_only",
+    "account_id": "",
+    "job_id": "",
+    "handoff_id": "",
+    "remote_object_id": ""
+  },
+  "douyin": {
+    "status": "blocked_external",
+    "account_id": "",
+    "job_id": "",
+    "publication_id": "",
+    "remote_object_id": ""
+  },
+  "kuaishou": {
+    "status": "blocked_external",
+    "account_id": "",
+    "job_id": "",
+    "publication_id": "",
+    "remote_object_id": ""
+  },
+  "xianyu": {
+    "status": "blocked_external",
+    "account_id": "",
+    "job_id": "",
+    "publication_id": "",
+    "remote_object_id": ""
+  },
+  "lechuang": {
+    "status": "blocked_external",
+    "image_asset_id": "",
+    "video_asset_id": ""
+  }
+}

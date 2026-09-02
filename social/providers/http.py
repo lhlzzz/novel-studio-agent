@@ -50,8 +50,9 @@ class SocialHttpClient:
         account_id: str = "",
         idempotency_key: str = "",
         absolute: bool = False,
-        retry: bool = True,
+        retry: bool | None = None,
         extra_headers: dict[str, str] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
     ) -> Any:
         request_id = request_id or new_request_id()
         url = path if absolute or path.startswith("http") else f"{self.base_url}{path}"
@@ -61,18 +62,25 @@ class SocialHttpClient:
         hdrs = {key: value for key, value in (headers or {}).items() if value}
         if extra_headers:
             hdrs.update({key: value for key, value in extra_headers.items() if value})
-        hdrs.setdefault("User-Agent", "MeitiSocial/4.4.1")
+        hdrs.setdefault("User-Agent", "MeitiSocial/4.4.3")
         hdrs["X-Request-Id"] = request_id
         if idempotency_key:
             hdrs.setdefault("Idempotency-Key", idempotency_key)
-        if json_body is not None:
+        if files:
+            payload, content = _encode_multipart(json_body if isinstance(json_body, dict) else {}, files)
+            hdrs["Content-Type"] = content
+        elif json_body is not None:
             payload = json.dumps(json_body).encode("utf-8")
             hdrs.setdefault("Content-Type", "application/json")
         elif content_type and payload is not None:
             hdrs.setdefault("Content-Type", content_type)
+        method_u = method.upper()
+        if retry is None:
+            retry = method_u in {"GET", "HEAD", "OPTIONS"}
         attempts = self.max_attempts if retry else 1
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
+            started = time.monotonic()
             try:
                 body = self._send(method, url, hdrs, payload)
                 log_event(
@@ -85,6 +93,8 @@ class SocialHttpClient:
                     account_id=account_id,
                     path=_safe_path(path),
                     attempt=attempt,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    endpoint_path=_safe_path(path),
                 )
                 return body
             except Exception as exc:
@@ -100,7 +110,10 @@ class SocialHttpClient:
                     account_id=account_id,
                     path=_safe_path(path),
                     attempt=attempt,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    endpoint_path=_safe_path(path),
                     error_code=exc.__class__.__name__,
+                    http_status=getattr(exc, "http_status", None),
                     error_message=str(redact(str(exc))),
                 )
                 if not retryable or attempt >= attempts:
@@ -174,3 +187,20 @@ class SocialHttpClient:
 def _safe_path(path: str) -> str:
     parsed = urllib.parse.urlparse(path)
     return parsed.path or path
+
+
+def _encode_multipart(fields: dict[str, Any], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
+    boundary = f"meiti{int(time.time() * 1000)}"
+    chunks: list[bytes] = []
+    for key, value in (fields or {}).items():
+        if value is None:
+            continue
+        chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
+    for key, (filename, data, mime) in files.items():
+        header = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"; filename=\"{filename}\"\r\n"
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode("utf-8")
+        chunks.append(header + data + b"\r\n")
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"

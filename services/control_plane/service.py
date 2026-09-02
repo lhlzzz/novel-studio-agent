@@ -8,7 +8,6 @@ from typing import Any
 def snapshot() -> dict[str, Any]:
     from agents.registry import list_agents
     from integrations.registry.loader import load_registry
-    from social.accounts.manager import SocialAccountManager
     from intelligence.router import credential_state
 
     agents = []
@@ -43,10 +42,7 @@ def snapshot() -> dict[str, Any]:
     accounts = []
     try:
         from social.runtime.container import SocialRuntime
-        try:
-            manager = SocialRuntime.production().manager
-        except Exception:
-            manager = SocialAccountManager()
+        manager = SocialRuntime.production().manager
         for account in manager.list_accounts():
             accounts.append({"id": account.account_id, "provider": account.provider, "platform": account.platform, "status": account.status, "enabled": account.enabled})
     except Exception:

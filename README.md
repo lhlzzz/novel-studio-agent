@@ -1,42 +1,54 @@
-# Meiti V4.4.2
+# Meiti V4.4.3
 
 Meiti is an AI Creator Operating System.
 
 ```text
 Lechuang = Creative Provider
-CN Social = Native Distribution
+Xiaohongshu = Handoff
+Douyin = Native API
+Kuaishou = Native API
+Xianyu = Native listing + Jushita
+Postiz = does not exist
 ```
 
 ```text
 User -> MediaAgent -> Creative Workflow -> Provider Resolver -> Lechuang
 -> MediaAsset -> Technical QA -> AI Judge -> ContentPackage
 -> Platform Variant -> Publish Gate -> DistributionJob
--> CN Social Provider Resolver -> 小红书 / 抖音 / 快手 / 闲鱼
--> Publication -> Reconciliation -> Analytics -> Memory
+-> CN Social Provider Resolver
+-> XHS Handoff / Douyin Publication / Kuaishou Publication / Xianyu Listing
+-> Reconciliation -> Analytics -> Memory
 ```
 
-Creative Provider generates media. Social Provider publishes. Creative never
-publishes. Social never generates media.
+Creative generates media. Social publishes or hands off. Creative never
+publishes. Social never generates media. Handoff is not a Publication.
+Content is not commerce.
+
+## Production composition
+
+`SocialRuntime.production()` is the unique production composition root.
+CLI, API, workers, Doctor, Control Plane, Scheduler, Reconciliation, and
+Analytics take store/secrets from that runtime. Testing uses
+`SocialRuntime.testing()`.
 
 ## Current production set
 
 - 小红书: official surface is the client share SDK. Meiti prepares a note
-  package and returns `HANDOFF_REQUIRED`. Direct server publish stays BLOCKED
-  until an official server-side API is verified. Public access is currently
-  paused; do not fake it.
-- 抖音: official OAuth + video/image publish + query. Create success is not
-  PUBLISHED; reconciliation maps review/processing.
+  package and persists `XHSHandoff`. Direct server publish is BLOCKED.
+  Remote reconciliation is NOT_APPLICABLE. Account status is `HANDOFF_READY`.
+- 抖音: official OAuth + video/image upload + create. HTTP 200 create is
+  SUBMITTED/PROCESSING, not PUBLISHED. Reconciliation maps remote state.
 - 快手: official `user_video_publish` (`start_upload` -> upload -> publish).
-  Publish success is SUBMITTED until photo query.
-- 闲鱼: marketplace listing, not a social post. Production listing APIs
-  require 聚石塔 (`MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA`). Local mode stays
-  BLOCKED.
+  Whole-file threshold follows the official 10MB helper. Publish success is
+  PROCESSING until photo query.
+- 闲鱼: marketplace listing, not a social post. Production listing requires
+  `MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA` and explicit commerce intent.
 
 Overseas adapters (X/Instagram/YouTube/TikTok/LinkedIn) remain in tree and
 are frozen this round.
 
-Do not claim all four CN platforms auto-publish unless real E2E evidence
-exists in `docs/audits/meiti-v4.4.2-cn-e2e.json`.
+Do not claim production verified or real E2E unless evidence exists in
+`docs/audits/meiti-v4.4.3-cn-e2e.json`.
 
 ```bash
 python -m pytest

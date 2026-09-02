@@ -134,7 +134,7 @@ def check_social_provider_health() -> dict:
 def check_research() -> dict:
     from intelligence.router import credential_state
     state = credential_state()
-    return {"status": "PASS" if state.available else "BLOCKED", "available": state.available}
+    return {"status": "PASS" if state.available else "BLOCKED_EXTERNAL", "available": state.available, "env": "SCRAPECREATORS_API_KEY"}
 
 
 def check_workers() -> dict:
@@ -255,14 +255,18 @@ def check_lechuang_contract() -> dict:
     client = LechuangClient()
     typed = all((CreateImageRequest, CreateTaskResponse, ProviderError))
     verified = bool(client.contract_verified and CONTRACT_VERIFIED and typed)
-    return _status(verified, reason=client.contract_reason, env="LECHUANG_API_URL", service="lechuang", next="Extract the official Lechuang HTTP contract from the operator workbench/docs. Do not guess endpoints.")
+    if verified:
+        return _status(True, reason=client.contract_reason, env="LECHUANG_API_URL", service="lechuang")
+    return {"status": "BLOCKED_EXTERNAL", "reason": client.contract_reason, "env": "LECHUANG_API_URL", "service": "lechuang", "next": "Extract the official Lechuang HTTP contract from the operator workbench/docs. Do not guess endpoints."}
 
 
 def check_lechuang_auth() -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
     adapter = LechuangAdapter()
     auth = adapter.client.auth()
-    return _status(bool(auth.api_key_present), reason=("ok" if auth.api_key_present else "LECHUANG_API_KEY missing"), env="LECHUANG_API_KEY", next="Put a real LECHUANG_API_KEY in the operator environment after the contract is verified.")
+    if auth.api_key_present:
+        return _status(True, reason="ok", env="LECHUANG_API_KEY")
+    return {"status": "BLOCKED_EXTERNAL", "reason": "LECHUANG_API_KEY missing", "env": "LECHUANG_API_KEY", "next": "Put a real LECHUANG_API_KEY in the operator environment after the contract is verified."}
 
 
 def check_lechuang_capability(name: str) -> dict:
@@ -270,7 +274,9 @@ def check_lechuang_capability(name: str) -> dict:
     adapter = LechuangAdapter()
     ready, reason = adapter.live_ready()
     verified = adapter.has_verified(name)
-    return _status(ready and verified, reason=reason, capability=name, verified=verified, env="LECHUANG_API_KEY", service="lechuang")
+    if ready and verified:
+        return _status(True, reason=reason, capability=name, verified=verified, env="LECHUANG_API_KEY", service="lechuang")
+    return {"status": "BLOCKED_EXTERNAL", "reason": reason, "capability": name, "verified": verified, "env": "LECHUANG_API_KEY", "service": "lechuang"}
 
 
 def check_vision_provider() -> dict:
@@ -278,9 +284,11 @@ def check_vision_provider() -> dict:
     provider = GatewayVisionProvider()
     ready, reason = provider.live_ready()
     if not ready:
-        return _status(False, reason=reason, env="AI_GATEWAY_API_KEY", service="ai-gateway", next="Set AI_GATEWAY_API_KEY and AI_GATEWAY_API_URL for the operator AI Gateway. Do not merge this with Lechuang.")
+        return {"status": "BLOCKED_EXTERNAL", "reason": reason, "env": "AI_GATEWAY_API_KEY", "service": "ai-gateway", "next": "Set AI_GATEWAY_API_KEY and AI_GATEWAY_API_URL for the operator AI Gateway. Do not merge this with Lechuang."}
     ok, probe_reason = provider.probe()
-    return _status(ok, reason=probe_reason, env="AI_GATEWAY_API_KEY", service="ai-gateway", next="Replace the invalid AI Gateway key or restore gateway access.")
+    if ok:
+        return _status(True, reason=probe_reason, env="AI_GATEWAY_API_KEY", service="ai-gateway")
+    return {"status": "BLOCKED_EXTERNAL", "reason": probe_reason, "env": "AI_GATEWAY_API_KEY", "service": "ai-gateway", "next": "Replace the invalid AI Gateway key or restore gateway access."}
 
 
 def check_ai_judge() -> dict:
@@ -299,7 +307,9 @@ def check_ai_judge() -> dict:
             ImageJudge().judge(image)
     except JudgeBlocked:
         blocked = True
-    ok = vision.get("status") == "PASS" and closed and blocked
+    if vision.get("status") != "PASS":
+        return {"status": "BLOCKED_EXTERNAL", "vision": vision, "missing_asset": missing.decision, "no_provider_blocked": blocked, "reason": vision.get("reason"), "env": "AI_GATEWAY_API_KEY", "service": "ai-gateway"}
+    ok = closed and blocked
     return _status(ok, vision=vision, missing_asset=missing.decision, no_provider_blocked=blocked, reason=vision.get("reason"))
 
 
@@ -324,7 +334,7 @@ def check_reconciliation() -> dict:
 
 
 def e2e_path() -> Path:
-    return ROOT / "docs/audits/meiti-v4.3-production-e2e.json"
+    return ROOT / "docs/audits/meiti-v4.4.3-cn-e2e.json"
 
 
 def load_e2e() -> dict:
@@ -342,7 +352,7 @@ def write_e2e_audit(checks: dict) -> dict:
     creative = existing.get("creative") if isinstance(existing.get("creative"), dict) else {}
     distribution = existing.get("distribution") if isinstance(existing.get("distribution"), dict) else {}
     payload = {
-        "version": "4.4",
+        "version": "4.4.3",
         "overall": "READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED",
         "creative": {
             "workflow": creative.get("workflow") or "",
@@ -353,7 +363,7 @@ def write_e2e_audit(checks: dict) -> dict:
             "reason": checks.get("Real Creative E2E", {}).get("reason"),
         },
         "distribution": {
-            "provider": distribution.get("provider") or "x",
+            "provider": distribution.get("provider") or "",
             "account_id": distribution.get("account_id") or distribution.get("integration_id") or "",
             "remote_post_id": distribution.get("remote_post_id") or "",
             "status": distribution.get("status") or "blocked",
@@ -381,7 +391,9 @@ def check_real_creative_e2e() -> dict:
     video = str(creative.get("video_asset_id") or "").strip()
     judge = str(creative.get("judge") or "").lower()
     ok = bool(image and video and judge == "pass" and not image.startswith("fake") and not video.startswith("fake"))
-    return _status(ok, reason="no real creative E2E evidence" if not ok else "ok", env="LECHUANG_API_KEY", service="lechuang", next="After the Lechuang contract is verified, run one image and one image-to-video workflow and persist real asset IDs.")
+    if ok:
+        return _status(True, reason="ok", env="LECHUANG_API_KEY", service="lechuang")
+    return {"status": "BLOCKED_EXTERNAL", "reason": "no real creative E2E evidence", "env": "LECHUANG_API_KEY", "service": "lechuang", "next": "After the Lechuang contract is verified, run one image and one image-to-video workflow and persist real asset IDs."}
 
 
 def check_real_distribution_e2e() -> dict:
@@ -391,19 +403,35 @@ def check_real_distribution_e2e() -> dict:
     status = str(distribution.get("status") or "").lower()
     account = str(distribution.get("account_id") or distribution.get("integration_id") or "").strip()
     ok = bool(remote and account and status == "published" and not remote.startswith("fake"))
-    return _status(ok, reason="no real distribution E2E evidence" if not ok else "ok", env="X_CLIENT_ID", service="x", next="Complete native X OAuth, verify one account, then publish MEITI_PRODUCTION_E2E_TEST.")
+    if ok:
+        return _status(True, reason="ok")
+    return {"status": "BLOCKED_EXTERNAL", "reason": "no real CN social E2E evidence", "next": "Run MEITI_PRODUCTION_E2E=true with real Douyin/Kuaishou/Xianyu credentials. XHS remains handoff-only."}
 
 
 def run() -> dict:
+    from scripts import social_doctor
     lechuang_auth = check_lechuang_auth()
     lechuang_contract = check_lechuang_contract()
+    social = social_doctor.run()
     return {
         "Architecture": check_architecture(),
+        "Persistence": check_database(),
+        "Credential": social["Credential Store"],
         "Creative Runtime": check_creative_runtime(),
-        "Creative Persistence": check_creative_persistence(),
-        "Provider Resolver": check_generation_resolver(),
+        "Lechuang": social["Lechuang"],
         "Lechuang Contract": lechuang_contract,
         "Lechuang Auth": lechuang_auth,
+        "CN Social Runtime": social["Runtime"],
+        "XHS": social["Xiaohongshu"],
+        "Douyin": social["Douyin"],
+        "Kuaishou": social["Kuaishou"],
+        "Xianyu": social["Xianyu"],
+        "Scheduler": social["Scheduler"],
+        "Publish Gate": social["Publish Gate"],
+        "Reconciliation": social["Reconciliation"],
+        "Analytics": social["Analytics"],
+        "Creative Persistence": check_creative_persistence(),
+        "Provider Resolver": check_generation_resolver(),
         "Image Generation": check_lechuang_capability("text_to_image"),
         "Image-to-Image": check_lechuang_capability("image_to_image"),
         "Image-to-Video": check_lechuang_capability("image_to_video"),
@@ -415,18 +443,18 @@ def run() -> dict:
         "Social Provider Health": check_social_provider_health(),
         "Research": {**check_research(), "env": "SCRAPECREATORS_API_KEY", "service": "scrapecreators", "next": "Set SCRAPECREATORS_API_KEY. Research stays BLOCKED until the key exists.", "reason": "SCRAPECREATORS_API_KEY missing" if check_research().get("status") != "PASS" else None},
         "Real Creative E2E": check_real_creative_e2e(),
+        "Real Social E2E": check_real_distribution_e2e(),
         "Real Distribution E2E": check_real_distribution_e2e(),
         "Publication Persistence": check_publication_persistence(),
-        "Reconciliation": check_reconciliation(),
-        "Analytics": check_analytics(),
         "Memory": check_memory(),
     }
 
 
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") for key, value in checks.items()}
-    blocked = [name for name, status in statuses.items() if status != "PASS"]
-    return {"ready": not blocked, "checks": statuses, "details": checks}
+    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL"}]
+    external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL"]
+    return {"ready": not code_blocked and not external, "architecture_ready": not code_blocked, "checks": statuses, "details": checks}
 
 
 def main() -> int:

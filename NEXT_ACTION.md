@@ -1,8 +1,9 @@
-# Meiti V4.4.2 Next Action
+# Meiti V4.4.3 Next Action
 
-**GOAL:** Keep live READY blocked until real CN credentials and Jushita exist.
+**GOAL:** Keep live READY blocked until real CN credentials, Jushita, and
+the official Lechuang contract exist.
 
-1. Set `MEITI_SECRET_DIR` and PostgreSQL.
+1. Set `MEITI_SECRET_DIR` (0700) and PostgreSQL.
 2. Douyin: `DOUYIN_CLIENT_KEY` / `DOUYIN_CLIENT_SECRET` / `DOUYIN_REDIRECT_URI`,
    OAuth, verify, enable, then one real video publish + reconcile.
 3. Kuaishou: `KUAISHOU_APP_ID` / `KUAISHOU_APP_SECRET` / `KUAISHOU_REDIRECT_URI`
@@ -10,3 +11,4 @@
 4. Xianyu: official ISV access + `MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA`.
 5. Xiaohongshu: keep handoff until official server publish exists.
 6. Extract the official Lechuang HTTP contract before live creative.
+7. Real E2E is operator-run: `MEITI_PRODUCTION_E2E=true`.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import threading
 from typing import Any, Protocol
 
 from integrations.contracts.distribution import (
@@ -54,6 +55,8 @@ class InMemoryStore:
     campaigns: dict[str, Campaign] = field(default_factory=dict)
     integrations: dict[str, Any] = field(default_factory=dict)
     accounts: dict[str, Any] = field(default_factory=dict)
+    handoffs: dict[str, Any] = field(default_factory=dict)
+    _claim_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def save_job(self, job: DistributionJob) -> DistributionJob:
         existing = self.get_job_by_idempotency(job.idempotency_key or "")
@@ -128,6 +131,13 @@ class InMemoryStore:
         from dataclasses import replace
         from datetime import datetime, timedelta, timezone
 
+        with self._claim_lock:
+            return self._claim_due_job(worker_id=worker_id, now=now, lease_seconds=lease_seconds)
+
+    def _claim_due_job(self, *, worker_id: str, now=None, lease_seconds: int = 60):
+        from dataclasses import replace
+        from datetime import datetime, timedelta, timezone
+
         now = now or datetime.now(timezone.utc)
         now_iso = now.isoformat() if hasattr(now, "isoformat") else str(now)
         lease_until = (now + timedelta(seconds=lease_seconds)).isoformat() if hasattr(now, "__add__") else now_iso
@@ -148,6 +158,24 @@ class InMemoryStore:
             claimed = replace(claimed, status="READY")
         self.jobs[claimed.job_id] = claimed
         return claimed
+
+    def save_handoff(self, handoff):
+        self.handoffs[handoff.handoff_id] = handoff
+        if getattr(handoff, "distribution_job_id", ""):
+            self.handoffs[f"job:{handoff.distribution_job_id}"] = handoff
+        return handoff
+
+    def get_handoff(self, handoff_id: str):
+        return self.handoffs.get(handoff_id)
+
+    def get_handoff_by_job(self, job_id: str):
+        found = self.handoffs.get(f"job:{job_id}")
+        if found is not None:
+            return found
+        for item in self.handoffs.values():
+            if getattr(item, "distribution_job_id", "") == job_id:
+                return item
+        return None
 
     def save_listing(self, listing):
         listings = getattr(self, "listings", None)
@@ -286,6 +314,10 @@ class DatabaseStore:
                 "last_verified_at": _as_datetime(account.last_verified_at),
                 "blocked_reason": account.blocked_reason,
                 "region": account.region,
+                "revoke_attempted": int(bool(getattr(account, "revoke_attempted", False))),
+                "remote_revoked": int(bool(getattr(account, "remote_revoked", False))),
+                "remote_revoke_supported": None if getattr(account, "remote_revoke_supported", None) is None else int(bool(account.remote_revoke_supported)),
+                "revoke_error": getattr(account, "revoke_error", None),
             }
             if row is None:
                 row = SocialAccountRecord(account_id=account.account_id, **fields)
@@ -321,6 +353,10 @@ class DatabaseStore:
                 region=row.region,
                 created_at=row.created_at.isoformat() if row.created_at else None,
                 updated_at=row.updated_at.isoformat() if row.updated_at else None,
+                revoke_attempted=bool(getattr(row, "revoke_attempted", 0)),
+                remote_revoked=bool(getattr(row, "remote_revoked", 0)),
+                remote_revoke_supported=None if getattr(row, "remote_revoke_supported", None) is None else bool(row.remote_revoke_supported),
+                revoke_error=getattr(row, "revoke_error", None),
             )
 
     def list_accounts(self):
@@ -382,6 +418,45 @@ class DatabaseStore:
                 },
             )
 
+    def save_handoff(self, handoff):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialHandoffRecord
+
+        fields = {
+            "provider": getattr(handoff, "provider", "xiaohongshu"),
+            "platform": getattr(handoff, "platform", "xiaohongshu"),
+            "account_id": handoff.account_id,
+            "content_package_id": handoff.content_package_id,
+            "status": handoff.status,
+            "export_path": getattr(handoff, "export_path", "") or "",
+            "distribution_job_id": getattr(handoff, "distribution_job_id", "") or "",
+            "package": dict(getattr(handoff, "package", None) or {}),
+            "expires_at": _as_datetime(getattr(handoff, "expires_at", None)),
+        }
+        with SessionLocal() as session:
+            row = session.get(SocialHandoffRecord, handoff.handoff_id)
+            if row is None:
+                session.add(SocialHandoffRecord(handoff_id=handoff.handoff_id, **fields))
+            else:
+                for key, value in fields.items():
+                    setattr(row, key, value)
+            session.commit()
+        return handoff
+
+    def get_handoff(self, handoff_id: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialHandoffRecord
+        with SessionLocal() as session:
+            row = session.get(SocialHandoffRecord, handoff_id)
+            return _handoff_from_record(row) if row is not None else None
+
+    def get_handoff_by_job(self, job_id: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import SocialHandoffRecord
+        with SessionLocal() as session:
+            row = session.query(SocialHandoffRecord).filter_by(distribution_job_id=job_id).one_or_none()
+            return _handoff_from_record(row) if row is not None else None
+
     def save_derived_asset(self, record):
         from scripts.db.engine import SessionLocal
         from scripts.db.models import DerivedAssetRecord
@@ -441,6 +516,8 @@ class DatabaseStore:
                 "lease_until": _as_datetime(job.lease_until),
                 "worker_id": job.worker_id,
                 "claimed_at": _as_datetime(job.claimed_at),
+                "provider": getattr(job, "provider", "") or "",
+                "platform": getattr(job, "platform", "") or "",
             }
             if row is None:
                 row = DistributionJobRecord(job_id=job.job_id, **fields)
@@ -608,6 +685,10 @@ class DatabaseStore:
         lease_until = naive + timedelta(seconds=lease_seconds)
         with SessionLocal() as session:
             query = session.query(DistributionJobRecord).filter(DistributionJobRecord.status.in_(("SCHEDULED", "READY")))
+            try:
+                query = query.with_for_update(skip_locked=True)
+            except Exception:
+                pass
             rows = query.order_by(DistributionJobRecord.scheduled_at.nullsfirst(), DistributionJobRecord.job_id).all()
             chosen = None
             for row in rows:
@@ -697,6 +778,8 @@ def _job_from_payload(payload: dict[str, Any]) -> DistributionJob:
         lease_until=payload.get("lease_until"),
         worker_id=payload.get("worker_id"),
         claimed_at=payload.get("claimed_at"),
+        provider=str(payload.get("provider") or ""),
+        platform=str(payload.get("platform") or ""),
     )
 
 
@@ -722,6 +805,8 @@ def _job_from_record(row: Any) -> DistributionJob:
         "lease_until": row.lease_until.isoformat() if getattr(row, "lease_until", None) else None,
         "worker_id": getattr(row, "worker_id", None),
         "claimed_at": row.claimed_at.isoformat() if getattr(row, "claimed_at", None) else None,
+        "provider": getattr(row, "provider", "") or "",
+        "platform": getattr(row, "platform", "") or "",
     })
 
 
@@ -748,4 +833,32 @@ def _publication_from_record(row: Any) -> Publication:
         platform=getattr(row, "platform", "") or "",
         created_at=row.created_at.isoformat() if getattr(row, "created_at", None) else None,
         provider_object_type=getattr(row, "provider_object_type", "") or "",
+    )
+
+
+def _handoff_from_record(row):
+    from social.handoff.models import XHSHandoff
+    if row is None:
+        return None
+    package = dict(row.package or {})
+    return XHSHandoff(
+        handoff_id=row.handoff_id,
+        account_id=row.account_id,
+        content_package_id=row.content_package_id,
+        provider=row.provider,
+        platform=row.platform,
+        status=row.status,
+        export_path=row.export_path or "",
+        distribution_job_id=row.distribution_job_id or "",
+        package=package,
+        content_type=str(package.get("content_type") or ""),
+        title=str(package.get("title") or ""),
+        content=str(package.get("content") or ""),
+        hashtags=tuple(package.get("hashtags") or ()),
+        images=tuple(package.get("images") or ()),
+        video=package.get("video"),
+        cover=package.get("cover"),
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+        expires_at=row.expires_at.isoformat() if row.expires_at else None,
     )

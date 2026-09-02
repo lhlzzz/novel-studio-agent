@@ -11,7 +11,10 @@
   credential_ref only.
 - **2026-09-02 V4.4.2:** Production social composition root is
   `SocialRuntime.production()`. Scope is 小红书 / 抖音 / 快手 / 闲鱼.
-  XHS is handoff-only. Xianyu is a commerce listing surface that requires
-  Jushita. Publish Gate reads runtime truth; callers cannot inject
-  verified=true. Scheduler claims durable jobs and publishes; it never calls
-  adapter.schedule().
+- **2026-09-03 V4.4.3:** XHS handoff is a first-class `XHSHandoff`, never a
+  Publication. XHS accounts are `HANDOFF_READY`, not `AUTHENTICATED`.
+  Production constructors require an explicit store and secret store.
+  OAuth state is persisted and consumed once. Refresh preserves refresh_token
+  when the provider omits a new one. Capability records carry evidence.
+  DistributionJob.provider/platform are canonical. Scheduler claims with a
+  durable lease and never calls adapter.schedule().

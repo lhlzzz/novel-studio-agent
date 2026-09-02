@@ -56,7 +56,16 @@ class KuaishouClient:
         )
         return complete or last
 
-    def publish(self, app_id: str, access_token: str, payload: dict[str, Any], **ctx: str) -> Any:
+    def publish(self, app_id: str, access_token: str, payload: dict[str, Any], *, cover_file=None, **ctx: str) -> Any:
+        if cover_file is not None:
+            return self.http.request(
+                "POST",
+                PUBLISH,
+                query={"app_id": app_id, "access_token": access_token},
+                json_body=payload,
+                files={"cover": cover_file},
+                **ctx,
+            )
         return self.http.request("POST", PUBLISH, query={"app_id": app_id, "access_token": access_token}, json_body=payload, **ctx)
 
     def photo_info(self, app_id: str, access_token: str, photo_id: str, **ctx: str) -> Any:

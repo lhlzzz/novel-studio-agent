@@ -17,12 +17,15 @@ class PlatformVariant:
     variant: ContentVariant
     content_type: str = ""
     account_id: str = ""
+    provider: str = ""
     cover_asset: str | None = None
     platform_options: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.account_id:
             object.__setattr__(self, "account_id", self.variant.account_id)
+        if not self.provider:
+            object.__setattr__(self, "provider", self.platform)
         if self.platform_options is None:
             object.__setattr__(self, "platform_options", dict((self.variant.metadata or {}).get("platform_options") or {}))
 

@@ -46,13 +46,22 @@ class MeitiScheduler:
     def execute_claimed(self, job: DistributionJob) -> Any:
         from agents.distribution_agent import DistributionAgent
 
+        if self.manager is None:
+            raise ValueError("MeitiScheduler requires SocialAccountManager from SocialRuntime")
         agent = DistributionAgent(
             store=self.store,
             manager=self.manager,
             adapter=self.adapter,
+            secrets=getattr(self.manager, "secrets", None),
+            provider_name=job.provider or None,
         )
-        publishable = job if job.action != "scheduled_publish" else replace(job, action="scheduled_publish")
-        return agent.execute(publishable)
+        existing = self.store.get_publication(job.job_id)
+        if existing is not None:
+            return existing
+        handoff = getattr(self.store, "get_handoff_by_job", lambda _id: None)(job.job_id)
+        if handoff is not None:
+            return handoff
+        return agent.execute(job)
 
 
 def run_once(*, execute: Callable[[Any], Any] | None = None, store: JobStore | None = None, now: datetime | None = None, worker_id: str = "scheduler") -> list[str]:

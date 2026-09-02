@@ -19,19 +19,25 @@ ACCOUNT_STATES = (
     "EXPIRED",
     "REVOKED",
     "BLOCKED",
+    "TARGET_ONLY",
+    "HANDOFF_READY",
+    "IDENTITY_UNVERIFIED",
 )
 
 ACCOUNT_TRANSITIONS = {
-    "PENDING": {"AUTHENTICATING", "BLOCKED"},
-    "AUTHENTICATING": {"AUTHENTICATED", "BLOCKED", "PENDING"},
+    "PENDING": {"AUTHENTICATING", "TARGET_ONLY", "HANDOFF_READY", "IDENTITY_UNVERIFIED", "BLOCKED"},
+    "AUTHENTICATING": {"AUTHENTICATED", "BLOCKED", "PENDING", "IDENTITY_UNVERIFIED"},
     "AUTHENTICATED": {"VERIFYING", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED"},
     "VERIFYING": {"VERIFIED", "AUTHENTICATED", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED"},
     "VERIFIED": {"ENABLED", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED", "AUTHENTICATED", "VERIFYING"},
     "ENABLED": {"DEGRADED", "EXPIRED", "REVOKED", "BLOCKED", "VERIFIED"},
     "DEGRADED": {"ENABLED", "EXPIRED", "REVOKED", "BLOCKED", "VERIFIED"},
     "EXPIRED": {"AUTHENTICATING", "AUTHENTICATED", "REVOKED", "BLOCKED"},
-    "REVOKED": {"PENDING", "AUTHENTICATING"},
-    "BLOCKED": {"PENDING", "AUTHENTICATING", "EXPIRED", "REVOKED"},
+    "REVOKED": {"PENDING", "AUTHENTICATING", "TARGET_ONLY"},
+    "BLOCKED": {"PENDING", "AUTHENTICATING", "EXPIRED", "REVOKED", "TARGET_ONLY", "HANDOFF_READY"},
+    "TARGET_ONLY": {"HANDOFF_READY", "BLOCKED", "REVOKED"},
+    "HANDOFF_READY": {"TARGET_ONLY", "BLOCKED", "REVOKED", "EXPIRED"},
+    "IDENTITY_UNVERIFIED": {"AUTHENTICATING", "BLOCKED", "REVOKED", "EXPIRED"},
 }
 
 ENABLED_FROM = frozenset({"VERIFIED"})
@@ -110,6 +116,7 @@ class SocialProviderCapabilities:
                 "verified_at": record.verified_at if record is not None else None,
                 "method": record.method if record is not None else "unverified",
                 "verification_method": (record.verification_method or record.method) if record is not None else "unverified",
+                "evidence": dict(record.evidence or {}) if record is not None else {},
             }
         return payload
 
@@ -163,6 +170,7 @@ class SocialProviderCapabilities:
                     verified_at=item.get("verified_at"),
                     method=str(item.get("verification_method") or item.get("method") or "unverified"),
                     verification_method=str(item.get("verification_method") or item.get("method") or "unverified"),
+                    evidence=dict(item.get("evidence") or {}),
                 )
                 for name, item in payload.items()
             }
@@ -222,6 +230,10 @@ class SocialAccount:
     channel_title: str = ""
     account_type: str = ""
     restriction: str | None = None
+    revoke_attempted: bool = False
+    remote_revoked: bool = False
+    remote_revoke_supported: bool | None = None
+    revoke_error: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in ACCOUNT_STATES:
@@ -239,7 +251,7 @@ class SocialAccount:
 
     @property
     def enabled(self) -> bool:
-        return self.status == "ENABLED"
+        return self.status in {"ENABLED", "HANDOFF_READY"}
 
     @property
     def verified(self) -> bool:
@@ -271,7 +283,7 @@ class SocialAccount:
             adapter=self.provider,
             distribution_backend="native",
             enabled=self.enabled,
-            state="ENABLED" if self.enabled else self.status,
+            state=self.status,
             verified_at=self.last_verified_at,
             account_name=self.account_name,
             platform=self.platform,

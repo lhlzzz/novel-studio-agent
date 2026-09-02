@@ -59,11 +59,12 @@ class XianyuAdapter(BaseCNAdapter):
                 provider="xianyu",
                 platform="xianyu",
                 username=str(creds.get("nick") or uid),
-                status="AUTHENTICATED",
+                status="IDENTITY_UNVERIFIED",
                 region="cn",
                 capabilities=SocialProviderCapabilities.from_claimed(CLAIMED),
                 provider_account_id=uid,
                 credential_ref=getattr(self, "_credential_ref", "") or "",
+                blocked_reason="JUSHITA required for identity verification",
             )]
         payload = self.xy_client.user_info(token)
         user = user_from_payload(payload if isinstance(payload, dict) else {})
@@ -87,14 +88,20 @@ class XianyuAdapter(BaseCNAdapter):
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
         jushita = self.jushita_ready()
-        method = "runtime_probe" if jushita and token else "jushita_required"
+        method = "official_endpoint_probe" if jushita and token else "jushita_required"
         records = {
-            name: CapabilityRecord(name=name, supported=bool(value), verified=bool(value and jushita and token), method=method)
+            name: CapabilityRecord(
+                name=name,
+                supported=bool(value),
+                verified=bool(value and jushita and token and name in {"listing", "listing_edit", "listing_delete", "media_upload", "image"}),
+                method=method,
+                evidence={"deployment_mode": self.deployment_mode, "jushita": jushita},
+            )
             for name, value in CLAIMED.items()
         }
         if not jushita:
             for name in ("listing", "listing_edit", "listing_delete", "media_upload"):
-                records[name] = CapabilityRecord(name=name, supported=True, verified=False, method="jushita_required")
+                records[name] = CapabilityRecord(name=name, supported=True, verified=False, method="jushita_required", evidence={"deployment_mode": self.deployment_mode})
         return SocialProviderCapabilities.from_records(records)
 
     def _validate_platform(self, job, account) -> list[str]:
@@ -116,6 +123,10 @@ class XianyuAdapter(BaseCNAdapter):
         token = str(creds.get("access_token") or "")
         uploaded = list((job.variant.metadata or {}).get("uploaded_media") or [])
         images = [str(item.get("remote_id") or item.get("remote_path") or "") for item in uploaded if item.get("remote_id") or item.get("remote_path")]
+        if not images:
+            raise ValidationError("Xianyu listing requires uploaded remote media identifiers; local paths are blocked")
+        if any(item.startswith("/") or item.startswith(".") for item in images):
+            raise ValidationError("Xianyu listing images must be remote media identifiers")
         payload = {
             "title": listing.get("title") or job.variant.title,
             "desc": listing.get("description") or job.variant.body,
@@ -128,12 +139,28 @@ class XianyuAdapter(BaseCNAdapter):
         item = item_from_payload(result if isinstance(result, dict) else {})
         if not item.item_id:
             raise PublishError("Xianyu item.publish did not return item_id; success is not online")
+        from commerce.xianyu import XianyuListingPackage
+        listing_pkg = XianyuListingPackage(
+            listing_id=f"xianyu-listing-{item.item_id}",
+            account_id=job.account_id,
+            title=str(payload.get("title") or ""),
+            description=str(payload.get("desc") or ""),
+            price=str(payload.get("price") or ""),
+            quantity=int(payload.get("quantity") or 1),
+            category_id=str(payload.get("category_id") or ""),
+            images=tuple(images),
+            commerce_intent="explicit",
+            metadata={"provider_item_id": item.item_id, "content_package_id": job.content_package_id, "status": "REVIEWING"},
+        )
+        saver = getattr(getattr(self, "store", None), "save_listing", None)
+        if callable(saver):
+            saver(listing_pkg)
         return {
             "id": item.item_id,
-            "post_id": item.item_id,
             "external_id": item.item_id,
             "status": "processing",
             "provider_object_type": "listing",
+            "listing_id": listing_pkg.listing_id,
         }
 
     def get_status(self, provider_post_id: str) -> dict[str, Any]:
@@ -146,21 +173,7 @@ class XianyuAdapter(BaseCNAdapter):
         return {"id": item.item_id or provider_post_id, "status": map_status(item.status), "raw": result, "provider_object_type": "listing"}
 
     def analytics(self, publication) -> dict[str, Any | None]:
-        try:
-            raw = self.get_status(publication.provider_post_id)
-        except Exception:
-            return {"views": None, "likes": None, "comments": None, "shares": None, "followers_delta": None, "pv": None, "click": None, "inquiry": None, "order": None}
-        data = raw.get("raw") if isinstance(raw.get("raw"), dict) else {}
-        stats = data.get("data") if isinstance(data.get("data"), dict) else data
-        return {
-            "views": None,
-            "likes": None,
-            "comments": None,
-            "shares": None,
-            "followers_delta": None,
-            "pv": stats.get("pv") if isinstance(stats, dict) else None,
-            "click": stats.get("click") if isinstance(stats, dict) else None,
-            "inquiry": (stats.get("consult") or stats.get("inquiry")) if isinstance(stats, dict) else None,
-            "order": stats.get("order") if isinstance(stats, dict) else None,
-            "listing_status": raw.get("status"),
-        }
+        from social.providers.xianyu.analytics import XianyuAnalyticsClient
+        creds = self._credentials(self.get_account(publication.account_id) if publication.account_id else None)
+        token = str(creds.get("access_token") or "")
+        return XianyuAnalyticsClient(self.xy_client).fetch(token, publication.provider_post_id)

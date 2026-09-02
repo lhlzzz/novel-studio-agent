@@ -58,7 +58,7 @@ def test_external_actions_require_gate():
 
     adapter = FakeAdapter()
     with pytest.raises(ExternalActionBlocked):
-        DistributionService(adapter).execute(job(), gate_check=lambda item: False)
+        DistributionService(adapter, store=__import__("integrations.persistence", fromlist=["InMemoryStore"]).InMemoryStore()).execute(job(), gate_check=lambda item: False)
     assert adapter.published is False
 
 
@@ -116,9 +116,9 @@ def test_idempotent_publish():
 
 def test_v43_doctor_keeps_unverified_live_paths_blocked():
     from scripts.meiti_doctor import check_lechuang_contract, check_real_creative_e2e, check_real_distribution_e2e
-    assert check_lechuang_contract()["status"] == "BLOCKED"
-    assert check_real_creative_e2e()["status"] == "BLOCKED"
-    assert check_real_distribution_e2e()["status"] == "BLOCKED"
+    assert check_lechuang_contract()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
+    assert check_real_creative_e2e()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
+    assert check_real_distribution_e2e()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
 
 
 def test_retry_policy():

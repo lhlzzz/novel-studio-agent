@@ -1,11 +1,11 @@
 import pytest
 
-from agents.distribution_agent import DistributionAgent
 from content.models import ContentPackage
+from social.runtime.container import SocialRuntime
 
 
 def test_distribution_agent_fails_closed_without_verified_provider():
-    agent = DistributionAgent()
+    agent = SocialRuntime.testing().agent()
     with pytest.raises(RuntimeError, match="not runtime verified"):
         agent.create_job(
             ContentPackage("pkg-1", "Test", "Hello"),
@@ -15,7 +15,7 @@ def test_distribution_agent_fails_closed_without_verified_provider():
 
 
 def test_distribution_agent_requires_verified_account():
-    agent = DistributionAgent()
+    agent = SocialRuntime.testing().agent()
     with pytest.raises(RuntimeError, match="no active verified"):
         agent.create_job(
             ContentPackage("pkg-1", "Test", "Hello"),
@@ -39,7 +39,7 @@ def test_distribution_agent_syncs_normalized_analytics(monkeypatch):
         captured["metrics"] = metrics
 
     monkeypatch.setattr("agents.distribution_agent.persist_metrics", fake_persist)
-    agent = DistributionAgent(adapter=FakeAdapter())
+    agent = SocialRuntime.testing().agent(adapter=FakeAdapter())
 
     result = agent.sync_analytics(
         publication_id="job-1",
