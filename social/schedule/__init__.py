@@ -1,5 +1,3 @@
-"""Meiti owns scheduling. Native providers are not third-party schedulers."""
+from social.schedule.scheduler import MeitiScheduler, run_once
 
-from services.workers.scheduler import run_once
-
-__all__ = ["run_once"]
+__all__ = ["MeitiScheduler", "run_once"]

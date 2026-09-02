@@ -44,24 +44,24 @@ providers:
     platform: xiaohongshu
     region: cn
     adapter: xiaohongshu
-    distribution: custom
-    capabilities: {}
+    distribution: native
+    capabilities: {image: true, video: true, handoff: true, direct_publish: false, publish: false, analytics: false, schedule: false, media_upload: false}
     enabled: false
   douyin:
     id: douyin
     platform: douyin
     region: cn
     adapter: douyin
-    distribution: custom
-    capabilities: {}
+    distribution: native
+    capabilities: {video: true, image: true, publish: true, media_upload: true, analytics: true, schedule: false, handoff: false}
     enabled: false
   kuaishou:
     id: kuaishou
     platform: kuaishou
     region: cn
     adapter: kuaishou
-    distribution: custom
-    capabilities: {}
+    distribution: native
+    capabilities: {video: true, publish: true, media_upload: true, analytics: true, schedule: false, image: false}
     enabled: false
   shipinghao:
     id: shipinghao
@@ -76,6 +76,7 @@ providers:
     platform: xianyu
     region: cn
     adapter: xianyu
-    distribution: custom
-    capabilities: {}
+    distribution: native
+    deployment_requirement: jushita
+    capabilities: {listing: true, media_upload: true, listing_edit: true, listing_delete: true, listing_query: true, image: true, video: false, publish: false}
     enabled: false

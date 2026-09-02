@@ -22,3 +22,12 @@ def test_register_and_version_lookup():
     clone = register_workflow(type(base)(**{**base.__dict__, "version": "1.0.1"}))
     assert get_workflow_version("creator-lifestyle-v1", "1.0.1").version == "1.0.1"
     assert clone.workflow_id == "creator-lifestyle-v1"
+
+
+def test_v442_workflow_aliases():
+    for alias, target in {
+        "creator-video-v1": "creator-video-default-v1",
+        "image-to-video-v1": "creator-image-to-video-v1",
+        "lifestyle-short-video-v1": "creator-lifestyle-v1",
+    }.items():
+        assert resolve_workflow(alias).workflow_id == target

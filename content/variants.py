@@ -11,6 +11,10 @@ PLATFORM_CONSTRAINTS = {
     "instagram": {"max_chars": 2200, "hashtag_limit": 30},
     "youtube": {"max_chars": 5000, "hashtag_limit": 15},
     "tiktok": {"max_chars": 2200, "hashtag_limit": 20},
+    "xiaohongshu": {"max_chars": 1000, "hashtag_limit": 10, "title_limit": 20},
+    "douyin": {"max_chars": 1000, "hashtag_limit": 5, "title_limit": 30},
+    "kuaishou": {"max_chars": 500, "hashtag_limit": 5},
+    "xianyu": {"max_chars": 5000, "hashtag_limit": 0, "title_limit": 60},
 }
 
 

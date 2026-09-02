@@ -1,19 +1,15 @@
-# Meiti V4.4 Handoff
+# Meiti V4.4.2 Handoff
 
-Branch `main`. Creative Workflow Engine is in `creative/`. Native social is in `social/`.
-
-Production path:
+Branch `main`. Baseline `6c6df42`.
 
 ```text
-resolve_agent -> Strategy.creative_requirement -> MediaAgent
--> WorkflowResolver -> CreativeWorkflowEngine -> ProviderResolver
--> Lechuang (live BLOCKED) or mock -> AI Gateway vision judge -> MediaAsset
--> ContentPackage -> DistributionJob -> Publish Gate
--> SocialProviderResolver -> Native Adapter -> Publication
--> analytics snapshots -> workflow performance -> memory
+Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
+-> PublishGate -> DistributionJob -> Douyin/Kuaishou/XHS/Xianyu
+-> Publication -> Reconciliation -> Analytics
 ```
 
-Doctor: `python scripts/meiti_doctor.py`
-Social doctor: `python scripts/social_doctor.py`
-Creative doctor: `python scripts/creative_doctor.py`
-Runtime JSON: `python scripts/runtime_check.py`
+SocialRuntime.production() is the unique production composition root.
+CLI, doctor, worker, and DistributionAgent must take runtime from there.
+
+XHS publish returns HANDOFF_REQUIRED. Xianyu requires explicit commerce
+intent and Jushita.

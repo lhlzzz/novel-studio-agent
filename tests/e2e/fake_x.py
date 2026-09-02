@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from integrations.contracts.distribution import MediaUploadResult, ProviderHealth
 from social.accounts.models import SocialAccount, SocialProviderCapabilities
+from tests.fixtures.fakes import _MemSecrets
 
 
 class FakeXAdapter:
@@ -12,6 +13,8 @@ class FakeXAdapter:
         self.posts = {}
         self.analytics_data = {}
         self.published = []
+        self.secrets = _MemSecrets()
+        self._credential_ref = self.secrets.put({"access_token": "fake-token", "provider": "x", "provider_account_id": "acct"})
         capabilities = SocialProviderCapabilities.from_claimed(
             {
                 "text": True, "image": True, "video": True, "thread": True, "publish": True,
@@ -31,6 +34,7 @@ class FakeXAdapter:
             capabilities=capabilities,
             last_verified_at="now",
             provider_account_id="acct",
+            credential_ref=self._credential_ref,
         )
 
     @property
@@ -64,7 +68,10 @@ class FakeXAdapter:
         return self.get_account(account_id).capabilities
 
     def verify_capabilities(self, account_id):
-        return self.get_account(account_id).capabilities
+        self.account = self.get_account(account_id)
+        verified = SocialProviderCapabilities.from_claimed(self.account.capabilities.claimed(), verified=True, method="runtime_test")
+        self.account = replace(self.account, capabilities=verified)
+        return verified
 
     def get_settings(self, integration_id):
         return {"platform": "x"}

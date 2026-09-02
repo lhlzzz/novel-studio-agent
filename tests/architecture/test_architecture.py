@@ -42,7 +42,7 @@ def test_media_agent_does_not_import_lechuang_adapter():
 
 
 def test_creative_does_not_import_social_adapters():
-    forbidden = ("XAdapter", "InstagramAdapter", "YouTubeAdapter", "TikTokAdapter", "LinkedInAdapter", "social.providers")
+    forbidden = ("XAdapter", "InstagramAdapter", "YouTubeAdapter", "TikTokAdapter", "LinkedInAdapter", "DouyinAdapter", "KuaishouAdapter", "XiaohongshuAdapter", "XianyuAdapter", "social.providers")
     for path in (ROOT / "creative").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert all(token not in text for token in forbidden), path

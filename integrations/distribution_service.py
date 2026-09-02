@@ -103,7 +103,7 @@ class DistributionService:
                     raise ExternalActionBlocked("media must be uploaded before publish")
             job = transition_job(job, "SUBMITTING", last_attempt_at=_utcnow(), attempt_count=attempt_no)
             self.store.save_job(job)
-            result = self.adapter.schedule(job) if job.action == "schedule" else self.adapter.publish(job)
+            result = self.adapter.publish(job)
         except IllegalJobTransition as exc:
             job = replace(job, status="FAILED_PERMANENT", error_code="illegal_transition", error_message=str(exc))
             self.store.save_job(job)
@@ -139,7 +139,16 @@ class DistributionService:
             raise ExternalActionBlocked("provider response did not contain an external post id")
         account = self._account(job)
         platform_object_id = result.get("external_id") or result.get("externalId") or result.get("platform_object_id")
-        status = "SCHEDULED" if job.action == "schedule" else "SUBMITTED"
+        remote_status = str(result.get("status") or "SUBMITTED").upper()
+        if remote_status in {"HANDOFF_REQUIRED", "READY_FOR_XHS"}:
+            status = "SUBMITTED"
+            publication_status = "HANDOFF_REQUIRED"
+        elif remote_status in {"PUBLISHED"}:
+            status = "SUBMITTED"
+            publication_status = "SUBMITTED"
+        else:
+            status = "SUBMITTED" if job.status == "SUBMITTING" else "SUBMITTED"
+            publication_status = remote_status if remote_status in {"SUBMITTED", "PROCESSING", "UNKNOWN", "HANDOFF_REQUIRED"} else "SUBMITTED"
         job = transition_job(job, status, provider_response=result)
         self.store.save_job(job)
         publication = Publication(
@@ -148,13 +157,14 @@ class DistributionService:
             provider=getattr(account, "provider", ""),
             provider_post_id=post_id,
             platform_object_id=str(platform_object_id) if platform_object_id is not None else None,
-            status=str(result.get("status") or status),
-            published_at=result.get("published_at") or (None if job.action == "schedule" else _utcnow()),
+            status=publication_status,
+            published_at=result.get("published_at"),
             external_url=result.get("url") or result.get("releaseURL") or result.get("external_url"),
             content_package_id=job.content_package_id,
             request_id=job.request_id,
             platform=getattr(account, "platform", "") or getattr(account, "provider", ""),
             created_at=_utcnow(),
+            provider_object_type=str(result.get("provider_object_type") or ""),
         )
         try:
             self.store.save_publication(publication)

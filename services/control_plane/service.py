@@ -42,7 +42,12 @@ def snapshot() -> dict[str, Any]:
     creative = _creative()
     accounts = []
     try:
-        for account in SocialAccountManager().list_accounts():
+        from social.runtime.container import SocialRuntime
+        try:
+            manager = SocialRuntime.production().manager
+        except Exception:
+            manager = SocialAccountManager()
+        for account in manager.list_accounts():
             accounts.append({"id": account.account_id, "provider": account.provider, "platform": account.platform, "status": account.status, "enabled": account.enabled})
     except Exception:
         accounts = [item for item in integrations if item["enabled"]]

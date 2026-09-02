@@ -8,8 +8,8 @@ from typing import Any
 from analytics.normalizers.metrics import NormalizedMetrics, normalize_metrics
 from analytics.persistence import persist_metrics
 from content.models import ContentPackage
-from content.variants import build_variant
-from governance.distribution_gate import check_distribution_job
+from governance.distribution_gate import admit_distribution_job
+from social.variants import build_platform_variant
 from governance.observability import new_request_id
 from integrations.contracts.distribution import (
     DistributionJob,
@@ -52,12 +52,14 @@ class DistributionAgent:
         store: JobStore | None = None,
         manager: SocialAccountManager | None = None,
         provider_name: str | None = None,
+        secrets: Any | None = None,
     ) -> None:
         self.store = store or InMemoryStore()
         self.registry = registry or {}
         self.adapter = adapter
         self.provider_name = provider_name
-        self.manager = manager or SocialAccountManager(store=self.store)
+        self.secrets = secrets
+        self.manager = manager or SocialAccountManager(store=self.store, secrets=secrets)
         if adapter is not None:
             self.service = DistributionService(adapter, store=self.store)
         else:
@@ -88,7 +90,7 @@ class DistributionAgent:
         return adapter.list_integrations()
 
     def get_capabilities(self, account_id: str):
-        adapter = self.adapter or self._adapter_for(self.provider_name or "x")
+        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
         return resolve_capability(account_id, "publish", adapter=adapter)
 
     def select_provider(self, platform: str) -> SocialAccount:
@@ -108,41 +110,19 @@ class DistributionAgent:
                 capabilities = verify(account.account_id) if callable(verify) else getattr(account, "capabilities", None)
                 if capabilities is not None and hasattr(account, "capabilities"):
                     account = replace(account, capabilities=capabilities) if hasattr(account, "capabilities") else account
-                if getattr(account, "status", "") == "VERIFIED":
-                    account = replace(account, status="ENABLED")
+                if getattr(account, "status", "") != "ENABLED":
+                    continue
                 self.store.save_account(account)
                 return account
-            list_integrations = getattr(self.adapter, "list_integrations", None)
-            if callable(list_integrations):
-                for integration in list_integrations():
-                    integration_platform = getattr(integration, "platform", "") or getattr(integration, "provider", "")
-                    if integration_platform != platform:
-                        continue
-                    verify = getattr(self.adapter, "verify_capabilities", None)
-                    capabilities = verify(integration.id) if callable(verify) else self.adapter.get_capabilities(integration.id)
-                    record = (getattr(capabilities, "records", {}) or {}).get("publish")
-                    if record is None or not record.allowed:
-                        continue
-                    account = SocialAccount(
-                        account_id=integration.id,
-                        provider=integration.provider,
-                        platform=platform,
-                        username=getattr(integration, "account_name", "") or "",
-                        display_name=getattr(integration, "account_name", "") or "",
-                        status="ENABLED",
-                        last_verified_at=getattr(integration, "verified_at", None),
-                    )
-                    self.store.save_account(account)
-                    self.store.save_integration(replace(integration, enabled=True, state="ENABLED", capabilities=capabilities))
-                    return account
             raise RuntimeError(f"no active verified account for platform={platform}")
         try:
-            return self.manager.select_verified(platform)
+            return self.manager.select_enabled(platform, account_id=None, provider=self.provider_name)
         except Exception as exc:
             raise RuntimeError(f"provider is not runtime verified: no active verified account for platform={platform}") from exc
 
     def _variant(self, package: ContentPackage, account_id: str, platform: str):
-        return build_variant(package, account_id=account_id, platform=platform)
+        built = build_platform_variant(package, account_id=account_id, platform=platform)
+        return built.variant
 
     def create_job(
         self,
@@ -152,9 +132,15 @@ class DistributionAgent:
         job_id: str,
         scheduled_at: str | None = None,
         request_id: str | None = None,
+        account_id: str | None = None,
     ) -> DistributionJob:
-        account = self.select_provider(platform)
-        action = "schedule" if scheduled_at else "publish"
+        if account_id:
+            account = self.manager.get_account(account_id)
+            if account.status != "ENABLED":
+                raise RuntimeError(f"account {account_id} is not ENABLED")
+        else:
+            account = self.select_provider(platform)
+        action = "publish"
         job = DistributionJob(
             job_id=job_id,
             content_package_id=package.package_id,
@@ -162,7 +148,7 @@ class DistributionAgent:
             variant=self._variant(package, account.account_id, platform),
             action=action,
             scheduled_at=scheduled_at,
-            status="DRAFT",
+            status="SCHEDULED" if scheduled_at else "DRAFT",
             idempotency_key=make_idempotency_key(package.package_id, account.account_id, action, scheduled_at),
             brand_id=package.brand_id,
             creator_id=package.creator_id,
@@ -174,61 +160,32 @@ class DistributionAgent:
         return self.store.save_job(job)
 
     def validate(self, job: DistributionJob) -> list[str]:
-        adapter = self._adapter_for(self.provider_name or "x")
+        adapter = self._adapter_for(self.provider_name or "douyin")
         return adapter.validate_payload(job)
 
     def dry_run(self, job: DistributionJob) -> dict[str, Any]:
-        adapter = self.adapter or self._adapter_for(self.provider_name or "x")
+        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
         return self._service(adapter).dry_run(job)
 
-    def execute(
-        self,
-        job: DistributionJob,
-        *,
-        content_valid: bool,
-        evidence_valid: bool,
-        account_valid: bool,
-        media_valid: bool,
-        approval_valid: bool,
-        provider_verified: bool = False,
-        integration_verified: bool = False,
-        account_verified: bool = False,
-        capability_verified: bool = False,
-        idempotency_valid: bool = False,
-        media_uploaded: bool = False,
-        payload_valid: bool = False,
-    ):
-        adapter = self.adapter or self._adapter_for(self.provider_name or "x")
-        account = adapter.get_account(job.account_id) if hasattr(adapter, "get_account") else adapter.get_integration(job.account_id)
-        capability = resolve_capability(
-            job.account_id,
-            "schedule" if job.action == "schedule" else "publish",
-            adapter=adapter,
-        )
+    def execute(self, job: DistributionJob, **_ignored: Any):
+        platform = self.provider_name or ((job.variant.metadata or {}).get("platform") if job.variant.metadata else None) or "douyin"
+        adapter = self.adapter or self._adapter_for(platform)
 
         def gate_check(candidate: DistributionJob) -> bool:
-            return not check_distribution_job(
-                candidate,
-                account,
-                content_valid=content_valid,
-                evidence_valid=evidence_valid,
-                account_valid=account_valid,
-                media_valid=media_valid,
-                approval_valid=approval_valid,
-                provider_verified=provider_verified or bool(getattr(account, "enabled", False)),
-                integration_verified=integration_verified or getattr(account, "status", getattr(account, "state", "")) in {"VERIFIED", "ENABLED"},
-                account_verified=account_verified or getattr(account, "verified", False) or getattr(account, "status", "") in {"VERIFIED", "ENABLED"},
-                capability_verified=capability_verified or capability.allowed,
-                idempotency_valid=idempotency_valid or bool(candidate.idempotency_key),
-                media_uploaded=media_uploaded or not candidate.variant.media or bool((candidate.variant.metadata or {}).get("uploaded_media")),
-                payload_valid=payload_valid or not adapter.validate_payload(candidate),
-            )
+            decision = admit_distribution_job(candidate, adapter=adapter, store=self.store)
+            return decision.ready
 
-        return self._service(adapter).execute(job, gate_check=gate_check)
+        publishable = job if job.action in {"publish", "scheduled_publish"} else replace(job, action="publish")
+        return self._service(adapter).execute(publishable, gate_check=gate_check)
 
-    def schedule(self, job: DistributionJob, **gate: bool):
-        scheduled = replace(job, action="schedule") if job.action != "schedule" else job
-        return self.execute(scheduled, **gate)
+    def schedule(self, job: DistributionJob, **_ignored: Any):
+        from integrations.contracts.distribution import transition_job
+        scheduled = replace(job, action="publish", status=job.status)
+        if scheduled.status == "DRAFT":
+            scheduled = transition_job(scheduled, "SCHEDULED", action="publish")
+        elif scheduled.status != "SCHEDULED":
+            scheduled = replace(scheduled, status="SCHEDULED")
+        return self.store.save_job(scheduled)
 
     def status(self, job_id: str) -> dict[str, Any]:
         publication = self.store.get_publication(job_id)
@@ -253,7 +210,7 @@ class DistributionAgent:
     def reconcile(self, job_id: str) -> dict[str, Any]:
         from social.reconciliation.service import reconcile_distribution_job
 
-        adapter = self.adapter or self._adapter_for(self.provider_name or "x")
+        adapter = self.adapter or self._adapter_for(self.provider_name or "douyin")
         return reconcile_distribution_job(job_id, adapter=adapter, store=self.store)
 
     def sync_analytics(

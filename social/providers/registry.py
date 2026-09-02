@@ -10,7 +10,10 @@ from social.accounts.models import SocialProviderCapabilities
 
 _RUNTIME_STATE: dict[str, dict[str, Any]] = {}
 
-NATIVE_PROVIDERS = ("x", "instagram", "youtube", "tiktok", "linkedin")
+CN_PROVIDERS = ("xiaohongshu", "douyin", "kuaishou", "xianyu")
+OVERSEAS_PROVIDERS = ("x", "instagram", "youtube", "tiktok", "linkedin")
+NATIVE_PROVIDERS = CN_PROVIDERS
+
 
 
 @dataclass(frozen=True)

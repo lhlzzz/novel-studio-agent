@@ -1,28 +1,17 @@
-# Meiti V4.4 State
+# Meiti V4.4.2 State
 
-Creative Runtime: PASS
-Lechuang: BLOCKED
-AI Judge: BLOCKED
-Render: PASS
-Persistence: PASS
-Worker lease: PASS
-Resume: PASS
-Social Provider Registry: PASS
-Social Account Manager: PASS
-Real Social Accounts: BLOCKED
+Scope: XHS, Douyin, Kuaishou, Xianyu
+
+Production Runtime: implemented
+Production Store: DatabaseStore
+Credential Store: MEITI_SECRET_DIR
+Scheduler: Meiti claim/lease
+Publish Gate: runtime checks
+Reconciliation: state machine
+Lechuang: BLOCKED until official contract/key
+Xiaohongshu: HANDOFF implemented; direct publish BLOCKED
+Douyin: adapter implemented; real OAuth BLOCKED without credentials
+Kuaishou: adapter implemented; real OAuth BLOCKED without credentials
+Xianyu: adapter implemented; JUSHITA BLOCKED by default
 Real Creative E2E: BLOCKED
-Real Distribution E2E: BLOCKED
-
-- CreativeRuntime is the unique composition root.
-- PostgreSQL is the creative and social metadata source of truth; workers resume from durable leases.
-- Assets are immutable and keyed by sha256.
-- Render uses ffmpeg and writes a new hashed file.
-- Visual AI Judge requires a verified vision provider; otherwise BLOCKED.
-- Lechuang live calls are BLOCKED until the official API schema is extracted.
-- Mock generation is tests-only and is never reported as live.
-- Native social adapters sit behind SocialProviderResolver and Gate.
-- Real platform ENABLE requires verified OAuth credentials.
-
-- V4.4 removes third-party social schedulers. Live READY requires real Lechuang, Vision, native social OAuth, Research, and E2E evidence.
-- AI Gateway is a separate vision provider from Lechuang. Credential reuse is allowed; identity is not merged.
-- Doctor reports BLOCKED instead of PASS when keys, contracts, or real publications are missing.
+Real Social E2E: BLOCKED

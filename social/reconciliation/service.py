@@ -12,10 +12,19 @@ STATUS_MAP = {
     "published": "PUBLISHED",
     "ok": "PUBLISHED",
     "success": "PUBLISHED",
+    "online": "PUBLISHED",
     "scheduled": "SCHEDULED",
-    "queue": "SCHEDULED",
-    "queued": "SCHEDULED",
-    "pending": "SCHEDULED",
+    "queue": "SUBMITTED",
+    "queued": "SUBMITTED",
+    "pending": "SUBMITTED",
+    "processing": "PUBLISHING",
+    "reviewing": "PUBLISHING",
+    "submitted": "SUBMITTED",
+    "handoff_required": "SUBMITTED",
+    "ready_for_xhs": "SUBMITTED",
+    "not_published": "SUBMITTED",
+    "offline": "FAILED",
+    "blocked": "FAILED",
     "failed": "FAILED",
     "error": "FAILED",
     "canceled": "CANCELLED",
@@ -44,13 +53,17 @@ class SocialReconciliationService:
         updated = self.reconcile_publication(publication, raw if isinstance(raw, dict) else {})
         self.store.save_publication(updated)
         if job is not None and job.status != updated.status:
-            allowed = {"SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "CANCELLED", "UNKNOWN", "SUBMITTED"}
-            target = updated.status if updated.status in allowed else "UNKNOWN"
+            target = updated.status
+            if job.status not in {"RECONCILING"} and "RECONCILING" in __import__("integrations.contracts.distribution", fromlist=["JOB_TRANSITIONS"]).JOB_TRANSITIONS.get(job.status, set()):
+                job = self.store.save_job(transition_job(job, "RECONCILING"))
             try:
                 job = transition_job(job, target)
                 self.store.save_job(job)
             except Exception:
-                self.store.save_job(replace(job, status=updated.status))
+                if job.status != "RECONCILING":
+                    raise
+                job = transition_job(job, "UNKNOWN" if target not in {"PUBLISHED", "FAILED", "CANCELLED", "SUBMITTED", "SCHEDULED", "PUBLISHING"} else target)
+                self.store.save_job(job)
         return {
             "job_id": job_id,
             "distribution_job_id": job_id,

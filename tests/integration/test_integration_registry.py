@@ -7,7 +7,7 @@ def test_registry_is_dynamic_and_disabled_until_verified():
     assert "instagram" in registry
     assert "xiaohongshu" in registry
     assert all(not integration.enabled for integration in registry.values())
-    assert registry["xiaohongshu"].distribution_backend == "custom"
+    assert registry["xiaohongshu"].distribution_backend == "native"
 
 
 def test_registry_is_not_fixed_to_six_providers():

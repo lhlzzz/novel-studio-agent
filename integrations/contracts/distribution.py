@@ -35,23 +35,25 @@ JOB_STATES = (
     "CANCELLED",
     "UNKNOWN",
     "FAILED_PERMANENT",
+    "RECONCILING",
 )
 
 JOB_TRANSITIONS = {
-    "DRAFT": {"VALIDATING", "CANCELLED"},
-    "VALIDATING": {"BLOCKED", "READY", "FAILED"},
-    "BLOCKED": {"VALIDATING", "CANCELLED", "DRAFT"},
+    "DRAFT": {"VALIDATING", "SCHEDULED", "READY", "CANCELLED", "BLOCKED"},
+    "VALIDATING": {"BLOCKED", "READY", "SCHEDULED", "FAILED"},
+    "BLOCKED": {"VALIDATING", "CANCELLED", "DRAFT", "READY", "SCHEDULED"},
     "READY": {"SUBMITTING", "CANCELLED", "BLOCKED", "VALIDATING"},
-    "SUBMITTING": {"SUBMITTED", "FAILED", "RETRYING"},
-    "SUBMITTED": {"SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "UNKNOWN"},
-    "SCHEDULED": {"PUBLISHING", "CANCELLED", "FAILED", "UNKNOWN"},
+    "SUBMITTING": {"SUBMITTED", "FAILED", "RETRYING", "UNKNOWN", "BLOCKED", "PUBLISHING"},
+    "SUBMITTED": {"SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "UNKNOWN", "RECONCILING"},
+    "SCHEDULED": {"READY", "PUBLISHING", "CANCELLED", "FAILED", "UNKNOWN", "BLOCKED"},
     "PUBLISHING": {"PUBLISHED", "FAILED", "UNKNOWN"},
     "PUBLISHED": set(),
-    "FAILED": {"RETRYING", "FAILED_PERMANENT", "CANCELLED"},
-    "RETRYING": {"SUBMITTING", "FAILED_PERMANENT"},
+    "FAILED": {"RETRYING", "FAILED_PERMANENT", "CANCELLED", "UNKNOWN"},
+    "RETRYING": {"SUBMITTING", "FAILED_PERMANENT", "UNKNOWN"},
     "CANCELLED": set(),
-    "UNKNOWN": {"SUBMITTED", "SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "CANCELLED"},
+    "UNKNOWN": {"RECONCILING", "SUBMITTED", "SCHEDULED", "PUBLISHING", "PUBLISHED", "FAILED", "CANCELLED", "READY", "RETRYING"},
     "FAILED_PERMANENT": set(),
+    "RECONCILING": {"PUBLISHED", "FAILED", "UNKNOWN", "CANCELLED", "SUBMITTED", "SCHEDULED", "PUBLISHING"},
 }
 
 
@@ -178,6 +180,9 @@ class DistributionJob:
     creator_id: str | None = None
     campaign_id: str | None = None
     request_id: str = ""
+    lease_until: str | None = None
+    worker_id: str | None = None
+    claimed_at: str | None = None
 
     @property
     def integration_id(self) -> str:
@@ -223,6 +228,7 @@ class Publication:
     publication_id: str = ""
     platform: str = ""
     created_at: str | None = None
+    provider_object_type: str = ""
 
     def __post_init__(self) -> None:
         if not self.publication_id:
@@ -243,6 +249,10 @@ class Publication:
     def remote_url(self) -> str | None:
         return self.external_url
 
+    @property
+    def object_type(self) -> str:
+        return self.provider_object_type
+
     def resolved_platform_object_id(self) -> str | None:
         return self.platform_object_id
 
@@ -262,6 +272,9 @@ class MediaUploadResult:
     remote_path: str
     uploaded_at: str
     status: str = "uploaded"
+    account_id: str = ""
+    failure_code: str | None = None
+    created_at: str | None = None
 
     @property
     def remote_media_id(self) -> str:
@@ -336,13 +349,15 @@ def validate_common_payload(job: DistributionJob, integration: Integration) -> l
         errors.append("job account does not match registered account")
     if not job.variant.body.strip() and not job.variant.media:
         errors.append("content body or media is required")
-    if job.action not in {"publish", "schedule", "delete", "cancel"}:
+    if job.action not in {"publish", "scheduled_publish", "delete", "cancel"}:
         errors.append(f"unsupported action: {job.action}")
-    capability_name = "schedule" if job.action == "schedule" else "publish"
-    if job.action in {"publish", "schedule"} and not integration.capabilities.verified(capability_name):
-        errors.append(f"{job.action} capability is unverified or unsupported")
+    if job.action in {"publish", "scheduled_publish"}:
+        caps = integration.capabilities
+        publishable = caps.verified("publish") or caps.verified("handoff") or caps.verified("listing")
+        if not publishable:
+            errors.append("publish capability is unverified or unsupported")
     enabled = bool(getattr(integration, "enabled", False) or getattr(integration, "status", "") == "ENABLED")
     state = str(getattr(integration, "state", None) or getattr(integration, "status", "") or "")
-    if not enabled or state not in {"ENABLED", "VERIFIED"}:
+    if not enabled or state != "ENABLED":
         errors.append("account is not enabled")
     return errors

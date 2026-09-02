@@ -146,13 +146,7 @@ class BaseSocialAdapter:
         health = self.health()
         if not health.authenticated:
             return SocialProviderCapabilities.from_claimed(self.claimed, verified=False, method="unverified")
-        verified = SocialProviderCapabilities.from_claimed(self.claimed, verified=True, method="runtime_probe")
-        try:
-            account = self.get_account(account_id)
-            self._accounts[account_id] = replace(account, capabilities=verified, status="VERIFIED", last_verified_at=_utcnow())
-        except KeyError:
-            pass
-        return verified
+        return SocialProviderCapabilities.from_claimed(self.claimed, verified=False, method="probe_required")
 
     def get_settings(self, integration_id: str) -> dict[str, Any]:
         return {"platform": self.platform, "provider": self.provider, "account_id": integration_id}
@@ -265,3 +259,10 @@ class BaseSocialAdapter:
 
     def revoke(self, account: SocialAccount) -> None:
         return None
+
+
+class BaseCNAdapter(BaseSocialAdapter):
+    region = "cn"
+
+    def schedule(self, job: DistributionJob) -> dict[str, Any]:
+        raise ValidationError(f"{self.provider} native schedule is unsupported; use Meiti scheduler")

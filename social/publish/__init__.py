@@ -1,5 +1,3 @@
-"""Publish execution stays in DistributionService; social only supplies native adapters."""
+from social.publish.gate import AdmissionDecision, admit
 
-from integrations.distribution_service import DistributionService
-
-__all__ = ["DistributionService"]
+__all__ = ["AdmissionDecision", "admit"]

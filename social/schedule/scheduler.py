@@ -1,0 +1,62 @@
+"""Meiti owns scheduling. Workers poll/claim/execute; they never sleep() or call adapter.schedule()."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from integrations.contracts.distribution import DistributionJob
+from integrations.persistence import JobStore
+
+
+class MeitiScheduler:
+    def __init__(self, store: JobStore, *, manager: Any | None = None, adapter: Any | None = None) -> None:
+        if store is None:
+            raise ValueError("MeitiScheduler requires an explicit store")
+        self.store = store
+        self.manager = manager
+        self.adapter = adapter
+
+    def tick(
+        self,
+        *,
+        worker_id: str,
+        now: datetime | None = None,
+        execute: Callable[[DistributionJob], Any] | None = None,
+        limit: int = 20,
+    ) -> list[str]:
+        now = now or datetime.now(timezone.utc)
+        executed: list[str] = []
+        runner = execute or self.execute_claimed
+        for _ in range(limit):
+            job = self.claim(worker_id=worker_id, now=now)
+            if job is None:
+                break
+            runner(job)
+            executed.append(job.job_id)
+        return executed
+
+    def claim(self, *, worker_id: str, now: datetime | None = None, lease_seconds: int = 60) -> DistributionJob | None:
+        claim = getattr(self.store, "claim_due_job", None)
+        if not callable(claim):
+            raise RuntimeError("store does not implement claim_due_job")
+        return claim(worker_id=worker_id, now=now, lease_seconds=lease_seconds)
+
+    def execute_claimed(self, job: DistributionJob) -> Any:
+        from agents.distribution_agent import DistributionAgent
+
+        agent = DistributionAgent(
+            store=self.store,
+            manager=self.manager,
+            adapter=self.adapter,
+        )
+        publishable = job if job.action != "scheduled_publish" else replace(job, action="scheduled_publish")
+        return agent.execute(publishable)
+
+
+def run_once(*, execute: Callable[[Any], Any] | None = None, store: JobStore | None = None, now: datetime | None = None, worker_id: str = "scheduler") -> list[str]:
+    if store is None:
+        raise ValueError("scheduler run_once requires an explicit store")
+    scheduler = MeitiScheduler(store)
+    return scheduler.tick(worker_id=worker_id, now=now, execute=execute)

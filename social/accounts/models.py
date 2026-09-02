@@ -12,6 +12,7 @@ ACCOUNT_STATES = (
     "PENDING",
     "AUTHENTICATING",
     "AUTHENTICATED",
+    "VERIFYING",
     "VERIFIED",
     "ENABLED",
     "DEGRADED",
@@ -20,11 +21,37 @@ ACCOUNT_STATES = (
     "BLOCKED",
 )
 
+ACCOUNT_TRANSITIONS = {
+    "PENDING": {"AUTHENTICATING", "BLOCKED"},
+    "AUTHENTICATING": {"AUTHENTICATED", "BLOCKED", "PENDING"},
+    "AUTHENTICATED": {"VERIFYING", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED"},
+    "VERIFYING": {"VERIFIED", "AUTHENTICATED", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED"},
+    "VERIFIED": {"ENABLED", "EXPIRED", "REVOKED", "BLOCKED", "DEGRADED", "AUTHENTICATED", "VERIFYING"},
+    "ENABLED": {"DEGRADED", "EXPIRED", "REVOKED", "BLOCKED", "VERIFIED"},
+    "DEGRADED": {"ENABLED", "EXPIRED", "REVOKED", "BLOCKED", "VERIFIED"},
+    "EXPIRED": {"AUTHENTICATING", "AUTHENTICATED", "REVOKED", "BLOCKED"},
+    "REVOKED": {"PENDING", "AUTHENTICATING"},
+    "BLOCKED": {"PENDING", "AUTHENTICATING", "EXPIRED", "REVOKED"},
+}
+
 ENABLED_FROM = frozenset({"VERIFIED"})
 
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class IllegalAccountTransition(ValueError):
+    """Raised when a SocialAccount cannot move to the requested status."""
+
+
+def transition_account(account: "SocialAccount", new_status: str, **changes: Any) -> "SocialAccount":
+    if new_status not in ACCOUNT_STATES:
+        raise ValueError(f"invalid account status: {new_status}")
+    allowed = ACCOUNT_TRANSITIONS.get(account.status, set())
+    if new_status != account.status and new_status not in allowed:
+        raise IllegalAccountTransition(f"{account.status} -> {new_status} is not allowed")
+    return replace(account, status=new_status, updated_at=_utcnow(), **changes)
 
 
 @dataclass(frozen=True)
@@ -40,13 +67,17 @@ class SocialProviderCapabilities:
     schedule: bool = False
     analytics: bool = False
     media_upload: bool = False
+    listing: bool = False
+    listing_edit: bool = False
+    listing_delete: bool = False
+    handoff: bool = False
     records: dict[str, CapabilityRecord] = field(default_factory=dict)
 
     def verified(self, name: str) -> bool:
         record = self.records.get(name)
         if record is not None:
             return record.allowed
-        return bool(getattr(self, name, False))
+        return False
 
     def claimed(self) -> dict[str, bool]:
         return {
@@ -61,7 +92,26 @@ class SocialProviderCapabilities:
             "schedule": self.schedule,
             "analytics": self.analytics,
             "media_upload": self.media_upload,
+            "listing": self.listing,
+            "listing_edit": self.listing_edit,
+            "listing_delete": self.listing_delete,
+            "handoff": self.handoff,
         }
+
+    def serialized(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        names = set(self.claimed()) | set(self.records)
+        for name in sorted(names):
+            record = self.records.get(name)
+            supported = record.supported if record is not None else bool(getattr(self, name, False))
+            payload[name] = {
+                "supported": supported,
+                "verified": bool(record.verified) if record is not None else False,
+                "verified_at": record.verified_at if record is not None else None,
+                "method": record.method if record is not None else "unverified",
+                "verification_method": (record.verification_method or record.method) if record is not None else "unverified",
+            }
+        return payload
 
     def to_integration(self) -> IntegrationCapabilities:
         records = dict(self.records)
@@ -71,18 +121,64 @@ class SocialProviderCapabilities:
                 CapabilityRecord(name=name, supported=supported, verified=False, method="registry_claim"),
             )
         return IntegrationCapabilities(
-            publish=self.verified("publish") or self.publish,
-            schedule=self.verified("schedule") or self.schedule,
-            analytics=self.verified("analytics") or self.analytics,
-            media=self.verified("image") or self.verified("video") or self.image or self.video,
-            media_upload=self.verified("media_upload") or self.media_upload,
+            publish=self.verified("publish"),
+            schedule=False,
+            analytics=self.verified("analytics"),
+            media=self.verified("image") or self.verified("video") or self.verified("reel"),
+            media_upload=self.verified("media_upload"),
             records=records,
         )
 
     @classmethod
+    def from_records(cls, records: dict[str, CapabilityRecord]) -> "SocialProviderCapabilities":
+        claimed = {name: record.supported for name, record in records.items()}
+        return cls(
+            text=bool(claimed.get("text")),
+            image=bool(claimed.get("image")),
+            video=bool(claimed.get("video")),
+            carousel=bool(claimed.get("carousel")),
+            story=bool(claimed.get("story")),
+            reel=bool(claimed.get("reel")),
+            thread=bool(claimed.get("thread")),
+            publish=bool(claimed.get("publish")),
+            schedule=False,
+            analytics=bool(claimed.get("analytics")),
+            media_upload=bool(claimed.get("media_upload")),
+            listing=bool(claimed.get("listing")),
+            listing_edit=bool(claimed.get("listing_edit")),
+            listing_delete=bool(claimed.get("listing_delete")),
+            handoff=bool(claimed.get("handoff")),
+            records=dict(records),
+        )
+
+    @classmethod
+    def from_serialized(cls, payload: dict[str, Any] | None) -> "SocialProviderCapabilities":
+        payload = payload or {}
+        if payload and all(isinstance(value, dict) for value in payload.values()):
+            records = {
+                name: CapabilityRecord(
+                    name=name,
+                    supported=bool(item.get("supported")),
+                    verified=bool(item.get("verified")),
+                    verified_at=item.get("verified_at"),
+                    method=str(item.get("verification_method") or item.get("method") or "unverified"),
+                    verification_method=str(item.get("verification_method") or item.get("method") or "unverified"),
+                )
+                for name, item in payload.items()
+            }
+            return cls.from_records(records)
+        return cls.from_claimed({name: bool(value) for name, value in payload.items()})
+
+    @classmethod
     def from_claimed(cls, claimed: dict[str, bool], *, verified: bool = False, method: str = "registry_claim") -> "SocialProviderCapabilities":
         records = {
-            name: CapabilityRecord(name=name, supported=bool(value), verified=bool(verified and value), method=method)
+            name: CapabilityRecord(
+                name=name,
+                supported=bool(value),
+                verified=bool(verified and value),
+                method=method,
+                verification_method=method,
+            )
             for name, value in claimed.items()
         }
         return cls(
@@ -94,9 +190,13 @@ class SocialProviderCapabilities:
             reel=bool(claimed.get("reel")),
             thread=bool(claimed.get("thread")),
             publish=bool(claimed.get("publish")),
-            schedule=bool(claimed.get("schedule")),
+            schedule=False,
             analytics=bool(claimed.get("analytics")),
             media_upload=bool(claimed.get("media_upload")),
+            listing=bool(claimed.get("listing")),
+            listing_edit=bool(claimed.get("listing_edit")),
+            listing_delete=bool(claimed.get("listing_delete")),
+            handoff=bool(claimed.get("handoff")),
             records=records,
         )
 
@@ -118,6 +218,10 @@ class SocialAccount:
     region: str = "global"
     provider_account_id: str = ""
     blocked_reason: str | None = None
+    channel_id: str = ""
+    channel_title: str = ""
+    account_type: str = ""
+    restriction: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in ACCOUNT_STATES:
@@ -181,4 +285,4 @@ class SocialAccount:
 def enable_account(account: SocialAccount) -> SocialAccount:
     if account.status != "VERIFIED":
         raise ValueError("only VERIFIED accounts can become ENABLED")
-    return replace(account, status="ENABLED", updated_at=_utcnow())
+    return transition_account(account, "ENABLED", blocked_reason=None)

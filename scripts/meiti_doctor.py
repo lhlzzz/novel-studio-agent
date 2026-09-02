@@ -39,7 +39,7 @@ def check_provider_registry() -> dict:
         from integrations.registry.loader import load_registry
         registry = load_registry()
         enabled_from_yaml = [name for name, item in registry.items() if item.enabled]
-        required = {"x", "instagram", "youtube", "tiktok", "linkedin"}
+        required = {"xiaohongshu", "douyin", "kuaishou", "xianyu"}
         missing = sorted(required - set(registry))
         return {
             "status": "PASS" if not missing and not enabled_from_yaml else "BLOCKED",
@@ -112,17 +112,8 @@ def check_memory() -> dict:
 
 
 def check_gate() -> dict:
-    from governance.distribution_gate import check_distribution_job
-    from integrations.contracts.distribution import ContentVariant, DistributionJob
-    from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account
-    account = enable_account(SocialAccount("i", "x", "x", username="meiti", status="VERIFIED", capabilities=SocialProviderCapabilities(publish=True, text=True)))
-    job = DistributionJob("j", "p", "i", ContentVariant("i", "test"))
-    failures = check_distribution_job(
-        job, account, content_valid=True, evidence_valid=True, account_valid=True,
-        media_valid=True, approval_valid=False, provider_verified=True, integration_verified=True,
-        account_verified=True, capability_verified=True, idempotency_valid=True, media_uploaded=True, payload_valid=True,
-    )
-    return {"status": "PASS" if failures == ["approval invalid"] else "BLOCKED", "failures": failures}
+    from scripts.social_doctor import check_publish_gate
+    return check_publish_gate()
 
 
 def check_social_provider_registry() -> dict:

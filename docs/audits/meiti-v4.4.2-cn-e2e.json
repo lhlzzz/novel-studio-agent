@@ -1,0 +1,18 @@
+{
+  "version": "4.4.2",
+  "creative": {"status": "blocked", "reason": "Lechuang contract/key missing"},
+  "xiaohongshu": {"status": "handoff_implemented", "direct_publish": "blocked", "remote_id": ""},
+  "douyin": {"status": "blocked", "reason": "OAuth credentials missing", "remote_id": ""},
+  "kuaishou": {"status": "blocked", "reason": "OAuth credentials missing", "remote_id": ""},
+  "xianyu": {"status": "blocked", "reason": "JUSHITA and official ISV access required", "remote_id": ""},
+  "scheduler": {"status": "implemented"},
+  "reconciliation": {"status": "implemented"},
+  "analytics": {"status": "implemented"},
+  "blockers": [
+    "Lechuang official contract/key",
+    "Douyin OAuth credentials and video.create scope",
+    "Kuaishou OAuth credentials and user_video_publish scope",
+    "Xianyu Jushita deployment and official ISV access",
+    "Xiaohongshu official server-side publish API not available"
+  ]
+}

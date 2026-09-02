@@ -6,9 +6,10 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from social.accounts.models import SocialAccount, enable_account
+from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account, transition_account
 from social.auth.secrets import RuntimeSecretStore, default_secret_store
 from social.providers.resolver import resolve_social_provider
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -21,10 +22,14 @@ class SocialAccountManager:
         self.store = store or InMemoryStore()
         self.secrets = secrets or default_secret_store()
 
-    def list_accounts(self, *, platform: str | None = None) -> list[SocialAccount]:
+    def list_accounts(self, *, platform: str | None = None, provider: str | None = None, region: str | None = None) -> list[SocialAccount]:
         accounts = list(getattr(self.store, "list_accounts", lambda: [])())
         if platform:
             accounts = [item for item in accounts if item.platform == platform]
+        if provider:
+            accounts = [item for item in accounts if item.provider == provider]
+        if region:
+            accounts = [item for item in accounts if item.region == region]
         return accounts
 
     def get_account(self, account_id: str) -> SocialAccount:
@@ -57,29 +62,53 @@ class SocialAccountManager:
                 display_name=getattr(item, "account_name", ""),
                 status="AUTHENTICATED",
             )
-            if account.status in {"PENDING", "AUTHENTICATING"}:
-                account = replace(account, status="AUTHENTICATED", updated_at=_utcnow())
+            account = replace(account, status="AUTHENTICATED", updated_at=_utcnow(), blocked_reason=None)
             saved.append(self.save(account))
         return saved[0]
 
     def verify_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
         account = self.get_account(account_id)
         implementation = adapter or resolve_social_provider(account.provider).implementation
-        verify = getattr(implementation, "verify_capabilities", None)
-        capabilities = verify(account.account_id) if callable(verify) else account.capabilities
-        from social.accounts.models import SocialProviderCapabilities
-        if not isinstance(capabilities, SocialProviderCapabilities):
-            capabilities = account.capabilities
         if account.status in {"EXPIRED", "REVOKED", "BLOCKED"}:
             return self.save(replace(account, blocked_reason=account.status, updated_at=_utcnow()))
-        verified = replace(
-            account,
-            status="VERIFIED",
-            capabilities=capabilities,
-            last_verified_at=_utcnow(),
-            updated_at=_utcnow(),
-            blocked_reason=None,
-        )
+        if account.status == "AUTHENTICATED":
+            account = self.save(transition_account(account, "VERIFYING"))
+        elif account.status not in {"VERIFYING", "VERIFIED", "ENABLED", "DEGRADED"}:
+            raise RuntimeError(f"{account.status} accounts cannot be verified")
+        verify = getattr(implementation, "verify_capabilities", None)
+        try:
+            capabilities = verify(account.account_id) if callable(verify) else account.capabilities
+        except Exception as exc:
+            blocked = transition_account(account, "BLOCKED", blocked_reason=str(exc), capabilities=account.capabilities)
+            return self.save(blocked)
+        if not isinstance(capabilities, SocialProviderCapabilities):
+            capabilities = account.capabilities
+        publish = capabilities.records.get("publish") or capabilities.records.get("handoff")
+        listing = capabilities.records.get("listing")
+        usable = bool((publish and publish.allowed) or (listing and listing.allowed) or capabilities.verified("handoff"))
+        if not usable:
+            blocked = transition_account(
+                account,
+                "BLOCKED" if account.status == "VERIFYING" else account.status,
+                blocked_reason="capability verification failed",
+                capabilities=capabilities,
+            ) if account.status == "VERIFYING" else replace(account, capabilities=capabilities, blocked_reason="capability verification failed")
+            if account.status == "VERIFYING":
+                blocked = self.save(transition_account(account, "AUTHENTICATED", blocked_reason="capability verification failed", capabilities=capabilities))
+                return blocked
+            return self.save(replace(account, capabilities=capabilities, blocked_reason="capability verification failed"))
+        if account.status == "VERIFYING":
+            verified = transition_account(
+                account,
+                "VERIFIED",
+                capabilities=capabilities,
+                last_verified_at=_utcnow(),
+                blocked_reason=None,
+            )
+        else:
+            verified = replace(account, capabilities=capabilities, last_verified_at=_utcnow(), blocked_reason=None)
+            if account.status not in {"VERIFIED", "ENABLED"}:
+                verified = replace(verified, status="VERIFIED")
         return self.save(verified)
 
     def enable_account(self, account_id: str) -> SocialAccount:
@@ -96,6 +125,15 @@ class SocialAccountManager:
             refresh(account)
         except Exception as exc:
             return self.save(replace(account, status="EXPIRED", updated_at=_utcnow(), blocked_reason=str(exc)))
+        if account.status in {"ENABLED", "VERIFIED", "DEGRADED"}:
+            account = self.save(replace(self.get_account(account_id), status="VERIFYING" if self.get_account(account_id).status != "VERIFYING" else self.get_account(account_id).status))
+        current = self.get_account(account_id)
+        if current.status in {"ENABLED", "VERIFIED", "DEGRADED", "AUTHENTICATED"}:
+            if current.status != "VERIFYING" and current.status in {"ENABLED", "VERIFIED", "DEGRADED"}:
+                try:
+                    current = self.save(transition_account(replace(current, status="VERIFIED") if current.status == "ENABLED" else current, "VERIFYING") if current.status == "VERIFIED" else current)
+                except Exception:
+                    pass
         return self.verify_account(account_id, adapter=implementation)
 
     def disconnect_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
@@ -111,11 +149,65 @@ class SocialAccountManager:
                 pass
         return self.save(replace(account, status="REVOKED", credential_ref="", updated_at=_utcnow()))
 
-    def select_verified(self, platform: str) -> SocialAccount:
-        usable = [item for item in self.list_accounts(platform=platform) if item.status == "ENABLED"]
+    def select_enabled(
+        self,
+        platform: str,
+        *,
+        account_id: str | None = None,
+        provider: str | None = None,
+        region: str | None = None,
+        capability: str = "publish",
+    ) -> SocialAccount:
+        if account_id:
+            account = self.get_account(account_id)
+            if account.status != "ENABLED":
+                raise RuntimeError(f"account {account_id} is not ENABLED")
+            if account.platform != platform and account.provider != platform:
+                raise RuntimeError(f"account {account_id} is not on platform={platform}")
+            return self._require_healthy(account, capability)
+        usable = []
+        for item in self.list_accounts(platform=platform, provider=provider, region=region):
+            if item.status != "ENABLED":
+                continue
+            if not self._credential_healthy(item):
+                continue
+            if capability and not item.capabilities.verified(capability) and not item.capabilities.verified("handoff"):
+                continue
+            usable.append(item)
         if not usable:
             raise RuntimeError(f"no verified enabled account for platform={platform}")
+        if len(usable) > 1:
+            raise RuntimeError(f"multiple ENABLED accounts for platform={platform}; pass explicit account_id")
         return usable[0]
+
+    def select_verified(self, platform: str, *, account_id: str | None = None) -> SocialAccount:
+        return self.select_enabled(platform, account_id=account_id)
+
+    def _credential_healthy(self, account: SocialAccount) -> bool:
+        if account.capabilities.verified("handoff"):
+            return True
+        if not account.credential_ref:
+            return False
+        record = getattr(self.secrets, "get_record", None)
+        payload = record(account.credential_ref) if callable(record) else self.secrets.get(account.credential_ref)
+        if payload is None:
+            return False
+        token = getattr(payload, "access_token", None)
+        if token is None and isinstance(payload, dict):
+            token = payload.get("access_token") or payload.get("token")
+        if not token:
+            return False
+        expired = getattr(payload, "expired", None)
+        if callable(expired) and expired():
+            return False
+        return True
+
+    def _require_healthy(self, account: SocialAccount, capability: str) -> SocialAccount:
+        if not self._credential_healthy(account):
+            raise RuntimeError(f"account {account.account_id} credential is unusable")
+        if capability and not account.capabilities.verified(capability) and not account.capabilities.verified("handoff"):
+            raise RuntimeError(f"account {account.account_id} capability {capability} is unverified")
+        return account
 
     def doctor_rows(self) -> list[dict[str, str]]:
         rows = []
@@ -127,6 +219,8 @@ class SocialAccountManager:
                 action = account.blocked_reason or "BLOCKED"
             elif account.status == "VERIFIED":
                 action = "ENABLE"
+            elif account.status == "VERIFYING":
+                action = "VERIFY"
             elif account.status != "ENABLED":
                 action = "VERIFY"
             rows.append({

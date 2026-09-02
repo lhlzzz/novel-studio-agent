@@ -24,6 +24,8 @@ def test_mock_package_to_memory_loop():
         campaign_id="camp-e2e",
     )
     variant = build_variant(package, account_id="x-test", platform="x")
+    from dataclasses import replace as _replace
+    variant = _replace(variant, metadata={**(variant.metadata or {}), "approval": "approved"})
     job = DistributionJob(
         "job-e2e",
         package.package_id,
@@ -33,11 +35,7 @@ def test_mock_package_to_memory_loop():
         request_id="req-e2e",
         campaign_id=package.campaign_id,
     )
-    failures = check_distribution_job(
-        job, adapter.account, content_valid=True, evidence_valid=True, account_valid=True,
-        media_valid=True, approval_valid=True, provider_verified=True, integration_verified=True,
-        capability_verified=True, idempotency_valid=True, media_uploaded=True, payload_valid=True,
-    )
+    failures = check_distribution_job(job, adapter.account, adapter=adapter)
     assert failures == []
     publication = DistributionService(adapter, store=store).execute(job, gate_check=lambda item: True)
     assert publication.request_id == "req-e2e"

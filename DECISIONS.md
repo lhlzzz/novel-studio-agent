@@ -1,21 +1,17 @@
-# Meiti V4.4 Decisions
+# Meiti Decisions
 
 - **2026-08-26:** Platform is an integration, not an agent or workspace.
 - **2026-08-28:** ProviderResolver is the only distribution routing mechanism.
 - **2026-08-29:** ContentPackage, Campaign, Publication, MediaUploadResult,
   and DistributionAttempt are first-class.
 - **2026-09-01:** CreativeWorkflow is the canonical media production abstraction.
-  Isolated generation scripts are deleted rather than wrapped.
-- **2026-09-01:** Lechuang is a generation provider. The official HTTP contract
-  was not extractable, so live methods raise ProviderBlocked/UnsupportedCapability.
-  Mock generation is the only CI path.
-- **2026-09-01:** Providers bind per workflow node, never as a workflow-wide field.
-- **2026-09-01:** Default people/lifestyle path is image -> image QA -> image-to-video.
-- **2026-09-01:** Generation assets are immutable and content-addressed by sha256.
-- **2026-09-01:** Judge returns score/decision/reason and never publishes.
-- **2026-09-01:** Creative runtime is durable: PostgreSQL CreativeRun/Task, worker lease, resume, replay from workflow snapshot.
-- **2026-09-01:** V4.3 production activation does not guess the Lechuang HTTP contract.
-- **2026-09-01:** AI Gateway Vision Provider is independent of Lechuang.
-- **2026-09-01:** Research artifacts are first-class and never written as ContentPackage.
-- **2026-09-02:** Meiti owns native social accounts. Third-party social schedulers
-  are not part of the runtime. Credentials are stored by credential_ref only.
+- **2026-09-01:** Lechuang is a generation provider. Live methods stay BLOCKED
+  until the official HTTP contract is extracted.
+- **2026-09-02:** Meiti owns native social accounts. Credentials are stored by
+  credential_ref only.
+- **2026-09-02 V4.4.2:** Production social composition root is
+  `SocialRuntime.production()`. Scope is 小红书 / 抖音 / 快手 / 闲鱼.
+  XHS is handoff-only. Xianyu is a commerce listing surface that requires
+  Jushita. Publish Gate reads runtime truth; callers cannot inject
+  verified=true. Scheduler claims durable jobs and publishes; it never calls
+  adapter.schedule().

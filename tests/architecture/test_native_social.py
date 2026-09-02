@@ -88,14 +88,10 @@ def test_publish_requires_verified_account():
     from integrations.contracts.distribution import ContentVariant, DistributionJob
     from social.accounts.models import SocialAccount
     account = SocialAccount("i", "x", "x", status="AUTHENTICATED")
-    job = DistributionJob("j", "p", "i", ContentVariant("i", "hello"))
-    failures = check_distribution_job(
-        job, account, content_valid=True, evidence_valid=True, account_valid=True,
-        media_valid=True, approval_valid=True, provider_verified=True, capability_verified=True,
-        idempotency_valid=True, media_uploaded=True, payload_valid=True,
-    )
+    job = DistributionJob("j", "p", "i", ContentVariant("i", "hello"), idempotency_key="k")
+    failures = check_distribution_job(job, account)
     assert "account not verified" in failures
-    assert "account disabled" in failures
+    assert "account disabled" in failures or "account not enabled" in failures
 
 
 def test_no_creative_to_social_direct_call():

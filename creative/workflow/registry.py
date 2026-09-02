@@ -76,7 +76,18 @@ def register_workflow(workflow: CreativeWorkflow) -> CreativeWorkflow:
     return workflow
 
 
+WORKFLOW_ALIASES = {
+    "creator-video-v1": "creator-video-default-v1",
+    "image-to-video-v1": "creator-image-to-video-v1",
+    "lifestyle-short-video-v1": "creator-lifestyle-v1",
+    "product-video-v1": "product-optional-content-v1",
+    "creator-image-v1": "creator-video-default-v1",
+    "product-image-v1": "product-optional-content-v1",
+}
+
+
 def resolve_workflow(workflow_id: str, version: str | None = None) -> CreativeWorkflow:
+    workflow_id = WORKFLOW_ALIASES.get(workflow_id, workflow_id)
     load_templates()
     versions = _REGISTRY.get(workflow_id)
     if not versions:

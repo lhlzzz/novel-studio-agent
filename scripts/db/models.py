@@ -439,7 +439,7 @@ class SocialAccountRecord(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED')",
+            "status IN ('PENDING','AUTHENTICATING','AUTHENTICATED','VERIFYING','VERIFIED','ENABLED','DEGRADED','EXPIRED','REVOKED','BLOCKED')",
             name="ck_meiti_social_account_status",
         ),
         Index("idx_meiti_social_accounts_provider", "provider"),
@@ -511,12 +511,16 @@ class DistributionJobRecord(Base):
     creator_id = Column(String(255))
     campaign_id = Column(String(255))
     request_id = Column(String(255), nullable=False, default="")
+    account_id = Column(String(255), nullable=False, default="")
+    lease_until = Column(DateTime)
+    worker_id = Column(String(255))
+    claimed_at = Column(DateTime)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('DRAFT','VALIDATING','BLOCKED','READY','SUBMITTING','SUBMITTED','SCHEDULED','PUBLISHING','PUBLISHED','FAILED','RETRYING','CANCELLED','UNKNOWN','FAILED_PERMANENT')",
+            "status IN ('DRAFT','VALIDATING','BLOCKED','READY','SUBMITTING','SUBMITTED','SCHEDULED','PUBLISHING','PUBLISHED','FAILED','RETRYING','CANCELLED','UNKNOWN','FAILED_PERMANENT','RECONCILING')",
             name="ck_meiti_distribution_job_status",
         ),
         Index("idx_meiti_distribution_jobs_status", "status"),
@@ -567,6 +571,7 @@ class PublicationRecord(Base):
     request_id = Column(String(255), nullable=False, default="")
     platform = Column(String(120), nullable=False, default="")
     account_id = Column(String(255), nullable=False, default="")
+    provider_object_type = Column(String(40), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -599,6 +604,31 @@ class MediaUploadRecord(Base):
         Index("idx_meiti_media_uploads_status", "status"),
     )
 
+
+
+
+class XianyuListingRecord(Base):
+    """Commerce listing identity. Not a social post."""
+
+    __tablename__ = "xianyu_listings"
+
+    listing_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), nullable=False)
+    provider_item_id = Column(String(255), nullable=False, default="")
+    title = Column(Text, nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    price = Column(String(40), nullable=False, default="")
+    category_id = Column(String(255), nullable=False, default="")
+    media_assets = Column(JSONB, nullable=False, default=list)
+    status = Column(String(40), nullable=False, default="DRAFT")
+    provider_response = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_xianyu_listings_account", "account_id"),
+        Index("idx_meiti_xianyu_listings_status", "status"),
+    )
 
 class MetricSnapshotRecord(Base):
     """Append-only metric observation; collection never overwrites history."""

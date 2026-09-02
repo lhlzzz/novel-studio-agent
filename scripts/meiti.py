@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Meiti CLI: social accounts, verify, disconnect, publish."""
+"""Meiti CLI: CN social accounts, connect, verify, enable, publish."""
 
 from __future__ import annotations
 
@@ -12,20 +12,37 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def _manager():
-    from social.accounts.manager import SocialAccountManager
+def _runtime(*, testing: bool = False):
+    from social.runtime.container import SocialRuntime
+    if testing:
+        return SocialRuntime.testing()
+    return SocialRuntime.production()
 
-    return SocialAccountManager()
+
+def _manager():
+    return _runtime().manager
 
 
 def cmd_accounts(_args: argparse.Namespace) -> int:
-    manager = _manager()
-    rows = manager.doctor_rows()
+    rows = _manager().doctor_rows()
     if not rows:
         print("no social accounts")
         return 0
     for row in rows:
         print(f"{row['label']}: {row['status']} ACTION: {row['action']}")
+    return 0
+
+
+def cmd_connect(args: argparse.Namespace) -> int:
+    runtime = _runtime()
+    authorization = {}
+    if args.code:
+        authorization["code"] = args.code
+    if args.username:
+        authorization["username"] = args.username
+        authorization["account_id"] = args.account_id or f"{args.platform}:{args.username}"
+    account = runtime.manager.connect_account(args.platform, authorization=authorization or None)
+    print(f"{account.label()}: {account.status} id={account.account_id}")
     return 0
 
 
@@ -41,6 +58,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_enable(args: argparse.Namespace) -> int:
+    account = _manager().enable_account(args.account_id)
+    print(f"{account.label()}: {account.status}")
+    return 0
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    account = _manager().refresh_account(args.account_id)
+    print(f"{account.label()}: {account.status}")
+    return 0
+
+
 def cmd_disconnect(args: argparse.Namespace) -> int:
     account = _manager().disconnect_account(args.account_id)
     print(f"{account.label()}: {account.status}")
@@ -48,33 +77,36 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
-    from agents.distribution_agent import DistributionAgent
+    runtime = _runtime()
     from content.models import ContentPackage
-
-    agent = DistributionAgent()
-    package = ContentPackage(args.package_id or "cli-package", args.title or "Meiti post", args.body)
-    job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job")
-    publication = agent.execute(
-        job,
-        content_valid=True,
-        evidence_valid=True,
-        account_valid=True,
-        media_valid=True,
-        approval_valid=True,
-        provider_verified=True,
-        account_verified=True,
-        capability_verified=True,
-        idempotency_valid=True,
-        media_uploaded=True,
-        payload_valid=True,
+    package = ContentPackage(
+        args.package_id or "cli-package",
+        args.title or "Meiti post",
+        args.body or "",
+        media_assets=tuple(args.media or ()),
+        commerce_intent=args.commerce_intent or "none",
+        metadata={"approval": "approved", "price": args.price, "category_id": args.category_id},
     )
-    print(json.dumps({
+    agent = runtime.agent(provider_name=args.platform)
+    job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job", account_id=args.account_id)
+    publication = agent.execute(job)
+    payload = {
         "publication_id": publication.publication_id,
         "provider_post_id": publication.provider_post_id,
         "status": publication.status,
         "platform": publication.platform,
-    }))
+        "provider_object_type": publication.provider_object_type,
+    }
+    if publication.status == "HANDOFF_REQUIRED":
+        payload["result"] = "HANDOFF_REQUIRED"
+        print("HANDOFF_REQUIRED")
+    print(json.dumps(payload))
     return 0
+
+
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    from scripts.social_doctor import main
+    return main()
 
 
 def main() -> int:
@@ -83,19 +115,37 @@ def main() -> int:
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)
+    connect = social_sub.add_parser("connect")
+    connect.add_argument("platform")
+    connect.add_argument("--code")
+    connect.add_argument("--username")
+    connect.add_argument("--account-id")
+    connect.set_defaults(func=cmd_connect)
     verify = social_sub.add_parser("verify")
     verify.add_argument("account_id", nargs="?")
     verify.set_defaults(func=cmd_verify)
+    enable = social_sub.add_parser("enable")
+    enable.add_argument("account_id")
+    enable.set_defaults(func=cmd_enable)
+    refresh = social_sub.add_parser("refresh")
+    refresh.add_argument("account_id")
+    refresh.set_defaults(func=cmd_refresh)
     disconnect = social_sub.add_parser("disconnect")
     disconnect.add_argument("account_id")
     disconnect.set_defaults(func=cmd_disconnect)
     publish = social_sub.add_parser("publish")
-    publish.add_argument("--platform", default="x")
-    publish.add_argument("--body", default="MEITI SOCIAL PUBLISH")
+    publish.add_argument("--platform", required=True)
+    publish.add_argument("--body", default="")
     publish.add_argument("--title", default="")
     publish.add_argument("--package-id")
     publish.add_argument("--job-id")
+    publish.add_argument("--account-id")
+    publish.add_argument("--media", nargs="*")
+    publish.add_argument("--commerce-intent", default="none")
+    publish.add_argument("--price")
+    publish.add_argument("--category-id")
     publish.set_defaults(func=cmd_publish)
+    social_sub.add_parser("doctor").set_defaults(func=cmd_doctor)
     args = parser.parse_args()
     return args.func(args)
 

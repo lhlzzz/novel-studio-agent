@@ -40,6 +40,7 @@ class JobStore(Protocol):
     def save_account(self, account: Any) -> Any: ...
     def get_account(self, account_id: str) -> Any | None: ...
     def list_accounts(self) -> list[Any]: ...
+    def claim_due_job(self, *, worker_id: str, now=None, lease_seconds: int = 60): ...
 
 
 @dataclass
@@ -122,7 +123,56 @@ class InMemoryStore:
         return list(self.accounts.values())
 
 
+
+    def claim_due_job(self, *, worker_id: str, now=None, lease_seconds: int = 60):
+        from dataclasses import replace
+        from datetime import datetime, timedelta, timezone
+
+        now = now or datetime.now(timezone.utc)
+        now_iso = now.isoformat() if hasattr(now, "isoformat") else str(now)
+        lease_until = (now + timedelta(seconds=lease_seconds)).isoformat() if hasattr(now, "__add__") else now_iso
+        due = []
+        for job in self.jobs.values():
+            if job.status not in {"SCHEDULED", "READY"}:
+                continue
+            if job.scheduled_at and str(job.scheduled_at) > now_iso:
+                continue
+            if job.lease_until and str(job.lease_until) > now_iso and job.worker_id not in {None, "", worker_id}:
+                continue
+            due.append(job)
+        if not due:
+            return None
+        job = sorted(due, key=lambda item: (item.scheduled_at or "", item.job_id))[0]
+        claimed = replace(job, worker_id=worker_id, claimed_at=now_iso, lease_until=lease_until)
+        if claimed.status == "SCHEDULED":
+            claimed = replace(claimed, status="READY")
+        self.jobs[claimed.job_id] = claimed
+        return claimed
+
+    def save_listing(self, listing):
+        listings = getattr(self, "listings", None)
+        if listings is None:
+            self.listings = {}
+            listings = self.listings
+        listings[listing.listing_id] = listing
+        return listing
+
+    def get_listing(self, listing_id: str):
+        return getattr(self, "listings", {}).get(listing_id)
+
+    def save_derived_asset(self, record):
+        self.media[f"derived:{record.derived_asset_id}"] = record
+        return record
+
+    def get_derived_asset(self, source_asset_id: str, target_platform: str, transformation: str):
+        for value in self.media.values():
+            if getattr(value, "source_asset_id", None) == source_asset_id and getattr(value, "target_platform", None) == target_platform and getattr(value, "transformation", None) == transformation:
+                return value
+        return None
+
+
 class DatabaseStore:
+
     """Persist distribution records in their first-class PostgreSQL tables."""
 
     def save_content_package(self, package: ContentPackage) -> ContentPackage:
@@ -230,7 +280,7 @@ class DatabaseStore:
                 "display_name": account.display_name,
                 "avatar_url": account.avatar_url,
                 "status": account.status,
-                "capabilities": account.capabilities.claimed() if hasattr(account.capabilities, "claimed") else {},
+                "capabilities": account.capabilities.serialized() if hasattr(account.capabilities, "serialized") else {},
                 "credential_ref": account.credential_ref,
                 "provider_account_id": account.provider_account_id,
                 "last_verified_at": _as_datetime(account.last_verified_at),
@@ -263,7 +313,7 @@ class DatabaseStore:
                 display_name=row.display_name,
                 avatar_url=row.avatar_url,
                 status=row.status,
-                capabilities=SocialProviderCapabilities.from_claimed(row.capabilities or {}),
+                capabilities=SocialProviderCapabilities.from_serialized(row.capabilities or {}),
                 credential_ref=row.credential_ref or "",
                 provider_account_id=row.provider_account_id or "",
                 last_verified_at=row.last_verified_at.isoformat() if row.last_verified_at else None,
@@ -280,6 +330,87 @@ class DatabaseStore:
         with SessionLocal() as session:
             ids = [row.account_id for row in session.query(SocialAccountRecord).all()]
         return [account for account_id in ids if (account := self.get_account(account_id)) is not None]
+
+    def save_listing(self, listing):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import XianyuListingRecord
+
+        listing_id = getattr(listing, "listing_id")
+        media = list(getattr(listing, "media_assets", None) or getattr(listing, "images", ()) or [])
+        fields = {
+            "account_id": getattr(listing, "account_id"),
+            "provider_item_id": getattr(listing, "provider_item_id", "") or "",
+            "title": getattr(listing, "title", "") or "",
+            "description": getattr(listing, "description", "") or "",
+            "price": str(getattr(listing, "price", "") or ""),
+            "category_id": getattr(listing, "category_id", "") or "",
+            "media_assets": media,
+            "status": getattr(listing, "status", "DRAFT") or "DRAFT",
+            "provider_response": dict(getattr(listing, "provider_response", None) or {}),
+        }
+        with SessionLocal() as session:
+            row = session.get(XianyuListingRecord, listing_id)
+            if row is None:
+                session.add(XianyuListingRecord(listing_id=listing_id, **fields))
+            else:
+                for key, value in fields.items():
+                    setattr(row, key, value)
+            session.commit()
+        return listing
+
+    def get_listing(self, listing_id: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import XianyuListingRecord
+        from commerce.xianyu import XianyuListingPackage
+
+        with SessionLocal() as session:
+            row = session.get(XianyuListingRecord, listing_id)
+            if row is None:
+                return None
+            return XianyuListingPackage(
+                listing_id=row.listing_id,
+                account_id=row.account_id,
+                title=row.title,
+                description=row.description,
+                price=row.price,
+                category_id=row.category_id,
+                images=tuple(row.media_assets or ()),
+                metadata={
+                    "provider_item_id": row.provider_item_id,
+                    "status": row.status,
+                    "provider_response": row.provider_response,
+                },
+            )
+
+    def save_derived_asset(self, record):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import DerivedAssetRecord
+
+        with SessionLocal() as session:
+            row = session.get(DerivedAssetRecord, record.derived_asset_id)
+            fields = {
+                "source_asset_id": record.source_asset_id,
+                "target_platform": record.target_platform,
+                "transformation": getattr(record, "transformation", "") or "",
+            }
+            if row is None:
+                session.add(DerivedAssetRecord(derived_asset_id=record.derived_asset_id, **fields))
+            else:
+                for key, value in fields.items():
+                    setattr(row, key, value)
+            session.commit()
+        return record
+
+    def get_derived_asset(self, source_asset_id: str, target_platform: str, transformation: str):
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import DerivedAssetRecord
+
+        with SessionLocal() as session:
+            return (
+                session.query(DerivedAssetRecord)
+                .filter_by(source_asset_id=source_asset_id, target_platform=target_platform, transformation=transformation)
+                .one_or_none()
+            )
 
     def save_job(self, job: DistributionJob) -> DistributionJob:
         from scripts.db.engine import SessionLocal
@@ -306,6 +437,10 @@ class DatabaseStore:
                 "creator_id": job.creator_id,
                 "campaign_id": job.campaign_id,
                 "request_id": job.request_id,
+                "account_id": job.account_id,
+                "lease_until": _as_datetime(job.lease_until),
+                "worker_id": job.worker_id,
+                "claimed_at": _as_datetime(job.claimed_at),
             }
             if row is None:
                 row = DistributionJobRecord(job_id=job.job_id, **fields)
@@ -353,6 +488,7 @@ class DatabaseStore:
                 "published_at": publication.published_at,
                 "content_package_id": publication.content_package_id,
                 "request_id": publication.request_id,
+                "provider_object_type": getattr(publication, "provider_object_type", "") or "",
             }
             if row is None:
                 row = PublicationRecord(publication_id=publication.publication_id, **fields)
@@ -460,6 +596,38 @@ class DatabaseStore:
             rows = session.query(DistributionAttemptRecord).filter_by(distribution_job_id=job_id).all()
             return sorted((_attempt_from_record(row) for row in rows), key=lambda item: item.attempt_no)
 
+
+    def claim_due_job(self, *, worker_id: str, now=None, lease_seconds: int = 60):
+        from dataclasses import replace
+        from datetime import datetime, timedelta, timezone
+        from scripts.db.engine import SessionLocal
+        from scripts.db.models import DistributionJobRecord
+
+        now = now or datetime.now(timezone.utc)
+        naive = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
+        lease_until = naive + timedelta(seconds=lease_seconds)
+        with SessionLocal() as session:
+            query = session.query(DistributionJobRecord).filter(DistributionJobRecord.status.in_(("SCHEDULED", "READY")))
+            rows = query.order_by(DistributionJobRecord.scheduled_at.nullsfirst(), DistributionJobRecord.job_id).all()
+            chosen = None
+            for row in rows:
+                if row.scheduled_at and row.scheduled_at > naive:
+                    continue
+                if row.lease_until and row.lease_until > naive and row.worker_id not in {None, "", worker_id}:
+                    continue
+                chosen = row
+                break
+            if chosen is None:
+                return None
+            chosen.worker_id = worker_id
+            chosen.claimed_at = naive
+            chosen.lease_until = lease_until
+            if chosen.status == "SCHEDULED":
+                chosen.status = "READY"
+            session.commit()
+            session.refresh(chosen)
+            return _job_from_record(chosen)
+
     @staticmethod
     def _write(record_key: str, record_type: str, payload: dict[str, Any]) -> None:
         from scripts.db.engine import SessionLocal
@@ -526,6 +694,9 @@ def _job_from_payload(payload: dict[str, Any]) -> DistributionJob:
         creator_id=payload.get("creator_id"),
         campaign_id=payload.get("campaign_id"),
         request_id=str(payload.get("request_id") or ""),
+        lease_until=payload.get("lease_until"),
+        worker_id=payload.get("worker_id"),
+        claimed_at=payload.get("claimed_at"),
     )
 
 
@@ -548,6 +719,9 @@ def _job_from_record(row: Any) -> DistributionJob:
         "creator_id": row.creator_id,
         "campaign_id": row.campaign_id,
         "request_id": row.request_id,
+        "lease_until": row.lease_until.isoformat() if getattr(row, "lease_until", None) else None,
+        "worker_id": getattr(row, "worker_id", None),
+        "claimed_at": row.claimed_at.isoformat() if getattr(row, "claimed_at", None) else None,
     })
 
 
@@ -573,4 +747,5 @@ def _publication_from_record(row: Any) -> Publication:
         request_id=row.request_id,
         platform=getattr(row, "platform", "") or "",
         created_at=row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+        provider_object_type=getattr(row, "provider_object_type", "") or "",
     )

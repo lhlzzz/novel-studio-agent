@@ -6,7 +6,7 @@ from typing import Any
 
 from analytics.normalizers.metrics import normalize_metrics
 from analytics.persistence import persist_metric_snapshot
-from integrations.persistence import InMemoryStore, JobStore
+from integrations.persistence import JobStore
 
 WINDOWS = ("5min", "1h", "6h", "24h", "72h", "7d", "30d")
 
@@ -14,7 +14,10 @@ WINDOWS = ("5min", "1h", "6h", "24h", "72h", "7d", "30d")
 def run_once(*, adapter: Any, store: JobStore | None = None, window: str = "1h") -> list[dict[str, Any]]:
     if window not in WINDOWS:
         raise ValueError(window)
-    store = store or InMemoryStore()
+    if store is None:
+        from social.runtime.container import SocialRuntime
+
+        store = SocialRuntime.production().store
     results = []
     for job in store.list_jobs(("SUBMITTED", "SCHEDULED", "PUBLISHED", "PUBLISHING")):
         publication = store.get_publication(job.job_id)

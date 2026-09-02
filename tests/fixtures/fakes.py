@@ -7,6 +7,7 @@ from integrations.contracts.distribution import (
     ProviderHealth,
 )
 from social.accounts.models import SocialAccount, SocialProviderCapabilities
+from social.auth.credentials import CredentialRecord
 
 
 def _caps(**flags):
@@ -27,10 +28,36 @@ def _caps(**flags):
     return SocialProviderCapabilities.from_claimed(claimed, verified=True, method="runtime_test")
 
 
+class _MemSecrets:
+    def __init__(self):
+        self.data = {}
+
+    def put(self, payload, ref=None):
+        record = payload if hasattr(payload, "to_payload") else CredentialRecord.from_payload(payload, ref=ref or "secret:fake")
+        ref = ref or record.credential_ref or "secret:fake"
+        self.data[ref] = record
+        return ref
+
+    def get(self, ref):
+        record = self.data.get(ref)
+        return record.to_payload() if record is not None else {}
+
+    def get_record(self, ref):
+        return self.data.get(ref)
+
+    def delete(self, ref):
+        self.data.pop(ref, None)
+
+    def exists(self, ref):
+        return ref in self.data
+
+
 class FakeAdapter:
     provider = "x"
 
     def __init__(self):
+        self.secrets = _MemSecrets()
+        ref = self.secrets.put({"access_token": "fake-token", "provider": "x", "provider_account_id": "acct"})
         self.account = SocialAccount(
             account_id="i",
             provider="x",
@@ -40,6 +67,8 @@ class FakeAdapter:
             status="ENABLED",
             capabilities=_caps(),
             last_verified_at="now",
+            credential_ref=ref,
+            provider_account_id="acct",
         )
         self.published = False
         self.posts = {}
