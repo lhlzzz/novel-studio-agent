@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Tear down Meta, Google, or LinkedIn ads for hooks, offers, and CTAs."
   openclaw:
     requires:
       env:

@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Evaluate creator or brand audience demographics and content fit."
   openclaw:
     requires:
       env:

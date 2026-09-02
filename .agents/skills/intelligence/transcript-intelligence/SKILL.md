@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Summarize and extract claims from social video transcripts."
   openclaw:
     requires:
       env:

@@ -13,6 +13,7 @@ description: >-
 allowed-tools: Bash, Read, Write, WebFetch
 homepage: https://scrapecreators.com
 metadata:
+  short-description: "Scrape public social data via ScrapeCreators REST API."
   openclaw:
     emoji: "🔍"
     requires:

@@ -2,6 +2,7 @@
 name: hook-writer-sms
 description: "When the user wants help writing opening lines, hooks, first sentences, video hooks, thumbnails titles, or pin titles that grab attention. Also use when the user mentions 'hook,' 'opening line,' 'first line,' 'scroll stopper,' 'attention grabber,' 'headline,' 'video hook,' 'on-screen hook,' 'YouTube title,' 'thumbnail text,' 'pin title,' 'how to start my post,' or 'nobody reads past my first line.' Covers text-first platforms (LinkedIn, Twitter/X, Threads, Bluesky) and visual-first platforms (Facebook, Instagram, TikTok, Pinterest, YouTube). Can be used standalone or invoked by other creation skills. For writing full posts, see post-writer-sms. For threads, see thread-writer-sms."
 metadata:
+  short-description: "Write hooks, opening lines, video hooks, and thumbnail titles."
   version: 1.1.0
 ---
 

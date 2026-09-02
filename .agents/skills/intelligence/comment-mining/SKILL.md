@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Mine comments for customer language, objections, and buying intent."
   openclaw:
     requires:
       env:

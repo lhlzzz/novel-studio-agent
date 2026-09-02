@@ -1,6 +1,8 @@
 ---
 name: story
 description: Long-form and short-form story writing and analysis capabilities for MeitiAgent.
+metadata:
+  short-description: "Long-form and short-form story writing for Meiti."
 ---
 
 # Story Writing Skills for MeitiAgent

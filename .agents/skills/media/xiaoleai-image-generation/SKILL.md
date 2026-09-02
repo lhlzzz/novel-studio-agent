@@ -1,6 +1,8 @@
 ---
 name: xiaoleai-image-generation
 description: Generate raster images through the XiaoleAI OpenAI-compatible image API and save returned b64_json data as local image files. Use when the user asks to create or regenerate an image with gpt-image-2 or supported Gemini image models, especially when they provide a XiaoleAI API key or request this relay endpoint.
+metadata:
+  short-description: "Generate images via XiaoleAI gpt-image-2 or Gemini image APIs."
 ---
 
 # Shared Image Generation

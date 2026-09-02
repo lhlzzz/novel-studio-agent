@@ -1,6 +1,8 @@
 ---
 name: marketing
 description: Shared marketing and social media capabilities for MeitiAgent platform agents.
+metadata:
+  short-description: "Shared Meiti marketing and social media skill router."
 ---
 
 # Marketing Skills for MeitiAgent

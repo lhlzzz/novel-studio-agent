@@ -2,6 +2,7 @@
 name: caption-writer-sms
 description: "When the user wants to write a caption for a visual-first social media post on Facebook, Instagram, TikTok, Pinterest, or YouTube. Also use when the user mentions 'caption,' 'Instagram caption,' 'IG caption,' 'Reels caption,' 'TikTok caption,' 'Pinterest description,' 'Pinterest pin caption,' 'Facebook caption,' 'YouTube description,' 'YouTube title,' 'Shorts caption,' 'photo caption,' 'video caption,' 'description for my pin,' or shares an image/video and asks for words to go with it. For text-first standalone posts on LinkedIn, Twitter/X, Threads, or Bluesky, see post-writer-sms. For multi-slide carousels, see carousel-writer-sms. For opening lines, see hook-writer-sms."
 metadata:
+  short-description: "Write captions for Instagram, TikTok, Facebook, Pinterest, or YouTube."
   version: 1.1.0
 ---
 

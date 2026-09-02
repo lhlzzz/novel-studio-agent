@@ -1,0 +1,60 @@
+# Meiti project Codex config.
+# Global ~/.agents/skills includes novel-writing and game-UI workflows that
+# are not part of Meiti. Disable them here so skill descriptions stay intact.
+
+[[skills.config]]
+path = "/root/.agents/skills/game-ui-design/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/last30days/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-cover/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-deslop/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-import/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-long-analyze/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-long-scan/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-long-write/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-review/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-setup/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-short-analyze/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-short-scan/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/root/.agents/skills/story-short-write/SKILL.md"
+enabled = false
+

@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Find overperforming posts versus a creator or competitor baseline."
   openclaw:
     requires:
       env:

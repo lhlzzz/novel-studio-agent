@@ -2,6 +2,7 @@
 name: platform-strategy-sms
 description: "When the user wants platform-specific tactical guidance for LinkedIn, Twitter/X, Threads, or Bluesky. Also use when the user mentions 'LinkedIn strategy,' 'Twitter strategy,' 'Threads strategy,' 'Bluesky strategy,' 'algorithm,' 'what works on LinkedIn,' 'cross-posting,' 'platform differences,' 'adapt my content,' or 'which platform should I focus on.' For overall content strategy, see content-strategy-sms. For writing posts, see post-writer-sms."
 metadata:
+  short-description: "Platform tactics for LinkedIn, X, Threads, or Bluesky."
   version: 1.0.0
 ---
 

@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Find and score creators for outreach, UGC, or partnerships."
   openclaw:
     requires:
       env:

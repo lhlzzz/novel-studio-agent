@@ -2,6 +2,7 @@
 name: social-media-context-sms
 description: "When the user wants to set up or update their social media profile, voice, audience, content pillars, or platform preferences. Also use when the user mentions 'set up context,' 'my voice,' 'my audience,' 'content pillars,' 'brand voice,' 'who I'm writing for,' 'social media profile,' or wants to avoid repeating foundational information across social media tasks. Use this at the start of any new project before using other social media skills — it creates .agents/social-media-context-sms.md that all other skills reference."
 metadata:
+  short-description: "Set voice, audience, content pillars, and platform preferences."
   version: 1.0.0
 ---
 

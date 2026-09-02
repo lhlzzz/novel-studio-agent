@@ -9,6 +9,7 @@ license: MIT
 homepage: https://scrapecreators.com
 repository: https://github.com/ScrapeCreators/social-media-research-skills
 metadata:
+  short-description: "Analyze a creator account: positioning, pillars, hooks, and outliers."
   openclaw:
     requires:
       env:

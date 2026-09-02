@@ -2,6 +2,7 @@
 name: content-repurposer-sms
 description: "When the user wants to turn one piece of content into multiple formats or adapt content across text-first and visual-first platforms (LinkedIn, Twitter/X, Threads, Bluesky, Facebook, Instagram, TikTok, Pinterest, YouTube). Also use when the user mentions 'repurpose,' 'turn this into,' 'adapt this for,' 'cross-post,' 'reformat,' 'blog to social,' 'newsletter to posts,' 'video to posts,' 'YouTube to clips,' 'Reels from a podcast,' or 'get more from this content.' For writing original posts, see post-writer-sms. For threads, see thread-writer-sms. For carousels, see carousel-writer-sms. For visual-first captions, see caption-writer-sms."
 metadata:
+  short-description: "Turn one piece of content into posts across LinkedIn, X, TikTok, and more."
   version: 1.1.0
 ---
 
