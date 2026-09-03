@@ -50,7 +50,6 @@ class MeitiScheduler:
             manager=self.manager,
             adapter=self.adapter,
             secrets=getattr(self.manager, "secrets", None),
-            provider_name=job.provider or None,
         )
         existing = self.store.get_publication(job.job_id)
         if existing is not None:

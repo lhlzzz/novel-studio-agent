@@ -94,7 +94,6 @@ def _apply_policy(variant: ContentVariant, platform: str) -> ContentVariant:
     if policy.caption_limit and caption and len(caption) > policy.caption_limit:
         caption = caption[: policy.caption_limit]
     metadata = dict(variant.metadata or {})
-    metadata["platform"] = platform
     metadata["content_type"] = metadata.get("content_type") or _content_type(platform, variant)
     return replace(variant, title=title, body=body, caption=caption, metadata=metadata)
 

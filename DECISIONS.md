@@ -28,3 +28,11 @@
   are DRAFT/SUBMITTED/PUBLISHED/OFF_SHELF/FAILED/UNKNOWN. Doctor architecture
   and production gates are separate; production gate exits non-zero until
   real E2E evidence exists. Missing external credentials remain BLOCKED_EXTERNAL.
+
+- **2026-09-03 V4.5.1:** Production activation hardening. bootstrap-production is
+  read-only preflight and never writes credentials. Provider status/analytics
+  require account_id; adapters do not fall back to the first cached account.
+  Doctor probe status is not production readiness. Migration 0010 listing
+  remap is upgrade-safe and explicitly not strictly reversible. Production CI
+  injects GitHub secrets into process env and uses a runner-local
+  MEITI_SECRET_DIR path. Missing external credentials remain BLOCKED_EXTERNAL.

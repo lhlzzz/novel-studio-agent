@@ -52,7 +52,6 @@ class DistributionAgent:
         registry: dict[str, Integration] | None = None,
         store: JobStore | None = None,
         manager: SocialAccountManager | None = None,
-        provider_name: str | None = None,
         secrets: Any | None = None,
     ) -> None:
         if store is None:
@@ -60,7 +59,6 @@ class DistributionAgent:
         self.store = store
         self.registry = registry or {}
         self.adapter = adapter
-        self.provider_name = provider_name
         self.secrets = secrets
         if manager is None:
             raise ValueError("DistributionAgent requires SocialAccountManager from SocialRuntime")
@@ -98,9 +96,8 @@ class DistributionAgent:
         return adapter.list_integrations()
 
     def get_capabilities(self, account_id: str):
-        if not self.adapter and not self.provider_name:
-            raise RuntimeError("provider is required")
-        adapter = self.adapter or self._adapter_for(self.provider_name)
+        account = self.manager.get_account(account_id)
+        adapter = self.adapter or self._adapter_for(account.provider)
         return resolve_capability(account_id, "publish", adapter=adapter)
 
     def select_provider(self, platform: str) -> SocialAccount:
@@ -127,7 +124,7 @@ class DistributionAgent:
             raise RuntimeError(f"no active verified account for platform={platform}")
         try:
             capability = "handoff" if platform in {"xiaohongshu", "xhs"} else "publish"
-            return self.manager.select_enabled(platform, account_id=None, provider=self.provider_name, capability=capability)
+            return self.manager.select_enabled(platform, account_id=None, capability=capability)
         except Exception as exc:
             raise RuntimeError(f"provider is not runtime verified: no active verified account for platform={platform}") from exc
 
@@ -211,7 +208,14 @@ class DistributionAgent:
         if publication is None:
             return {"id": job_id, "status": "UNKNOWN"}
         adapter = self.adapter or self._adapter_for(publication.provider)
-        return adapter.get_status(publication.resolved_provider_post_id())
+        account = self.store.get_account(publication.account_id)
+        if account is not None and hasattr(adapter, "bind_account"):
+            adapter.bind_account(account)
+        return adapter.get_status(
+            publication.resolved_provider_post_id(),
+            account_id=publication.account_id,
+            provider_object_type=publication.provider_object_type or "",
+        )
 
     def cancel(self, job_id: str) -> DistributionJob:
         job = self.store.get_job(job_id)
@@ -223,7 +227,7 @@ class DistributionAgent:
             adapter = self.adapter or self._adapter_for(publication.provider)
             cancel = getattr(adapter, "cancel", None) or getattr(adapter, "delete", None)
             if callable(cancel):
-                cancel(publication.resolved_provider_post_id())
+                cancel(publication.resolved_provider_post_id(), account_id=publication.account_id)
         return self.store.save_job(cancelled)
 
     def reconcile(self, job_id: str) -> dict[str, Any]:
@@ -242,13 +246,16 @@ class DistributionAgent:
         post_id: str,
         platform: str,
     ) -> NormalizedMetrics:
-        adapter = self.adapter or self._adapter_for(platform)
+        publication = self.store.get_publication(publication_id)
+        account_id = publication.account_id if publication is not None else ""
+        provider = publication.provider if publication is not None else platform
+        adapter = self.adapter or self._adapter_for(provider)
         if hasattr(adapter, "analytics"):
             from integrations.contracts.distribution import Publication
 
-            raw = adapter.analytics(Publication(publication_id, "", platform, post_id, platform=platform))
+            raw = adapter.analytics(Publication(publication_id, account_id, provider, post_id, platform=platform))
         else:
-            raw = adapter.get_analytics(post_id)
+            raw = adapter.get_analytics(post_id, account_id=account_id)
         metrics = normalize_metrics(
             publication_id,
             raw,

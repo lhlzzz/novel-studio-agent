@@ -11,7 +11,7 @@ from social.providers.douyin.capabilities import CLAIMED, REQUIRED_PUBLISH_SCOPE
 from social.providers.douyin.client import DouyinClient
 from social.providers.douyin.contract import PART_SIZE, SMALL_UPLOAD_LIMIT
 from social.providers.douyin.schemas import map_status, user_from_payload, video_from_payload
-from social.providers.errors import AuthenticationError, MediaUploadError, PublishError, ValidationError
+from social.providers.errors import AuthenticationError, MediaUploadError, PublishError, SocialProviderError, ValidationError
 from social.media_policy import validate_job
 
 
@@ -87,7 +87,7 @@ class DouyinAdapter(BaseCNAdapter):
             if not (user.open_id or open_id):
                 raise AuthenticationError("open_id missing")
             user_ok = True
-        except Exception:
+        except SocialProviderError:
             return SocialProviderCapabilities.from_claimed(CLAIMED, verified=False, method="unverified")
         record = self.secrets.get_record(account.credential_ref) if account.credential_ref else None
         scopes = (record.scopes or record.scope or "") if record is not None else ""
@@ -191,7 +191,7 @@ class DouyinAdapter(BaseCNAdapter):
             "provider_request_id": request_id,
         }
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "video") -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "video") -> dict[str, Any]:
         if provider_object_type == "image_post":
             return {
                 "id": provider_post_id,
@@ -199,13 +199,13 @@ class DouyinAdapter(BaseCNAdapter):
                 "reason": "Douyin image post has no independent status API",
                 "provider_object_type": "image_post",
             }
-        account = next(iter(self._accounts.values()), None)
+        account = self._require_account(account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
-        open_id = str(creds.get("open_id") or creds.get("provider_account_id") or "")
+        open_id = str(creds.get("open_id") or creds.get("provider_account_id") or account.provider_account_id or "")
         if not token:
             raise AuthenticationError("Douyin status is BLOCKED: access token missing")
-        result = self.dy_client.video_data(token, open_id, [provider_post_id])
+        result = self.dy_client.video_data(token, open_id, [provider_post_id], account_id=account_id)
         data = result.get("data") if isinstance(result, dict) else {}
         items = data.get("list") if isinstance(data, dict) else None
         item = (items or [data or result])[0] if isinstance(items, list) and items else (data or result)
@@ -223,5 +223,5 @@ class DouyinAdapter(BaseCNAdapter):
 
     def analytics(self, publication) -> dict[str, Any | None]:
         from social.providers.douyin.analytics import DouyinAnalyticsClient
-        token, open_id = self._token(self.get_account(publication.account_id) if publication.account_id else None)
+        token, open_id = self._token(self._require_account(getattr(publication, "account_id", "")))
         return DouyinAnalyticsClient(self.dy_client).fetch(token, open_id, publication.provider_post_id)

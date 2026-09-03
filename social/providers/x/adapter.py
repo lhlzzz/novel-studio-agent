@@ -119,22 +119,25 @@ class XAdapter(BaseSocialAdapter):
             "url": f"https://x.com/i/web/status/{tweet.id}",
         }
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
-        headers = self._auth_headers()
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "") -> dict[str, Any]:
+        account = self._require_account(account_id) if account_id else None
+        headers = self._auth_headers(account)
         if not headers:
             raise AuthenticationError("X status is BLOCKED: access token missing")
         result = self.x_client.get_tweet(headers, provider_post_id)
         tweet = tweet_from_payload(result if isinstance(result, dict) else {})
         return {"id": tweet.id or provider_post_id, "status": "published" if tweet.id else "UNKNOWN", "raw": result}
 
-    def delete(self, provider_post_id: str) -> dict[str, Any]:
-        headers = self._auth_headers()
+    def delete(self, provider_post_id: str, *, account_id: str = "") -> dict[str, Any]:
+        account = self._require_account(account_id) if account_id else None
+        headers = self._auth_headers(account)
         if not headers:
             raise AuthenticationError("X delete is BLOCKED: access token missing")
         return self.x_client.delete_tweet(headers, provider_post_id)
 
     def analytics(self, publication) -> dict[str, Any | None]:
-        headers = self._auth_headers()
+        account = self._require_account(getattr(publication, "account_id", "")) if getattr(publication, "account_id", "") else None
+        headers = self._auth_headers(account)
         if not headers:
             return dict(NULL_ANALYTICS)
         result = self.x_client.get_tweet(headers, publication.provider_post_id)

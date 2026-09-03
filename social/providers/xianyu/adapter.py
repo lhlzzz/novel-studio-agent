@@ -240,20 +240,20 @@ class XianyuAdapter(BaseCNAdapter):
             },
         }
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "listing") -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "listing") -> dict[str, Any]:
         if provider_object_type and provider_object_type != "listing":
             return {"id": provider_post_id, "status": "NOT_APPLICABLE", "provider_object_type": provider_object_type}
         if not self.jushita_ready():
             return {"id": provider_post_id, "status": "unknown", "reason": "JUSHITA required", "provider_object_type": "listing"}
-        account = next(iter(self._accounts.values()), None)
+        account = self._require_account(account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
-        result = self.xy_client.item_query(token, provider_post_id)
+        result = self.xy_client.item_query(token, provider_post_id, account_id=account_id)
         item = item_from_payload(result if isinstance(result, dict) else {})
         return {"id": item.item_id or provider_post_id, "status": map_status(item.status), "raw": result, "provider_object_type": "listing"}
 
     def analytics(self, publication) -> dict[str, Any | None]:
         from social.providers.xianyu.analytics import XianyuAnalyticsClient
-        creds = self._credentials(self.get_account(publication.account_id) if publication.account_id else None)
+        creds = self._credentials(self._require_account(getattr(publication, "account_id", "")))
         token = str(creds.get("access_token") or "")
         return XianyuAnalyticsClient(self.xy_client).fetch(token, publication.provider_post_id)

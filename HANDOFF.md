@@ -1,6 +1,6 @@
-# Meiti V4.5 Handoff
+# Meiti V4.5.1 Handoff
 
-Branch `main`. Production activation of V4.4.4 CN social runtime.
+Branch `main`. Production activation hardening of V4.5.
 
 ```text
 Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
@@ -10,9 +10,9 @@ Lechuang -> MediaAsset -> ContentPackage -> PlatformVariant
 ```
 
 SocialRuntime.production() is the unique production composition root.
-`python scripts/meiti.py bootstrap-production` is the production init entry.
-XHS publish returns HandoffOutcome and persists one XHSHandoff per job.
-Xianyu returns ListingOutcome. Publication is only for native social posts.
-Refresh is account-scoped and is not hidden inside `_credentials()`.
-MediaUpload is first-class; variant metadata is not authoritative.
-Lechuang remains BLOCKED_EXTERNAL without an official contract.
+`python scripts/meiti.py bootstrap-production` is read-only preflight.
+Credentials enter RuntimeSecretStore only via OAuth callback or
+`python scripts/meiti.py credentials put --provider lechuang`.
+Provider get_status/analytics require account_id.
+XHS publish returns HandoffOutcome. Xianyu returns ListingOutcome.
+CODE_COMPLETE = true. EXTERNAL_READY = false. PRODUCTION_READY = false.

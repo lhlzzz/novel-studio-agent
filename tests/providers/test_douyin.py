@@ -60,3 +60,46 @@ def test_capability_evidence_not_over_verified(tmp_path):
     assert caps.records["user_info"].evidence.get("endpoint")
     assert caps.records["publish"].verified is True
     assert caps.records["publish"].evidence.get("scope") == "video.create"
+
+
+def test_multi_account_douyin_status(tmp_path):
+    seen = []
+    def handler(method, path, kwargs):
+        seen.append(kwargs)
+        return {"data": {"list": [{"item_id": "item-b", "video_status": 5}]}}
+    adapter, _ = _adapter(tmp_path, handler)
+    secrets = adapter.secrets
+    from social.auth.credentials import CredentialRecord
+    from social.accounts.models import SocialAccount, SocialProviderCapabilities
+    ref_a = secrets.put(CredentialRecord.from_payload({"provider": "douyin", "access_token": "token-a", "provider_account_id": "open-a"}))
+    ref_b = secrets.put(CredentialRecord.from_payload({"provider": "douyin", "access_token": "token-b", "provider_account_id": "open-b"}))
+    account_a = SocialAccount("douyin:open-a", "douyin", "douyin", username="a", status="ENABLED", provider_account_id="open-a", credential_ref=ref_a, capabilities=SocialProviderCapabilities.from_claimed({"publish": True}))
+    account_b = SocialAccount("douyin:open-b", "douyin", "douyin", username="b", status="ENABLED", provider_account_id="open-b", credential_ref=ref_b, capabilities=SocialProviderCapabilities.from_claimed({"publish": True}))
+    adapter.bind_account(account_a)
+    adapter.bind_account(account_b)
+    status = adapter.get_status("item-b", account_id="douyin:open-b", provider_object_type="video")
+    assert status["id"] == "item-b"
+    headers = seen[0].get("headers") or {}
+    blob = str(headers)
+    assert "token-b" in blob
+    assert "token-a" not in blob
+
+
+def test_multi_account_analytics(tmp_path):
+    seen = []
+    def handler(method, path, kwargs):
+        seen.append(kwargs)
+        return {"data": {"list": [{"item_id": "item-b", "statistics": {"play_count": 1}}]}}
+    adapter, _ = _adapter(tmp_path, handler)
+    secrets = adapter.secrets
+    from social.auth.credentials import CredentialRecord
+    from social.accounts.models import SocialAccount, SocialProviderCapabilities
+    from integrations.contracts.distribution import Publication
+    ref_a = secrets.put(CredentialRecord.from_payload({"provider": "douyin", "access_token": "token-a", "provider_account_id": "open-a"}))
+    ref_b = secrets.put(CredentialRecord.from_payload({"provider": "douyin", "access_token": "token-b", "provider_account_id": "open-b"}))
+    adapter.bind_account(SocialAccount("douyin:open-a", "douyin", "douyin", username="a", status="ENABLED", provider_account_id="open-a", credential_ref=ref_a, capabilities=SocialProviderCapabilities.from_claimed({"analytics": True})))
+    adapter.bind_account(SocialAccount("douyin:open-b", "douyin", "douyin", username="b", status="ENABLED", provider_account_id="open-b", credential_ref=ref_b, capabilities=SocialProviderCapabilities.from_claimed({"analytics": True})))
+    adapter.analytics(Publication("job-b", "douyin:open-b", "douyin", "item-b", platform="douyin"))
+    blob = str(seen[0].get("headers") or "")
+    assert "token-b" in blob
+    assert "token-a" not in blob

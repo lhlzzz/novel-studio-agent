@@ -112,7 +112,7 @@ class FakeXAdapter:
         self.posts[result["id"]] = result
         return result
 
-    def get_status(self, provider_post_id, *, provider_object_type: str = "publication"):
+    def get_status(self, provider_post_id, *, account_id: str = "", provider_object_type: str = "publication"):
         return self.posts.get(provider_post_id, {"id": provider_post_id, "status": "UNKNOWN"})
 
     def get_analytics(self, provider_post_id):

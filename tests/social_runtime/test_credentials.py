@@ -53,3 +53,32 @@ def test_get_credentials_does_not_refresh(tmp_path):
     loaded = runtime.manager.get_credentials(account.account_id)
     assert loaded.access_token == "tok"
     assert runtime.secrets.get_record(ref).access_token == "tok"
+
+
+def test_simultaneous_replace_does_not_leave_corrupt_json(tmp_path):
+    import json
+    import threading
+    store = RuntimeSecretStore(tmp_path)
+    ref = store.put({"provider": "douyin", "access_token": "start", "refresh_token": "keep"})
+    errors = []
+
+    def writer(idx: int):
+        try:
+            store.replace(ref, {"provider": "douyin", "access_token": f"tok-{idx}"})
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    loaded = store.get_record(ref)
+    assert loaded is not None
+    assert loaded.access_token.startswith("tok-")
+    assert loaded.refresh_token == "keep"
+    payload = json.loads(store._path(ref).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    leftovers = list(tmp_path.glob("*.tmp*"))
+    assert leftovers == []

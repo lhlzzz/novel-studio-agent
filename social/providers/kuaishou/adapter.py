@@ -8,7 +8,7 @@ from social.accounts.models import SocialAccount, SocialProviderCapabilities
 from social.auth.credentials import CredentialRecord
 from social.media_policy import validate_job
 from social.providers.base import BaseCNAdapter
-from social.providers.errors import AuthenticationError, MediaUploadError, PublishError, ValidationError
+from social.providers.errors import AuthenticationError, MediaUploadError, PublishError, SocialProviderError, ValidationError
 from social.providers.kuaishou.auth import KuaishouAuth
 from social.providers.kuaishou.capabilities import CLAIMED, REQUIRED_SCOPES
 from social.providers.kuaishou.client import KuaishouClient
@@ -77,7 +77,7 @@ class KuaishouAdapter(BaseCNAdapter):
             if not user.user_id:
                 raise AuthenticationError("user_id missing")
             user_ok = True
-        except Exception:
+        except SocialProviderError:
             return SocialProviderCapabilities.from_claimed(CLAIMED, verified=False, method="unverified")
         record = self.secrets.get_record(account.credential_ref) if account.credential_ref else None
         scopes = (record.scopes or record.scope or "") if record is not None else ""
@@ -171,18 +171,18 @@ class KuaishouAdapter(BaseCNAdapter):
             "provider_request_id": request_id,
         }
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
-        account = next(iter(self._accounts.values()), None)
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "") -> dict[str, Any]:
+        account = self._require_account(account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
         if not token:
             raise AuthenticationError("Kuaishou status is BLOCKED: access token missing")
-        result = self.ks_client.photo_info(self.app_id, token, provider_post_id)
+        result = self.ks_client.photo_info(self.app_id, token, provider_post_id, account_id=account_id)
         photo = photo_from_payload(result if isinstance(result, dict) else {})
         return {"id": photo.photo_id or provider_post_id, "status": map_status(photo), "raw": result, "provider_object_type": "photo"}
 
     def analytics(self, publication) -> dict[str, Any | None]:
         from social.providers.kuaishou.analytics import KuaishouAnalyticsClient
-        creds = self._credentials(self.get_account(publication.account_id) if publication.account_id else None)
+        creds = self._credentials(self._require_account(getattr(publication, "account_id", "")))
         token = str(creds.get("access_token") or "")
         return KuaishouAnalyticsClient(self.ks_client, self.app_id).fetch(token, publication.provider_post_id)

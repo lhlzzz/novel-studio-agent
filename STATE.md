@@ -1,8 +1,10 @@
-# Meiti V4.5 State
+# Meiti V4.5.1 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
 Creative Provider: Lechuang
 Postiz: REMOVED
+
+V4.5.1 = Production Activation Hardening
 
 Architecture: PASS
 Production Runtime: requires MEITI_SECRET_DIR + DatabaseStore
@@ -13,9 +15,11 @@ Capability Verification: layered claimed/authorized/contract_verified/live_verif
 Publish Gate: PASS
 Scheduler: PASS
 Idempotency: PASS
-Reconciliation: PASS
-Analytics: PASS
+Reconciliation: account-scoped
+Analytics: account-scoped
 Security: PASS
+Bootstrap: read-only preflight
+Production CI: secret injection wired
 
 Lechuang: BLOCKED_EXTERNAL until official contract and key
 Xiaohongshu: HANDOFF_ONLY; direct publish BLOCKED_EXTERNAL

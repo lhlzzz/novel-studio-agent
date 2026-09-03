@@ -210,7 +210,7 @@ class XiaohongshuAdapter(BaseCNAdapter):
             return self.publish_direct(job)
         return self.handoff_to_xhs(job)
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "") -> dict[str, Any]:
         raise CapabilityUnsupported("Xiaohongshu remote status is NOT_APPLICABLE; handoff is not a publication")
 
     def analytics(self, publication) -> dict[str, Any | None]:

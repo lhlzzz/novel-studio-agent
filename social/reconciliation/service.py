@@ -46,6 +46,13 @@ class SocialReconciliationService:
         self.adapter = adapter
         self.store = store
 
+    def _bind_account(self, account_id: str) -> None:
+        if not account_id or not hasattr(self.adapter, "bind_account"):
+            return
+        account = self.store.get_account(account_id)
+        if account is not None:
+            self.adapter.bind_account(account)
+
     def reconcile(self, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(job_id)
         handoff = self.store.get_handoff_by_job(job_id)
@@ -61,13 +68,18 @@ class SocialReconciliationService:
         if listing is not None:
             if not job or not job.provider:
                 return {"job_id": job_id, "status": "UNKNOWN", "reason": "listing job provider missing"}
-            raw = self.adapter.get_status(listing.provider_item_id, provider_object_type="listing")
-            from commerce.xianyu import map_listing_status, transition_listing
+            self._bind_account(listing.account_id)
+            raw = self.adapter.get_status(
+                listing.provider_item_id,
+                account_id=listing.account_id,
+                provider_object_type="listing",
+            )
+            from commerce.xianyu import IllegalListingTransition, map_listing_status, transition_listing
             mapped = map_listing_status(str((raw or {}).get("status") or ""))
             if mapped != listing.status:
                 try:
                     listing = transition_listing(listing, mapped)
-                except Exception:
+                except IllegalListingTransition:
                     listing = listing
                 self.store.save_listing(listing)
             return {
@@ -79,10 +91,19 @@ class SocialReconciliationService:
             }
         publication = self.store.get_publication(job_id)
         if publication is None:
-            return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication missing"}
+            publication = self._recover_missing_publication(job_id)
+            if publication is None:
+                return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication missing"}
         if not publication.provider:
             return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication provider missing"}
-        raw = self.adapter.get_status(publication.resolved_provider_post_id(), provider_object_type=publication.provider_object_type or "publication")
+        if not publication.account_id:
+            return {"job_id": job_id, "status": "UNKNOWN", "reason": "publication account_id missing"}
+        self._bind_account(publication.account_id)
+        raw = self.adapter.get_status(
+            publication.resolved_provider_post_id(),
+            account_id=publication.account_id,
+            provider_object_type=publication.provider_object_type or "publication",
+        )
         updated = self.reconcile_publication(publication, raw if isinstance(raw, dict) else {})
         self.store.save_publication(updated)
         if job is not None and job.status != updated.status:
@@ -108,8 +129,43 @@ class SocialReconciliationService:
             "raw": raw,
         }
 
+    def _recover_missing_publication(self, job_id: str) -> Publication | None:
+        job = self.store.get_job(job_id)
+        if job is None or not job.provider or not job.account_id:
+            return None
+        payload = job.provider_response if isinstance(job.provider_response, dict) else {}
+        object_id = str(
+            payload.get("provider_object_id")
+            or payload.get("post_id")
+            or payload.get("item_id")
+            or payload.get("id")
+            or ""
+        )
+        if not object_id:
+            return None
+        object_type = str(payload.get("provider_object_type") or "publication")
+        self._bind_account(job.account_id)
+        raw = self.adapter.get_status(object_id, account_id=job.account_id, provider_object_type=object_type)
+        raw = raw if isinstance(raw, dict) else {}
+        publication = Publication(
+            distribution_job_id=job.job_id,
+            account_id=job.account_id,
+            provider=job.provider,
+            provider_post_id=object_id,
+            platform_object_id=str(raw.get("platform_object_id") or payload.get("external_id") or object_id),
+            status="UNKNOWN",
+            content_package_id=job.content_package_id,
+            request_id=job.request_id,
+            platform=job.platform,
+            provider_object_type=object_type,
+        )
+        recovered = self.reconcile_publication(publication, raw)
+        self.store.save_publication(recovered)
+        return recovered
+
     @staticmethod
     def reconcile_publication(publication: Publication, raw: dict[str, Any]) -> Publication:
+
         status = _mapped(str(raw.get("status") or raw.get("state") or "unknown"))
         platform_object_id = raw.get("platform_object_id") or raw.get("external_id") or raw.get("externalId") or publication.platform_object_id
         object_type = str(raw.get("provider_object_type") or publication.provider_object_type or "")

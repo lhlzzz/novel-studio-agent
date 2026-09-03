@@ -1,9 +1,9 @@
-# Meiti V4.5 Task
+# Meiti V4.5.1 Task
 
-**GOAL:** Production activation for CN social + Lechuang. Architecture,
-persistence, secret store, OAuth, MediaUpload, DistributionOutcome, CI, and
-doctor semantics are code-complete. Live provider E2E stays BLOCKED_EXTERNAL
-without real credentials.
+**GOAL:** Production activation hardening. Architecture, persistence, secret
+store, account-scoped reconciliation, doctor probe/gate split, CI secret
+injection, and bootstrap preflight are code-complete. Live provider E2E stays
+BLOCKED_EXTERNAL without real credentials.
 
 **VERIFY:** pytest, architecture tests, bootstrap-production, social_doctor,
 meiti_doctor --gate architecture. Production gate exits non-zero until live

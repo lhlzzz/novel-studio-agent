@@ -84,6 +84,7 @@ class TimeoutError(SocialProviderError):
 
 class ServerError(ProviderUnavailable):
     retryable = True
+    unknown = True
 
 
 def classify_http_error(status: int, detail: str, retry_after: float | None = None) -> SocialProviderError:

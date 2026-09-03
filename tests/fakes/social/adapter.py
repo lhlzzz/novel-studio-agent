@@ -88,6 +88,10 @@ class FakeAdapter:
             raise KeyError(account_id)
         return self.account
 
+    def bind_account(self, account):
+        self.account = account
+        return account
+
     def get_integration(self, integration_id):
         return self.get_account(integration_id).as_integration()
 
@@ -144,16 +148,16 @@ class FakeAdapter:
     def schedule(self, job):
         return self.publish(job)
 
-    def get_status(self, provider_post_id, *, provider_object_type: str = "publication"):
+    def get_status(self, provider_post_id, *, account_id: str = "", provider_object_type: str = "publication"):
         return {"id": provider_post_id, "status": "published"}
 
-    def cancel(self, provider_post_id):
+    def cancel(self, provider_post_id, *, account_id: str = ""):
         return {"id": provider_post_id, "deleted": True}
 
-    def delete(self, provider_post_id):
-        return self.cancel(provider_post_id)
+    def delete(self, provider_post_id, *, account_id: str = ""):
+        return self.cancel(provider_post_id, account_id=account_id)
 
-    def get_analytics(self, provider_post_id):
+    def get_analytics(self, provider_post_id, *, account_id: str = ""):
         return {"views": 4, "likes": 2, "comments": None, "shares": None, "followers_delta": None}
 
     def analytics(self, publication):

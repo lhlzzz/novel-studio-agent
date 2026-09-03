@@ -6,6 +6,29 @@ on:
 jobs:
   production:
     runs-on: ubuntu-latest
+    env:
+      MEITI_PRODUCTION: "true"
+      MEITI_PRODUCTION_E2E: "false"
+      MEITI_SECRET_DIR: ${{ runner.temp }}/meiti-secrets
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      MEITI_DATABASE_URL: ${{ secrets.MEITI_DATABASE_URL }}
+      DOUYIN_CLIENT_KEY: ${{ secrets.DOUYIN_CLIENT_KEY }}
+      DOUYIN_CLIENT_SECRET: ${{ secrets.DOUYIN_CLIENT_SECRET }}
+      DOUYIN_REDIRECT_URI: ${{ secrets.DOUYIN_REDIRECT_URI }}
+      KUAISHOU_APP_ID: ${{ secrets.KUAISHOU_APP_ID }}
+      KUAISHOU_APP_SECRET: ${{ secrets.KUAISHOU_APP_SECRET }}
+      KUAISHOU_REDIRECT_URI: ${{ secrets.KUAISHOU_REDIRECT_URI }}
+      XIANYU_APP_KEY: ${{ secrets.XIANYU_APP_KEY }}
+      XIANYU_APP_SECRET: ${{ secrets.XIANYU_APP_SECRET }}
+      XIANYU_REDIRECT_URI: ${{ secrets.XIANYU_REDIRECT_URI }}
+      XHS_CLIENT_ID: ${{ secrets.XHS_CLIENT_ID }}
+      XHS_CLIENT_SECRET: ${{ secrets.XHS_CLIENT_SECRET }}
+      XHS_REDIRECT_URI: ${{ secrets.XHS_REDIRECT_URI }}
+      LECHUANG_API_URL: ${{ secrets.LECHUANG_API_URL }}
+      LECHUANG_API_KEY: ${{ secrets.LECHUANG_API_KEY }}
+      AI_GATEWAY_API_URL: ${{ secrets.AI_GATEWAY_API_URL }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      MEITI_XIANYU_DEPLOYMENT_MODE: ${{ secrets.MEITI_XIANYU_DEPLOYMENT_MODE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,6 +38,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Prepare secret directory
+        run: |
+          mkdir -p "$MEITI_SECRET_DIR"
+          chmod 700 "$MEITI_SECRET_DIR"
       - name: Production bootstrap
         run: python scripts/meiti.py bootstrap-production
       - name: Social production gate

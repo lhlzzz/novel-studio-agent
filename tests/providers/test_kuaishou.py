@@ -100,7 +100,7 @@ def test_photo_query_success(tmp_path):
     def handler(method, path, kwargs):
         return {"data": {"photo_id": "p1", "pending": False}}
     adapter, _ = _adapter(tmp_path, handler)
-    status = adapter.get_status("p1", provider_object_type="photo")
+    status = adapter.get_status("p1", account_id="kuaishou:u1", provider_object_type="photo")
     assert status["status"] == "published"
 
 
@@ -108,7 +108,7 @@ def test_photo_query_failure(tmp_path):
     def handler(method, path, kwargs):
         return {"data": {}}
     adapter, _ = _adapter(tmp_path, handler)
-    status = adapter.get_status("p1")
+    status = adapter.get_status("p1", account_id="kuaishou:u1")
     assert status["status"] in {"unknown", "processing"}
 
 
@@ -122,3 +122,22 @@ def test_upload_endpoint_must_be_https(tmp_path):
     import pytest
     with pytest.raises(MediaUploadError):
         adapter._upload_bytes(b"x", mime_type="video/mp4", filename="a.mp4", account_id="kuaishou:u1", idempotency_key="k")
+
+
+def test_multi_account_kuaishou_status(tmp_path):
+    seen = []
+    def handler(method, path, kwargs):
+        seen.append(kwargs)
+        return {"data": {"photo_id": "p-b", "pending": False}}
+    adapter, _ = _adapter(tmp_path, handler)
+    from social.auth.credentials import CredentialRecord
+    from social.accounts.models import SocialAccount, SocialProviderCapabilities
+    secrets = adapter.secrets
+    ref_a = secrets.put(CredentialRecord.from_payload({"provider": "kuaishou", "access_token": "token-a", "provider_account_id": "u-a"}))
+    ref_b = secrets.put(CredentialRecord.from_payload({"provider": "kuaishou", "access_token": "token-b", "provider_account_id": "u-b"}))
+    adapter.bind_account(SocialAccount("kuaishou:u-a", "kuaishou", "kuaishou", username="a", status="ENABLED", provider_account_id="u-a", credential_ref=ref_a, capabilities=SocialProviderCapabilities.from_claimed({"publish": True})))
+    adapter.bind_account(SocialAccount("kuaishou:u-b", "kuaishou", "kuaishou", username="b", status="ENABLED", provider_account_id="u-b", credential_ref=ref_b, capabilities=SocialProviderCapabilities.from_claimed({"publish": True})))
+    status = adapter.get_status("p-b", account_id="kuaishou:u-b")
+    assert status["id"] == "p-b"
+    query = seen[0].get("query") or {}
+    assert query.get("access_token") == "token-b"

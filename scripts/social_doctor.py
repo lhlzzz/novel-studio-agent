@@ -222,9 +222,10 @@ def _provider_report(name: str) -> dict:
 def check_accounts() -> dict:
     runtime, error = _runtime()
     if runtime is None:
-        return _status("BLOCKED_EXTERNAL", reason=error, accounts=[])
+        return _status("BLOCKED_EXTERNAL", reason=error, accounts=[], account_count=0, enabled_count=0)
     rows = runtime.manager.doctor_rows()
-    return _status("PASS", account_count=len(rows), accounts=rows)
+    enabled = [row for row in rows if str(row.get("status") or "") == "ENABLED"]
+    return _status("PASS", account_count=len(rows), enabled_count=len(enabled), accounts=rows)
 
 
 def check_provider_registry() -> dict:
@@ -248,9 +249,25 @@ def check_account_manager() -> dict:
     return check_accounts()
 
 
+def _aggregate_probe(reports: dict) -> str:
+    statuses = [str(item.get("status") or "FAIL") for item in reports.values()]
+    if any(status == "FAIL" for status in statuses):
+        return "FAIL"
+    allowed = {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "NOT_CONFIGURED", "SKIPPED"}
+    if all(status in allowed for status in statuses):
+        return "PASS"
+    if any(status == "BLOCKED_EXTERNAL" for status in statuses):
+        return "BLOCKED_EXTERNAL"
+    return "FAIL"
+
+
 def check_provider_health() -> dict:
     reports = {name: _provider_report(name) for name in CN}
-    return {"status": "BLOCKED_EXTERNAL", "providers": {name: item.get("status") for name, item in reports.items()}, "details": reports}
+    return {
+        "status": _aggregate_probe(reports),
+        "providers": {name: item.get("status") for name, item in reports.items()},
+        "details": reports,
+    }
 
 
 def check_lechuang() -> dict:
@@ -277,9 +294,15 @@ def structured_report(checks: dict | None = None) -> dict:
     }
     e2e_status = "PASS" if all(item.get("Real E2E") == "LIVE_VERIFIED" for item in (checks["Douyin"], checks["Kuaishou"], checks["Xianyu"])) else "BLOCKED_EXTERNAL"
     required = [runtime, persistence, security] + [item["status"] for key, item in providers.items() if key != "xiaohongshu"]
+    enabled_count = int(checks.get("Social Accounts", {}).get("enabled_count") or 0)
     if architecture == "FAIL":
         overall = "FAIL"
-    elif e2e_status == "PASS" and all(status == "PASS" for status in required) and providers["xiaohongshu"]["status"] in {"PASS", "HANDOFF_ONLY"}:
+    elif (
+        e2e_status == "PASS"
+        and all(status == "PASS" for status in required)
+        and providers["xiaohongshu"]["status"] in {"PASS", "HANDOFF_ONLY"}
+        and enabled_count > 0
+    ):
         overall = "PASS"
     else:
         overall = "BLOCKED_EXTERNAL"
@@ -296,10 +319,22 @@ def structured_report(checks: dict | None = None) -> dict:
 
 
 def evaluate_production_readiness(checks: dict | None = None) -> dict:
+    checks = checks or run()
     report = structured_report(checks)
     architecture = report["architecture"]["status"]
     runtime = report["runtime"]["status"]
     overall = report["overall"]["status"]
+    probe = {
+        "providers": check_provider_health() if "Douyin" not in checks else {
+            "status": None,
+            "providers": {
+                "douyin": checks["Douyin"].get("status"),
+                "kuaishou": checks["Kuaishou"].get("status"),
+                "xianyu": checks["Xianyu"].get("status"),
+                "xiaohongshu": checks["Xiaohongshu"].get("status"),
+            },
+        }
+    }
     architecture_fail = [] if architecture == "PASS" else ["architecture"]
     return {
         "architecture": architecture,
@@ -311,6 +346,7 @@ def evaluate_production_readiness(checks: dict | None = None) -> dict:
         "external_ready": overall == "PASS",
         "overall_ready": overall == "PASS",
         "blockers": architecture_fail,
+        "probe": probe,
         "report": report,
     }
 

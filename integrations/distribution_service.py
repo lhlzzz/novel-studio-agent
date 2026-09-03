@@ -240,6 +240,9 @@ class DistributionService:
             if existing is not None and existing.status in {"UPLOADED", "uploaded"} and (existing.remote_id or getattr(existing, "provider_media_id", "")):
                 uploaded.append(existing)
                 continue
+            if existing is not None and existing.status in {"UNKNOWN", "UPLOADING"}:
+                uploaded.append(existing)
+                continue
             result = self.adapter.upload_media(path, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id)
             result = replace(result, account_id=job.account_id, provider=job.provider, platform=job.platform or result.platform)
             self.store.save_media(result)
@@ -365,6 +368,10 @@ class DistributionService:
         )
 
     def _account(self, job: DistributionJob):
+        stored = self.store.get_account(job.account_id)
+        if stored is not None and hasattr(self.adapter, "bind_account"):
+            self.adapter.bind_account(stored)
+            return stored
         return self.adapter.get_account(job.account_id)
 
     def _record_attempt(

@@ -150,6 +150,9 @@ class SocialHttpClient:
         except SocialTimeoutError as exc:
             raise SocialTimeoutError(f"{self.provider} {method} timed out: {exc}") from exc
         except Exception as exc:
+            from social.providers.errors import SocialProviderError
+            if isinstance(exc, SocialProviderError):
+                raise
             name = exc.__class__.__name__.lower()
             if "time" in name:
                 raise SocialTimeoutError(f"{self.provider} {method} timed out: {exc}") from exc

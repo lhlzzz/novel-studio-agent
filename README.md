@@ -1,4 +1,4 @@
-# Meiti V4.5
+# Meiti V4.5.1
 
 Meiti is an AI Creator Operating System.
 
@@ -36,8 +36,9 @@ Analytics take store/secrets from that runtime. Testing uses
 python scripts/meiti.py bootstrap-production
 ```
 
-Bootstrap checks `MEITI_SECRET_DIR` (0700), database, migrations, and
-provider prerequisites. It never generates platform credentials.
+V4.5.1 hardens production activation: bootstrap is read-only preflight,
+provider status is account-scoped, and production CI injects GitHub secrets
+into process environment. Bootstrap never writes credentials.
 
 ## Current production set
 

@@ -23,3 +23,11 @@ def test_token_never_logged():
     logged = log_event(agent="social-provider", action="publish", status="ok", access_token="leak", authorization="Bearer leak")
     assert logged["access_token"] == "[redacted]"
     assert logged["authorization"] == "[redacted]"
+
+
+def test_bearer_token_redacted():
+    from governance.observability import log_event
+    logged = log_event(agent="social-provider", action="publish", status="error", error_message="Authorization: Bearer super-secret-token")
+    dumped = str(logged)
+    assert "super-secret-token" not in dumped
+    assert "Bearer" not in dumped or "[redacted]" in dumped

@@ -57,7 +57,7 @@ class UnsupportedDistributionAdapter:
         self._unsupported("schedule")
         raise UnsupportedCapabilityError("schedule")
 
-    def get_status(self, provider_post_id: str) -> dict:
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "") -> dict:
         self._unsupported("get_status")
         raise UnsupportedCapabilityError("get_status")
 

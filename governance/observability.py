@@ -20,6 +20,7 @@ SECRET_KEYS = {
     "secret",
     "password",
     "client_secret",
+    "app_secret",
     "session",
     "scrapecreators_api_key",
     "lechuang_api_key",
@@ -28,6 +29,7 @@ SECRET_PATTERN = re.compile(
     r"(api[_-]?key|authorization|bearer|refresh[_-]?token|access[_-]?token|cookie|secret)\s*[:=]\s*\S+",
     re.IGNORECASE,
 )
+BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+\S+")
 
 
 def new_request_id() -> str:
@@ -43,6 +45,7 @@ def redact(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
     if isinstance(value, str):
+        value = BEARER_PATTERN.sub("Bearer [redacted]", value)
         return SECRET_PATTERN.sub(lambda match: f"{match.group(1)}=[redacted]", value)
     return value
 

@@ -41,9 +41,12 @@ class LechuangClient:
         self.contract_verified = bool(contract.get("verified")) and CONTRACT_VERIFIED
         self.contract_reason = str(contract.get("reason") or "Lechuang API contract unverified")
         stored_url, stored_key = _lechuang_secret()
-        env_url = os.getenv("LECHUANG_API_URL", "").strip() or stored_url
-        self.base_url = (base_url if base_url is not None else env_url).rstrip("/")
-        key = api_key if api_key is not None else (os.getenv("LECHUANG_API_KEY", "") or stored_key)
+        env_url = os.getenv("LECHUANG_API_URL", "").strip()
+        self.base_url = (base_url if base_url is not None else (stored_url or env_url)).rstrip("/")
+        if api_key is not None:
+            key = api_key
+        else:
+            key = stored_key or os.getenv("LECHUANG_API_KEY", "")
         self.api_key = str(key or "")
         self.max_poll_count = MAX_POLL_COUNT
         self.max_wait_seconds = MAX_WAIT_SECONDS

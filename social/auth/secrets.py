@@ -137,11 +137,10 @@ class RuntimeSecretStore:
             return {"ok": False, "reason": str(exc), **evidence}
 
     def _write_atomic(self, path: Path, payload: dict[str, Any]) -> None:
-        tmp = path.with_name(path.name + ".tmp")
-        if tmp.exists():
-            tmp.unlink()
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{secrets.token_hex(8)}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_TRUNC
         fd = os.open(tmp, flags, 0o600)
+        replaced = False
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -149,10 +148,13 @@ class RuntimeSecretStore:
                 json.dump(payload, fh)
                 fh.flush()
                 os.fsync(fh.fileno())
+            os.replace(tmp, path)
+            replaced = True
         finally:
             if fd is not None:
                 os.close(fd)
-        os.replace(tmp, path)
+            if not replaced and tmp.exists():
+                tmp.unlink()
         dir_fd = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(dir_fd)

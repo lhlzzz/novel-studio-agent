@@ -70,9 +70,10 @@ class BaseSocialAdapter:
             payload.setdefault("client_id", env_id)
         if env_secret:
             payload.setdefault("client_secret", env_secret)
-        token = os.getenv(f"{self.provider.upper()}_ACCESS_TOKEN", "").strip()
-        if token:
-            payload.setdefault("access_token", token)
+        if account is None:
+            token = os.getenv(f"{self.provider.upper()}_ACCESS_TOKEN", "").strip()
+            if token:
+                payload.setdefault("access_token", token)
         return payload
 
     def ensure_valid_credentials(self, account: SocialAccount) -> dict[str, Any]:
@@ -137,12 +138,23 @@ class BaseSocialAdapter:
         raise AuthenticationError(f"{self.provider} account discovery requires a verified OAuth token")
 
     def get_account(self, account_id: str) -> SocialAccount:
-        accounts = {item.account_id: item for item in self.list_accounts()}
-        if account_id in accounts:
-            return accounts[account_id]
+        if not account_id:
+            raise KeyError("account_id is required")
         if account_id in self._accounts:
             return self._accounts[account_id]
-        raise KeyError(account_id)
+        raise KeyError(f"unknown account: {account_id}")
+
+    def _require_account(self, account_id: str) -> SocialAccount:
+        if not account_id:
+            raise AuthenticationError(f"{self.provider} account_id is required")
+        try:
+            return self.get_account(account_id)
+        except KeyError as exc:
+            raise AuthenticationError(f"{self.provider} unknown account: {account_id}") from exc
+
+    def bind_account(self, account: SocialAccount) -> SocialAccount:
+        self._accounts[account.account_id] = account
+        return account
 
     def get_integration(self, integration_id: str):
         return self.get_account(integration_id).as_integration()
@@ -219,22 +231,22 @@ class BaseSocialAdapter:
             raise ValidationError(f"{self.provider} native schedule is unsupported; use Meiti scheduler")
         return self.publish(job)
 
-    def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:
+    def get_status(self, provider_post_id: str, *, account_id: str = "", provider_object_type: str = "") -> dict[str, Any]:
         raise ValidationError(f"{self.provider} status is BLOCKED until credentials exist")
 
-    def delete(self, provider_post_id: str) -> dict[str, Any]:
+    def delete(self, provider_post_id: str, *, account_id: str = "") -> dict[str, Any]:
         raise ValidationError(f"{self.provider} delete is BLOCKED until credentials exist")
 
-    def cancel(self, provider_post_id: str) -> dict[str, Any]:
-        return self.delete(provider_post_id)
+    def cancel(self, provider_post_id: str, *, account_id: str = "") -> dict[str, Any]:
+        return self.delete(provider_post_id, account_id=account_id)
 
     def analytics(self, publication: Publication) -> dict[str, Any | None]:
         return dict(NULL_ANALYTICS)
 
-    def get_analytics(self, provider_post_id: str) -> dict[str, Any | None]:
+    def get_analytics(self, provider_post_id: str, *, account_id: str = "") -> dict[str, Any | None]:
         publication = Publication(
             distribution_job_id=provider_post_id,
-            account_id="",
+            account_id=account_id,
             provider=self.provider,
             provider_post_id=provider_post_id,
             platform=self.platform,

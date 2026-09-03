@@ -1,0 +1,76 @@
+{
+  "version": "4.5.1",
+  "real_e2e": false,
+  "providers": {
+    "douyin": {
+      "provider": "douyin",
+      "account_id_hash": "",
+      "run_id": "",
+      "oauth": "BLOCKED_EXTERNAL",
+      "credential": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "provider_object": "BLOCKED_EXTERNAL",
+      "reconciliation": "PASS",
+      "analytics": "PASS",
+      "real_e2e": false
+    },
+    "kuaishou": {
+      "provider": "kuaishou",
+      "account_id_hash": "",
+      "run_id": "",
+      "oauth": "BLOCKED_EXTERNAL",
+      "credential": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "provider_object": "BLOCKED_EXTERNAL",
+      "reconciliation": "PASS",
+      "analytics": "PASS",
+      "real_e2e": false
+    },
+    "xianyu": {
+      "provider": "xianyu",
+      "account_id_hash": "",
+      "run_id": "",
+      "oauth": "BLOCKED_EXTERNAL",
+      "credential": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "provider_object": "BLOCKED_EXTERNAL",
+      "reconciliation": "PASS",
+      "analytics": "PASS",
+      "real_e2e": false
+    },
+    "xiaohongshu": {
+      "provider": "xiaohongshu",
+      "account_id_hash": "",
+      "run_id": "",
+      "oauth": "BLOCKED_EXTERNAL",
+      "credential": "BLOCKED_EXTERNAL",
+      "capability": "HANDOFF_ONLY",
+      "upload": "NOT_APPLICABLE",
+      "publish": "HANDOFF_ONLY",
+      "provider_object": "NOT_APPLICABLE",
+      "reconciliation": "NOT_APPLICABLE",
+      "analytics": "NOT_APPLICABLE",
+      "real_e2e": false
+    },
+    "lechuang": {
+      "provider": "lechuang",
+      "account_id_hash": "",
+      "run_id": "",
+      "oauth": "NOT_APPLICABLE",
+      "credential": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "NOT_APPLICABLE",
+      "provider_object": "BLOCKED_EXTERNAL",
+      "reconciliation": "NOT_APPLICABLE",
+      "analytics": "NOT_APPLICABLE",
+      "real_e2e": false
+    }
+  }
+}

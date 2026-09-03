@@ -68,14 +68,13 @@ class SocialRuntime:
             secrets = RuntimeSecretStore(Path(tempfile.mkdtemp(prefix="meiti-test-secrets-")))
         return cls.create(store=store, secrets=secrets, production=False, **kwargs)
 
-    def agent(self, *, adapter: Any | None = None, provider_name: str | None = None):
+    def agent(self, *, adapter: Any | None = None):
         from agents.distribution_agent import DistributionAgent
 
         return DistributionAgent(
             store=self.store,
             manager=self.manager,
             adapter=adapter,
-            provider_name=provider_name,
             secrets=self.secrets,
         )
 

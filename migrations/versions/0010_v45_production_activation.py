@@ -1,4 +1,4 @@
-"""V4.5 production activation: media upload fields and listing lifecycle."""
+"""V4.5 production activation: media upload fields and listing lifecycle.\n\nListing status remap is upgrade-safe: normalize values, then apply CHECK.\nDowngrade is intentionally lossy. SUBMITTED cannot restore SUBMITTING vs PROCESSING.\nSee DECISIONS.md: 0010 listing remap is not strictly reversible.\n"""
 
 from alembic import op
 import sqlalchemy as sa
@@ -33,6 +33,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Lossy reverse map. SUBMITTED/PUBLISHED/OFF_SHELF cannot restore original dual values.
     op.drop_constraint("ck_meiti_xianyu_listing_status", "xianyu_listings", type_="check")
     op.execute("UPDATE xianyu_listings SET status = 'SUBMITTING' WHERE status = 'SUBMITTED'")
     op.execute("UPDATE xianyu_listings SET status = 'ONLINE' WHERE status = 'PUBLISHED'")

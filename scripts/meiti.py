@@ -87,7 +87,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         commerce_intent=args.commerce_intent or "none",
         metadata={"approval": "approved", "price": args.price, "category_id": args.category_id},
     )
-    agent = runtime.agent(provider_name=args.platform)
+    agent = runtime.agent()
     job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job", account_id=args.account_id)
     result = agent.execute(job)
     kind = getattr(result, "kind", "")
@@ -130,7 +130,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
 
 def bootstrap_production() -> dict:
-    """Check production prerequisites. Never generate platform credentials."""
+    """Pure preflight. Never write tokens, API keys, credentials, or accounts."""
     import os
     import stat
     from pathlib import Path as _Path
@@ -147,23 +147,17 @@ def bootstrap_production() -> dict:
         checks["secret_dir"] = _item("BLOCKED_EXTERNAL", reason="MEITI_SECRET_DIR missing")
     else:
         path = _Path(secret_dir)
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            os.chmod(path, 0o700)
-            mode = stat.S_IMODE(path.stat().st_mode)
-            if mode != 0o700:
-                checks["secret_dir"] = _item("FAIL", reason=f"directory mode {oct(mode)} != 0700", path=str(path))
-            else:
-                from social.auth.secrets import production_secret_store, secret_id
-                store = production_secret_store()
-                doctor = store.doctor()
-                lechuang_key = os.getenv("LECHUANG_API_KEY", "").strip()
-                lechuang_url = os.getenv("LECHUANG_API_URL", "").strip()
-                if lechuang_key:
-                    store.put_json({"api_key": lechuang_key, "api_url": lechuang_url}, ref=secret_id("lechuang", "api"))
-                checks["secret_dir"] = _item("PASS" if doctor.get("ok") else "FAIL", **{k: v for k, v in doctor.items() if k != "ok"})
-        except OSError as exc:
-            checks["secret_dir"] = _item("FAIL", reason=str(exc))
+        if not path.is_dir():
+            checks["secret_dir"] = _item("BLOCKED_EXTERNAL", reason="MEITI_SECRET_DIR does not exist", path=str(path))
+        else:
+            try:
+                mode = stat.S_IMODE(path.stat().st_mode)
+                if mode != 0o700:
+                    checks["secret_dir"] = _item("FAIL", reason=f"directory mode {oct(mode)} != 0700", path=str(path))
+                else:
+                    checks["secret_dir"] = _item("PASS", path=str(path), mode=oct(mode))
+            except OSError as exc:
+                checks["secret_dir"] = _item("FAIL", reason=str(exc))
 
     try:
         from scripts.db.engine import engine
@@ -204,6 +198,13 @@ def bootstrap_production() -> dict:
     checks["xhs_oauth"] = _item("PASS" if _env(("XHS_CLIENT_ID", "XHS_CLIENT_SECRET", "XHS_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
     checks["lechuang"] = _item("PASS" if _env(("LECHUANG_API_URL", "LECHUANG_API_KEY")) else "BLOCKED_EXTERNAL")
 
+    try:
+        from social.runtime.container import SocialRuntime
+        runtime_ok = callable(getattr(SocialRuntime, "production", None))
+        checks["runtime"] = _item("PASS" if runtime_ok else "FAIL")
+    except Exception as exc:
+        checks["runtime"] = _item("FAIL", reason=str(exc))
+
     blocking = [name for name, item in checks.items() if item["status"] == "FAIL"]
     external = [name for name, item in checks.items() if item["status"] == "BLOCKED_EXTERNAL"]
     if blocking:
@@ -216,6 +217,7 @@ def bootstrap_production() -> dict:
         "overall": {"status": overall},
         "checks": checks,
         "generated_credentials": False,
+        "credential_writes": False,
         "exit_code": exit_code,
     }
 
@@ -231,11 +233,35 @@ def cmd_bootstrap_production(_args: argparse.Namespace) -> int:
     return int(report.get("exit_code") or 1)
 
 
+def cmd_credentials_put(args: argparse.Namespace) -> int:
+    """Explicit credential provisioning. Bootstrap never writes secrets."""
+    import os
+    from social.auth.secrets import production_secret_store, secret_id
+
+    if args.provider != "lechuang":
+        print(f"unsupported provider: {args.provider}")
+        return 1
+    key = os.getenv("LECHUANG_API_KEY", "").strip()
+    url = os.getenv("LECHUANG_API_URL", "").strip()
+    if not key or not url:
+        print('{"overall": {"status": "BLOCKED_EXTERNAL"}, "reason": "LECHUANG_API_URL/LECHUANG_API_KEY missing"}')
+        return 1
+    store = production_secret_store()
+    store.put_json({"api_key": key, "api_url": url}, ref=secret_id("lechuang", "api"))
+    print('{"provider": "lechuang", "status": "STORED"}')
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="meiti")
     sub = parser.add_subparsers(dest="group", required=True)
     boot = sub.add_parser("bootstrap-production")
     boot.set_defaults(func=cmd_bootstrap_production)
+    cred = sub.add_parser("credentials")
+    cred_sub = cred.add_subparsers(dest="command", required=True)
+    put = cred_sub.add_parser("put")
+    put.add_argument("--provider", required=True, choices=("lechuang",))
+    put.set_defaults(func=cmd_credentials_put)
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)
