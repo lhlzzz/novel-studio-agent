@@ -55,7 +55,7 @@ production execution.
 ## Command
 
 ```bash
-python .agents/skills/xiaoleai-image-generation/scripts/generate_image.py \
+python .agents/skills/media/xiaoleai-image-generation/scripts/generate_image.py \
   --prompt-file /path/to/prompt.txt \
   --output-prefix /path/to/master_front \
   --model gpt-image-2 \
@@ -67,7 +67,7 @@ python .agents/skills/xiaoleai-image-generation/scripts/generate_image.py \
 For a prompt supplied directly:
 
 ```bash
-python .agents/skills/xiaoleai-image-generation/scripts/generate_image.py \
+python .agents/skills/media/xiaoleai-image-generation/scripts/generate_image.py \
   --prompt "A concise image prompt" \
   --output-prefix ./generated/image
 ```
@@ -76,7 +76,7 @@ For a platform-owned internal asset, pass `--platform`. The shared owner then
 chooses a platform default ratio and writes to the root shared asset directory:
 
 ```bash
-python .agents/skills/xiaoleai-image-generation/scripts/generate_image.py \
+python .agents/skills/media/xiaoleai-image-generation/scripts/generate_image.py \
   --platform xiaohongshu \
   --asset-name elder-care-note-cover \
   --prompt-file /path/to/prompt.txt \

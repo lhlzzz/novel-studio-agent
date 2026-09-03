@@ -1,0 +1,51 @@
+{
+  "version": "4.5.4",
+  "provider": "xiaole-lechuang",
+  "credential": "PASS",
+  "contract": "PASS",
+  "image": {
+    "model": "gpt-image-2",
+    "mime_type": "image/png",
+    "asset_id": "2eab0884328d8073fba340445eef766999ed754160823d95c62fc6bafbf9f31d",
+    "sha256_prefix": "2eab0884328d",
+    "width": 1152,
+    "height": 2048,
+    "size": 3840673,
+    "path_exists": true,
+    "request_id": "cd43021a-6454-4a79-9930-c4d505ebaef4",
+    "contract": "PASS",
+    "capability": "PASS",
+    "real_generation": "PASS",
+    "media_asset": "PASS",
+    "qa": "PASS",
+    "real_e2e": true
+  },
+  "video": {
+    "reason": "XiaoleAI/Lechuang video API is not present in repository evidence",
+    "evidence_checked": [
+      "creative/providers/lechuang/models.yaml",
+      "creative/providers/lechuang/client.py",
+      "creative/providers/lechuang/contract.py",
+      "creative/providers/lechuang/README.md",
+      ".agents/skills/media/xiaoleai-image-generation/SKILL.md",
+      "docs.xiaoleai.team public pages",
+      "www.xiaoleai.team public pages",
+      "api.xiaoleai.team public pages"
+    ],
+    "contract": "NOT_VERIFIED",
+    "capability": "NOT_VERIFIED",
+    "real_generation": "NOT_VERIFIED",
+    "media_asset": "NOT_VERIFIED",
+    "qa": "NOT_VERIFIED",
+    "real_e2e": false
+  },
+  "image_to_video": {
+    "real_generation": "NOT_VERIFIED",
+    "media_asset": "NOT_VERIFIED",
+    "qa": "NOT_VERIFIED",
+    "contract": "NOT_VERIFIED",
+    "capability": "NOT_VERIFIED",
+    "real_e2e": false
+  },
+  "overall": "IMAGE_PRODUCTION_READY"
+}

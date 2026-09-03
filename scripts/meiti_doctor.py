@@ -330,11 +330,11 @@ def check_reconciliation() -> dict:
 
 
 def e2e_path() -> Path:
-    return ROOT / "docs/audits/meiti-v4.5.3-real-e2e.json"
+    return ROOT / "docs/audits/meiti-v4.5.4-real-e2e.json"
 
 
 def legacy_e2e_path() -> Path:
-    return ROOT / "docs/audits/meiti-v4.4.4-cn-e2e.json"
+    return ROOT / "docs/audits/meiti-v4.5.3-real-e2e.json"
 
 
 def load_e2e() -> dict:
@@ -355,12 +355,13 @@ def write_e2e_audit(checks: dict) -> dict:
     image_e2e = bool(image.get("real_e2e"))
     video_e2e = bool(video.get("real_e2e"))
     payload = {
-        "version": "4.5.3",
+        "version": "4.5.4",
         "provider": "xiaole-lechuang",
         "credential": checks.get("Creative Credential", {}).get("status") or checks.get("Lechuang Auth", {}).get("status") or existing.get("credential") or "",
         "contract": checks.get("Lechuang Contract", {}).get("status") or existing.get("contract") or "",
         "image": {
-            **{key: value for key, value in image.items() if key not in {"capability", "real_generation", "media_asset", "qa", "real_e2e"}},
+            **{key: value for key, value in image.items() if key not in {"capability", "real_generation", "media_asset", "qa", "real_e2e", "contract"}},
+            "contract": image.get("contract") or checks.get("Lechuang Contract", {}).get("status") or "PASS",
             "capability": checks.get("Image Generation", {}).get("status") or image.get("capability") or "",
             "real_generation": image.get("real_generation") or "",
             "media_asset": image.get("media_asset") or "",
@@ -368,6 +369,8 @@ def write_e2e_audit(checks: dict) -> dict:
             "real_e2e": image_e2e,
         },
         "video": {
+            **{key: value for key, value in video.items() if key not in {"capability", "real_generation", "media_asset", "qa", "real_e2e", "contract"}},
+            "contract": video.get("contract") or "NOT_VERIFIED",
             "capability": checks.get("Video Generation", {}).get("status") or video.get("capability") or "NOT_VERIFIED",
             "real_generation": video.get("real_generation") or "NOT_VERIFIED",
             "media_asset": video.get("media_asset") or "NOT_VERIFIED",
@@ -375,47 +378,87 @@ def write_e2e_audit(checks: dict) -> dict:
             "real_e2e": video_e2e,
         },
         "image_to_video": {
+            **{key: value for key, value in i2v.items() if key not in {"capability", "real_e2e", "contract"}},
+            "contract": i2v.get("contract") or "NOT_VERIFIED",
             "capability": checks.get("Image-to-Video", {}).get("status") or i2v.get("capability") or "NOT_VERIFIED",
+            "real_generation": i2v.get("real_generation") or "NOT_VERIFIED",
+            "media_asset": i2v.get("media_asset") or "NOT_VERIFIED",
+            "qa": i2v.get("qa") or "NOT_VERIFIED",
             "real_e2e": bool(i2v.get("real_e2e")),
         },
-        "overall": "BLOCKED_EXTERNAL",
+        "overall": "NOT_VERIFIED",
     }
     image_pass = image_e2e and str(payload["image"].get("media_asset") or "") == "PASS" and str(payload["image"].get("qa") or "") == "PASS"
-    if image_pass and video_e2e:
-        payload["overall"] = "READY"
+    video_pass = video_e2e and str(payload["video"].get("media_asset") or "") == "PASS" and str(payload["video"].get("qa") or "") == "PASS"
+    if image_pass and video_pass:
+        payload["overall"] = "CREATIVE_PRODUCTION_READY"
     elif image_pass:
         payload["overall"] = "IMAGE_PRODUCTION_READY"
+    elif str(payload["image"].get("capability") or "") == "BLOCKED_EXTERNAL":
+        payload["overall"] = "BLOCKED_EXTERNAL"
     path = e2e_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
     return payload
 
 
-def record_image_real_e2e(*, asset_id: str, qa_decision: str, sha256: str = "", mime_type: str = "") -> dict:
+def record_image_real_e2e(
+    *,
+    asset_id: str,
+    qa_decision: str,
+    sha256: str = "",
+    mime_type: str = "",
+    path: str = "",
+    width: int | None = None,
+    height: int | None = None,
+    size: int | None = None,
+    model: str = "",
+    request_id: str = "",
+) -> dict:
     """Persist image E2E evidence. Never stores secrets or raw credential payloads."""
     existing = load_e2e()
-    ok = bool(asset_id) and str(qa_decision).lower() == "pass" and bool(sha256)
+    path_ok = bool(path) and Path(path).is_file()
+    size_ok = int(size or 0) > 0 or (path_ok and Path(path).stat().st_size > 0)
+    mime_ok = str(mime_type or "").startswith("image/")
+    dim_ok = int(width or 0) > 0 and int(height or 0) > 0
+    qa_ok = str(qa_decision).lower() == "pass"
+    ok = bool(asset_id) and bool(sha256) and path_ok and size_ok and mime_ok and dim_ok and qa_ok
     image = {
-        "capability": "PASS",
+        "contract": "PASS",
+        "capability": "PASS" if ok else "BLOCKED_EXTERNAL",
         "real_generation": "PASS" if ok else "BLOCKED_EXTERNAL",
         "media_asset": "PASS" if ok else "BLOCKED_EXTERNAL",
-        "qa": "PASS" if ok else "BLOCKED_EXTERNAL",
+        "qa": "PASS" if qa_ok else "BLOCKED_EXTERNAL",
         "real_e2e": ok,
+        "model": model or "gpt-image-2",
+        "mime_type": mime_type,
         "asset_id": asset_id,
         "sha256_prefix": sha256[:12] if sha256 else "",
-        "mime_type": mime_type,
+        "width": width,
+        "height": height,
+        "size": size,
+        "path_exists": path_ok,
+        "request_id": request_id,
     }
-    existing["version"] = "4.5.3"
+    existing["version"] = "4.5.4"
     existing["provider"] = "xiaole-lechuang"
     existing["image"] = image
     existing.setdefault("video", {
+        "contract": "NOT_VERIFIED",
         "capability": "NOT_VERIFIED",
         "real_generation": "NOT_VERIFIED",
         "media_asset": "NOT_VERIFIED",
         "qa": "NOT_VERIFIED",
         "real_e2e": False,
     })
-    existing.setdefault("image_to_video", {"capability": "NOT_VERIFIED", "real_e2e": False})
+    existing.setdefault("image_to_video", {
+        "contract": "NOT_VERIFIED",
+        "capability": "NOT_VERIFIED",
+        "real_generation": "NOT_VERIFIED",
+        "media_asset": "NOT_VERIFIED",
+        "qa": "NOT_VERIFIED",
+        "real_e2e": False,
+    })
     existing["overall"] = "IMAGE_PRODUCTION_READY" if ok else "BLOCKED_EXTERNAL"
     path = e2e_path()
     path.parent.mkdir(parents=True, exist_ok=True)

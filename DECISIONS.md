@@ -10,6 +10,9 @@
 - **2026-09-03 V4.5.3:** XiaoleAI and Lechuang share one Creative credential
   (`XIAOLEAI_API_KEY` / `XIAOLEAI_BASE_URL`). Image generation is the verified
   OpenAI-compatible contract. Video remains NOT_VERIFIED.
+- **2026-09-03 V4.5.4:** Creative production gates are capability-independent.
+  IMAGE_PRODUCTION_READY does not require video. VIDEO and IMAGE_TO_VIDEO stay
+  NOT_VERIFIED until a real video API contract exists. Do not guess endpoints.
 - **2026-09-02:** Meiti owns native social accounts. Credentials are stored by
   credential_ref only.
 - **2026-09-02 V4.4.2:** Production social composition root is

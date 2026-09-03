@@ -17,18 +17,23 @@ from creative.providers.resolver import GenerationProviderResolver
 
 
 ROOT = Path(__file__).resolve().parents[2]
-AUDIT = ROOT / "docs/audits/meiti-v4.5.3-real-e2e.json"
+AUDIT = ROOT / "docs/audits/meiti-v4.5.4-real-e2e.json"
 
 
 def test_skip_is_not_real_e2e():
     audit = json.loads(AUDIT.read_text(encoding="utf-8"))
-    assert audit["version"] == "4.5.3"
-    assert audit["image"]["real_e2e"] is False or (
-        audit["image"]["media_asset"] == "PASS" and audit["image"]["qa"] == "PASS"
-    )
+    assert audit["version"] == "4.5.4"
+    if audit["image"]["real_e2e"] is True:
+        assert audit["image"]["media_asset"] == "PASS"
+        assert audit["image"]["qa"] == "PASS"
+        assert audit["image"]["real_generation"] == "PASS"
+    else:
+        assert audit["image"]["real_e2e"] is False
+    assert audit["video"]["real_e2e"] is False
+    assert audit["video"]["contract"] == "NOT_VERIFIED"
     if not load_creative_credential().present:
         assert audit["image"]["real_e2e"] is False
-        assert audit["overall"] != "READY"
+        assert audit["overall"] not in {"READY", "CREATIVE_PRODUCTION_READY", "IMAGE_PRODUCTION_READY"}
 
 
 def test_real_image_e2e_fail_closed(tmp_path):

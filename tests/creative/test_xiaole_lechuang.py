@@ -50,6 +50,7 @@ def _png_b64() -> str:
 def test_credential_loader_ignores_lechuang_env(monkeypatch):
     monkeypatch.delenv(API_KEY_ENV, raising=False)
     monkeypatch.delenv(BASE_URL_ENV, raising=False)
+    monkeypatch.delenv("MEITI_SECRET_DIR", raising=False)
     monkeypatch.setenv("LECHUANG_API_KEY", "must-not-be-used")
     monkeypatch.setenv("LECHUANG_API_URL", "https://example.invalid")
     cred = load_creative_credential()
@@ -60,6 +61,7 @@ def test_credential_loader_ignores_lechuang_env(monkeypatch):
 
 
 def test_credential_loader_uses_xiaole_env(monkeypatch):
+    monkeypatch.delenv("MEITI_SECRET_DIR", raising=False)
     monkeypatch.setenv(API_KEY_ENV, "xiaole-secret")
     monkeypatch.setenv(BASE_URL_ENV, "https://api.xiaoleai.team/v1")
     cred = load_creative_credential()
@@ -158,11 +160,39 @@ def test_technical_qa_on_persisted_png(tmp_path):
     assert asset.size > 0
 
 
-def test_cli_generate_video_is_not_verified():
+def test_cli_generate_video_is_not_verified(capsys):
     from scripts.meiti import cmd_creative_generate_video
     class Args:
         prompt = "x"
     assert cmd_creative_generate_video(Args()) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "NOT_VERIFIED"
+    assert payload["VIDEO_CONTRACT_VERIFIED"] is False
+    assert payload["VIDEO_PRODUCTION_READY"] == "NOT_VERIFIED"
+
+
+def test_skill_path_is_media_owner():
+    root = Path(__file__).resolve().parents[2]
+    skill = (root / ".agents/skills/media/xiaoleai-image-generation/SKILL.md").read_text(encoding="utf-8")
+    owned = ".agents/skills/media/xiaoleai-image-generation/scripts/generate_image.py"
+    stale = ".agents/skills/" + "xiaoleai-image-generation/"
+    assert owned in skill
+    assert stale not in skill
+    hits = []
+    needle = "agents/skills/" + "xiaoleai-image-generation"
+    skip = {".git", ".venv", "__pycache__", ".understand-anything", "postgres-data", "media", "node_modules"}
+    for folder in (root / ".agents", root / "creative", root / "scripts", root / "docs", root / "tests"):
+        for path in folder.rglob("*"):
+            if not path.is_file() or any(part in skip for part in path.parts):
+                continue
+            if path.suffix.lower() not in {".md", ".py", ".yaml", ".yml", ".json", ".txt"}:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if needle in text and "xiaoleai-image-generation/" in text.replace("/media/", "/"):
+                if path.name == "test_xiaole_lechuang.py":
+                    continue
+                hits.append(str(path.relative_to(root)))
+    assert hits == []
 
 
 def test_cli_generate_image_blocked_without_key(monkeypatch, capsys):
@@ -181,12 +211,34 @@ def test_cli_generate_image_blocked_without_key(monkeypatch, capsys):
     assert payload["status"] == "BLOCKED_EXTERNAL"
 
 
-def test_audit_owner_is_v453():
-    path = Path(__file__).resolve().parents[2] / "docs/audits/meiti-v4.5.3-real-e2e.json"
+def test_audit_owner_is_v454():
+    root = Path(__file__).resolve().parents[2]
+    legacy = json.loads((root / "docs/audits/meiti-v4.5.3-real-e2e.json").read_text(encoding="utf-8"))
+    assert legacy["version"] == "4.5.3"
+    path = root / "docs/audits/meiti-v4.5.4-real-e2e.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["version"] == "4.5.3"
+    assert data["version"] == "4.5.4"
     assert data["provider"] == "xiaole-lechuang"
+    assert data["video"]["contract"] == "NOT_VERIFIED"
     assert data["video"]["capability"] == "NOT_VERIFIED"
     assert data["image_to_video"]["real_e2e"] is False
-    assert "api_key" not in json.dumps(data).lower()
-    assert "token" not in json.dumps(data).lower()
+    dumped = json.dumps(data).lower()
+    assert "api_key" not in dumped
+    assert "token" not in dumped
+    assert "authorization" not in dumped
+
+
+def test_creative_doctor_keeps_image_and_video_independent(monkeypatch):
+    from scripts import creative_doctor
+
+    monkeypatch.setattr(creative_doctor, "AUDIT_PATH", Path(__file__).resolve().parents[2] / "docs/audits/meiti-v4.5.4-real-e2e.json")
+    checks = creative_doctor.run()
+    assert checks["LIVE"]["VIDEO_PRODUCTION_READY"]["status"] == "NOT_VERIFIED"
+    assert checks["LIVE"]["IMAGE_TO_VIDEO_PRODUCTION_READY"]["status"] == "NOT_VERIFIED"
+    image = checks["LIVE"]["IMAGE_PRODUCTION_READY"]["status"]
+    assert image in {"PASS", "BLOCKED_EXTERNAL"}
+    creative = checks["LIVE"]["CREATIVE_PRODUCTION_READY"]["status"]
+    if image == "PASS":
+        assert creative == "PASS"
+    else:
+        assert creative == "BLOCKED_EXTERNAL"

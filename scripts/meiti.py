@@ -355,6 +355,12 @@ def cmd_creative_generate_image(args: argparse.Namespace) -> int:
             qa_decision=str(qa.get("decision") or ""),
             sha256=str(getattr(asset, "sha256", "") or ""),
             mime_type=str(getattr(asset, "mime_type", "") or ""),
+            path=str(getattr(asset, "path", "") or ""),
+            width=getattr(asset, "width", None),
+            height=getattr(asset, "height", None),
+            size=getattr(asset, "size", None),
+            model=str((task.result or {}).get("model") or args.model or ""),
+            request_id=str((task.result or {}).get("request_id") or task.provider_task_id or ""),
         )
     payload = {
         "status": task.status,
@@ -374,8 +380,20 @@ def cmd_creative_generate_image(args: argparse.Namespace) -> int:
 
 
 def cmd_creative_generate_video(_args: argparse.Namespace) -> int:
-    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
-    print(json.dumps({"status": "NOT_VERIFIED", "reason": VIDEO_NOT_VERIFIED}))
+    from creative.providers.lechuang.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
+    print(json.dumps({
+        "status": "NOT_VERIFIED",
+        "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
+        "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
+        "reason": VIDEO_NOT_VERIFIED,
+        "evidence_checked": [
+            "creative/providers/lechuang/models.yaml",
+            "creative/providers/lechuang/client.py",
+            "creative/providers/lechuang/README.md",
+            ".agents/skills/media/xiaoleai-image-generation/SKILL.md",
+            "docs.xiaoleai.team public pages",
+        ],
+    }))
     return 1
 
 

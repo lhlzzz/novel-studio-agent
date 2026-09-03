@@ -61,7 +61,7 @@ into process environment. Bootstrap never writes credentials.
   remote media identifiers, and price/quantity/category validation.
 
 Do not claim production verified or real E2E unless evidence exists in
-`docs/audits/meiti-v4.5.3-real-e2e.json`. Missing credentials are
+`docs/audits/meiti-v4.5.4-real-e2e.json`. Missing credentials are
 `BLOCKED_EXTERNAL`, not PASS. Image and video gates are independent.
 
 ```bash

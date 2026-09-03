@@ -158,7 +158,7 @@ def main() -> int:
         if args.aspect_ratio is None:
             args.aspect_ratio = platform_defaults["aspect_ratio"]
         if args.output_prefix is None:
-            project_root = Path(__file__).resolve().parents[4]
+            project_root = Path(__file__).resolve().parents[5]
             args.output_prefix = (
                 project_root
                 / "videos"
