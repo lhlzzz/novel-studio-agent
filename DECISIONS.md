@@ -22,3 +22,9 @@
   account-scoped. Media uploads are keyed by source_hash+provider+account_id.
   request_id, provider_request_id, and provider_object_id are distinct.
   Missing external credentials are BLOCKED_EXTERNAL, never PASS.
+- **2026-09-03 V4.5:** Production activation. Secret files use hashed identity
+  and directory fsync. AccountManager.get_credentials() is read-only.
+  MediaUpload is first-class and persisted by JobStore. Xianyu listing states
+  are DRAFT/SUBMITTED/PUBLISHED/OFF_SHELF/FAILED/UNKNOWN. Doctor architecture
+  and production gates are separate; production gate exits non-zero until
+  real E2E evidence exists. Missing external credentials remain BLOCKED_EXTERNAL.

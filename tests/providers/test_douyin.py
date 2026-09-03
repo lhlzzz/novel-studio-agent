@@ -4,6 +4,7 @@ from social.auth.secrets import RuntimeSecretStore
 from social.providers.douyin.adapter import DouyinAdapter
 from social.providers.douyin.client import DouyinClient
 from tests.fakes.social.http import FakeHttp
+from integrations.contracts.distribution import MediaUploadResult
 
 
 def _adapter(tmp_path, handler):
@@ -44,7 +45,7 @@ def test_image_post_object_type(tmp_path):
         return {"data": {}}
     adapter, _ = _adapter(tmp_path, handler)
     from integrations.contracts.distribution import ContentVariant, DistributionJob
-    job = DistributionJob("j", "p", "douyin:open", ContentVariant("douyin:open", "hi", metadata={"uploaded_media": [{"remote_id": "img-1"}]}), idempotency_key="k", provider="douyin", platform="douyin")
+    job = DistributionJob("j", "p", "douyin:open", ContentVariant("douyin:open", "hi"), idempotency_key="k", provider="douyin", platform="douyin", media_uploads=(MediaUploadResult(source_hash="h", source_path="a.jpg", mime_type="image/jpeg", size=1, provider="douyin", remote_id="img-1", remote_path="img-1", uploaded_at="now"),))
     result = adapter.publish(job)
     assert result["provider_object_type"] == "image_post"
     assert result["status"] == "processing"

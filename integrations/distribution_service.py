@@ -237,29 +237,16 @@ class DistributionService:
         for path in job.variant.media:
             digest = _hash_path(path)
             existing = self.store.get_media(digest, job.provider, job.account_id) if digest else None
-            if existing is not None and existing.status == "uploaded" and existing.remote_id:
+            if existing is not None and existing.status in {"UPLOADED", "uploaded"} and (existing.remote_id or getattr(existing, "provider_media_id", "")):
                 uploaded.append(existing)
                 continue
             result = self.adapter.upload_media(path, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id)
-            result = replace(result, account_id=job.account_id, provider=job.provider)
+            result = replace(result, account_id=job.account_id, provider=job.provider, platform=job.platform or result.platform)
             self.store.save_media(result)
             uploaded.append(result)
         if not job.variant.media:
             return job
-        metadata = dict(job.variant.metadata or {})
-        metadata["uploaded_media"] = [
-            {
-                "source_hash": item.source_hash,
-                "source_path": item.source_path,
-                "mime_type": item.mime_type,
-                "size": item.size,
-                "remote_id": item.remote_id,
-                "remote_path": item.remote_path,
-                "uploaded_at": item.uploaded_at,
-            }
-            for item in uploaded
-        ]
-        return replace(job, variant=replace(job.variant, metadata=metadata))
+        return replace(job, media_uploads=tuple(uploaded))
 
     def _persist_handoff(self, job, result, attempt_no: int, started: str):
         from social.handoff.models import XHSHandoff
@@ -324,7 +311,7 @@ class DistributionService:
             self.store.save_job(job)
             return ListingOutcome(listing=existing, job=job, request_id=job.request_id, provider_object_id=existing.provider_item_id)
         payload = result.get("listing") if isinstance(result.get("listing"), dict) else {}
-        object_id = str(result.get("provider_object_id") or result.get("id") or "")
+        object_id = str(result.get("provider_object_id") or result.get("item_id") or result.get("id") or "")
         account = self._account(job)
         job = transition_job(job, "SUBMITTED", provider_response=result)
         self.store.save_job(job)
@@ -342,7 +329,7 @@ class DistributionService:
             shipping=dict(payload.get("shipping") or {}),
             attributes=dict(payload.get("attributes") or {}),
             commerce_intent="explicit",
-            status="PROCESSING",
+            status="SUBMITTED",
             provider_item_id=object_id,
             distribution_job_id=job.job_id,
             content_package_id=job.content_package_id,

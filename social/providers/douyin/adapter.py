@@ -162,8 +162,9 @@ class DouyinAdapter(BaseCNAdapter):
     def publish(self, job) -> dict[str, Any]:
         account = self.get_account(job.account_id)
         token, open_id = self._token(account)
-        uploaded = list((job.variant.metadata or {}).get("uploaded_media") or [])
-        media_ids = [str(item.get("remote_id")) for item in uploaded if item.get("remote_id")]
+        from social.providers.base import job_uploaded_media
+        uploaded = job_uploaded_media(job)
+        media_ids = [str(item.remote_id or item.provider_media_id) for item in uploaded]
         videos = [path for path in job.variant.media if str(path).lower().endswith((".mp4", ".mov"))]
         if videos:
             if not media_ids:
@@ -179,12 +180,15 @@ class DouyinAdapter(BaseCNAdapter):
         item_id = video.item_id or video.video_id
         if not item_id:
             raise PublishError("Douyin create did not return item_id; HTTP 200 is not PUBLISHED")
+        extra = result if isinstance(result, dict) else {}
+        request_id = str(extra.get("provider_request_id") or extra.get("log_id") or (extra.get("extra") or {}).get("logid") or "") or None
         return {
-            "id": item_id,
+            "provider_object_id": item_id,
             "post_id": item_id,
             "external_id": video.video_id or item_id,
             "status": "processing",
             "provider_object_type": object_type,
+            "provider_request_id": request_id,
         }
 
     def get_status(self, provider_post_id: str, *, provider_object_type: str = "video") -> dict[str, Any]:

@@ -7,7 +7,7 @@ import pytest
 from commerce.models import CommerceDecision
 from commerce.xianyu import XianyuListing
 from content.models import ContentPackage
-from integrations.contracts.distribution import ContentVariant, DistributionJob, PublicationOutcome
+from integrations.contracts.distribution import ContentVariant, DistributionJob, MediaUploadResult, PublicationOutcome
 from integrations.distribution_service import DistributionService, ExternalActionBlocked
 from integrations.persistence import InMemoryStore
 from social.accounts.models import SocialAccount, SocialProviderCapabilities, enable_account, transition_account
@@ -97,9 +97,9 @@ def test_xianyu_listing_persisted_once_by_service_not_adapter(monkeypatch, tmp_p
             "approval": "approved",
             "commerce_intent": "sell",
             "listing": {"title": "bike", "price": "12.5", "category_id": "cat", "quantity": 1},
-            "uploaded_media": [{"remote_id": "media-9"}],
         }),
         idempotency_key="xy-k", provider="xianyu", platform="xianyu", request_id="req-xy",
+        media_uploads=(MediaUploadResult(source_hash="h", source_path="https://cdn/x.jpg", mime_type="image/jpeg", size=1, provider="xianyu", remote_id="media-9", remote_path="media-9", uploaded_at="now"),),
     )
     result = DistributionService(adapter, store=store).execute(job, gate_check=lambda item: True)
     assert result.kind == "listing"

@@ -90,25 +90,134 @@ def cmd_publish(args: argparse.Namespace) -> int:
     agent = runtime.agent(provider_name=args.platform)
     job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job", account_id=args.account_id)
     result = agent.execute(job)
-    if hasattr(result, "handoff_id"):
+    kind = getattr(result, "kind", "")
+    if kind == "handoff" or hasattr(result, "handoff"):
+        handoff = getattr(result, "handoff", result)
         payload = {
-            "handoff_id": result.handoff_id,
-            "status": result.status,
-            "platform": result.platform,
             "kind": "handoff",
+            "handoff_id": getattr(handoff, "handoff_id", ""),
+            "status": getattr(handoff, "status", ""),
+            "platform": getattr(handoff, "platform", "xiaohongshu"),
         }
         print("READY_FOR_XHS")
         print(json.dumps(payload))
         return 0
+    if kind == "listing" or hasattr(result, "listing"):
+        listing = getattr(result, "listing", result)
+        payload = {
+            "kind": "listing",
+            "listing_id": getattr(listing, "listing_id", ""),
+            "provider_item_id": getattr(listing, "provider_item_id", ""),
+            "status": getattr(listing, "status", ""),
+            "provider_request_id": getattr(result, "provider_request_id", None),
+        }
+        print(json.dumps(payload))
+        return 0
+    publication = getattr(result, "publication", result)
     payload = {
-        "publication_id": result.publication_id,
-        "provider_post_id": result.provider_post_id,
-        "status": result.status,
-        "platform": result.platform,
-        "provider_object_type": result.provider_object_type,
+        "kind": "publication",
+        "publication_id": getattr(publication, "publication_id", ""),
+        "provider_post_id": getattr(publication, "provider_post_id", ""),
+        "status": getattr(publication, "status", ""),
+        "platform": getattr(publication, "platform", ""),
+        "provider_object_type": getattr(publication, "provider_object_type", ""),
+        "provider_request_id": getattr(result, "provider_request_id", None),
+        "provider_object_id": getattr(result, "provider_object_id", ""),
     }
     print(json.dumps(payload))
     return 0
+
+
+
+def bootstrap_production() -> dict:
+    """Check production prerequisites. Never generate platform credentials."""
+    import os
+    import stat
+    from pathlib import Path as _Path
+
+    checks: dict = {}
+
+    def _item(status: str, **extra):
+        payload = {"status": status}
+        payload.update(extra)
+        return payload
+
+    secret_dir = os.environ.get("MEITI_SECRET_DIR", "").strip()
+    if not secret_dir:
+        checks["secret_dir"] = _item("BLOCKED_EXTERNAL", reason="MEITI_SECRET_DIR missing")
+    else:
+        path = _Path(secret_dir)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            os.chmod(path, 0o700)
+            mode = stat.S_IMODE(path.stat().st_mode)
+            if mode != 0o700:
+                checks["secret_dir"] = _item("FAIL", reason=f"directory mode {oct(mode)} != 0700", path=str(path))
+            else:
+                from social.auth.secrets import production_secret_store, secret_id
+                store = production_secret_store()
+                doctor = store.doctor()
+                lechuang_key = os.getenv("LECHUANG_API_KEY", "").strip()
+                lechuang_url = os.getenv("LECHUANG_API_URL", "").strip()
+                if lechuang_key:
+                    store.put_json({"api_key": lechuang_key, "api_url": lechuang_url}, ref=secret_id("lechuang", "api"))
+                checks["secret_dir"] = _item("PASS" if doctor.get("ok") else "FAIL", **{k: v for k, v in doctor.items() if k != "ok"})
+        except OSError as exc:
+            checks["secret_dir"] = _item("FAIL", reason=str(exc))
+
+    try:
+        from scripts.db.engine import engine
+        with engine.connect() as conn:
+            conn.exec_driver_sql("SELECT 1")
+        checks["database"] = _item("PASS")
+    except Exception as exc:
+        checks["database"] = _item("BLOCKED_EXTERNAL", reason=str(exc))
+
+    try:
+        from alembic.config import Config
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        from scripts.db.engine import engine
+        from scripts.db.migrate import MIGRATIONS_DIR
+        cfg = Config()
+        cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
+        script = ScriptDirectory.from_config(cfg)
+        with engine.connect() as conn:
+            context = MigrationContext.configure(conn)
+            current = context.get_current_revision()
+        head = script.get_current_head()
+        if current == head:
+            checks["migration"] = _item("PASS", current=current, head=head)
+        else:
+            checks["migration"] = _item("FAIL", current=current, head=head, reason="database is not at head revision")
+    except Exception as exc:
+        checks["migration"] = _item("BLOCKED_EXTERNAL", reason=str(exc))
+
+    def _env(keys: tuple[str, ...]) -> bool:
+        return all(os.getenv(key, "").strip() for key in keys)
+
+    checks["douyin_oauth"] = _item("PASS" if _env(("DOUYIN_CLIENT_KEY", "DOUYIN_CLIENT_SECRET", "DOUYIN_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
+    checks["kuaishou_oauth"] = _item("PASS" if _env(("KUAISHOU_APP_ID", "KUAISHOU_APP_SECRET", "KUAISHOU_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
+    checks["xianyu_oauth"] = _item("PASS" if _env(("XIANYU_APP_KEY", "XIANYU_APP_SECRET", "XIANYU_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
+    jushita = (os.getenv("MEITI_XIANYU_DEPLOYMENT_MODE") or "").strip().upper() == "JUSHITA"
+    checks["xianyu_jushita"] = _item("PASS" if jushita else "BLOCKED_EXTERNAL")
+    checks["xhs_oauth"] = _item("PASS" if _env(("XHS_CLIENT_ID", "XHS_CLIENT_SECRET", "XHS_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
+    checks["lechuang"] = _item("PASS" if _env(("LECHUANG_API_URL", "LECHUANG_API_KEY")) else "BLOCKED_EXTERNAL")
+
+    blocking = [name for name, item in checks.items() if item["status"] == "FAIL"]
+    external = [name for name, item in checks.items() if item["status"] == "BLOCKED_EXTERNAL"]
+    if blocking:
+        overall, exit_code = "FAIL", 1
+    elif external:
+        overall, exit_code = "BLOCKED_EXTERNAL", 1
+    else:
+        overall, exit_code = "PASS", 0
+    return {
+        "overall": {"status": overall},
+        "checks": checks,
+        "generated_credentials": False,
+        "exit_code": exit_code,
+    }
 
 
 def cmd_doctor(_args: argparse.Namespace) -> int:
@@ -116,9 +225,17 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return main()
 
 
+def cmd_bootstrap_production(_args: argparse.Namespace) -> int:
+    report = bootstrap_production()
+    print(json.dumps(report, indent=2, default=str))
+    return int(report.get("exit_code") or 1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="meiti")
     sub = parser.add_subparsers(dest="group", required=True)
+    boot = sub.add_parser("bootstrap-production")
+    boot.set_defaults(func=cmd_bootstrap_production)
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)

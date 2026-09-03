@@ -1,0 +1,35 @@
+{
+  "commit": "9176cbf7eb7c2f952a9b5278c693556fe4f3e1dd",
+  "timestamp": "2026-09-03T02:44:25.202537+00:00",
+  "architecture": {
+    "status": "PASS"
+  },
+  "runtime": {
+    "status": "BLOCKED_EXTERNAL"
+  },
+  "providers": {
+    "douyin": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "kuaishou": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "xianyu": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "xiaohongshu": {
+      "status": "HANDOFF_ONLY"
+    },
+    "lechuang": {
+      "status": "BLOCKED_EXTERNAL"
+    }
+  },
+  "e2e": {
+    "status": "BLOCKED_EXTERNAL"
+  },
+  "overall": {
+    "status": "BLOCKED_EXTERNAL"
+  },
+  "exit_code": 1,
+  "real_e2e": false
+}

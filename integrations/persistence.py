@@ -50,8 +50,20 @@ class JobStore(Protocol):
     def get_listing_by_job(self, job_id: str) -> Any | None: ...
 
 
+def _expire_stored_handoff(store, handoff):
+    if handoff is None:
+        return None
+    from social.handoff.models import expire_if_needed
+    expired = expire_if_needed(handoff)
+    if expired.status != handoff.status:
+        store.save_handoff(expired)
+        return expired
+    return handoff
+
+
 @dataclass
 class InMemoryStore:
+
     jobs: dict[str, DistributionJob] = field(default_factory=dict)
     publications: dict[str, Publication] = field(default_factory=dict)
     media: dict[str, MediaUploadResult] = field(default_factory=dict)
@@ -177,15 +189,15 @@ class InMemoryStore:
         return handoff
 
     def get_handoff(self, handoff_id: str):
-        return self.handoffs.get(handoff_id)
+        return _expire_stored_handoff(self, self.handoffs.get(handoff_id))
 
     def get_handoff_by_job(self, job_id: str):
         found = self.handoffs.get(f"job:{job_id}")
         if found is not None:
-            return found
+            return _expire_stored_handoff(self, found)
         for item in self.handoffs.values():
             if getattr(item, "distribution_job_id", "") == job_id:
-                return item
+                return _expire_stored_handoff(self, item)
         return None
 
     def save_listing(self, listing):
@@ -490,14 +502,16 @@ class DatabaseStore:
         from scripts.db.models import SocialHandoffRecord
         with SessionLocal() as session:
             row = session.get(SocialHandoffRecord, handoff_id)
-            return _handoff_from_record(row) if row is not None else None
+            handoff = _handoff_from_record(row) if row is not None else None
+        return _expire_stored_handoff(self, handoff)
 
     def get_handoff_by_job(self, job_id: str):
         from scripts.db.engine import SessionLocal
         from scripts.db.models import SocialHandoffRecord
         with SessionLocal() as session:
             row = session.query(SocialHandoffRecord).filter_by(distribution_job_id=job_id).one_or_none()
-            return _handoff_from_record(row) if row is not None else None
+            handoff = _handoff_from_record(row) if row is not None else None
+        return _expire_stored_handoff(self, handoff)
 
     def save_derived_asset(self, record):
         from scripts.db.engine import SessionLocal
@@ -654,10 +668,18 @@ class DatabaseStore:
                 "provider": result.provider,
                 "account_id": result.account_id or "",
                 "integration_id": result.account_id or "",
-                "remote_media_id": result.remote_id,
+                "remote_media_id": result.remote_id or result.provider_media_id,
                 "remote_media_path": result.remote_path,
                 "status": result.status,
                 "uploaded_at": result.uploaded_at,
+                "platform": result.platform or "",
+                "source_asset_id": result.source_asset_id or "",
+                "media_type": result.media_type or "",
+                "provider_request_id": result.provider_request_id or None,
+                "checksum": result.checksum or result.source_hash,
+                "completed_at": result.completed_at,
+                "error_code": result.error_code or result.failure_code,
+                "error_message": result.error_message,
             }
             if row is None:
                 row = MediaUploadRecord(source_hash=result.source_hash, **fields)
@@ -681,11 +703,21 @@ class DatabaseStore:
             row = query.one_or_none()
             if row is None:
                 return None
+            uploaded_at = row.uploaded_at.isoformat() if hasattr(row.uploaded_at, "isoformat") else str(row.uploaded_at)
+            completed = getattr(row, "completed_at", None)
             return MediaUploadResult(
                 source_hash=row.source_hash, source_path=row.source_path, mime_type=row.mime_type,
                 size=row.size, provider=row.provider, remote_id=row.remote_media_id,
-                remote_path=row.remote_media_path, uploaded_at=row.uploaded_at.isoformat(), status=row.status,
+                remote_path=row.remote_media_path, uploaded_at=uploaded_at, status=row.status,
                 account_id=getattr(row, "account_id", "") or "",
+                platform=getattr(row, "platform", "") or "",
+                source_asset_id=getattr(row, "source_asset_id", "") or "",
+                media_type=getattr(row, "media_type", "") or "",
+                provider_request_id=getattr(row, "provider_request_id", "") or "",
+                checksum=getattr(row, "checksum", "") or row.source_hash,
+                completed_at=completed.isoformat() if completed is not None and hasattr(completed, "isoformat") else (str(completed) if completed else None),
+                error_code=getattr(row, "error_code", None),
+                error_message=getattr(row, "error_message", None),
             )
 
     def save_attempt(self, attempt: DistributionAttempt) -> DistributionAttempt:

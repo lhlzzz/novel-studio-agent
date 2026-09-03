@@ -634,9 +634,17 @@ class MediaUploadRecord(Base):
     integration_id = Column(String(255), nullable=False, default="")
     remote_media_id = Column(String(255), nullable=False)
     remote_media_path = Column(Text, nullable=False)
-    status = Column(String(40), nullable=False, default="uploaded")
+    status = Column(String(40), nullable=False, default="UPLOADED")
     uploaded_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    platform = Column(String(120), nullable=False, default="")
+    source_asset_id = Column(String(255), nullable=False, default="")
+    media_type = Column(String(40), nullable=False, default="")
+    provider_request_id = Column(String(255))
+    checksum = Column(String(64), nullable=False, default="")
+    completed_at = Column(DateTime)
+    error_code = Column(String(120))
+    error_message = Column(Text)
 
     __table_args__ = (
         Index("idx_meiti_media_uploads_provider", "provider"),
@@ -673,7 +681,7 @@ class XianyuListingRecord(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('DRAFT','SUBMITTING','PROCESSING','ONLINE','FAILED','REMOVED','UNKNOWN')",
+            "status IN ('DRAFT','SUBMITTED','PUBLISHED','OFF_SHELF','FAILED','UNKNOWN')",
             name="ck_meiti_xianyu_listing_status",
         ),
         Index("uq_meiti_xianyu_listings_job", "distribution_job_id", unique=True, postgresql_where=text("distribution_job_id <> ''")),

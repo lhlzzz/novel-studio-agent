@@ -1,4 +1,4 @@
-# Meiti V4.4.4
+# Meiti V4.5
 
 Meiti is an AI Creator Operating System.
 
@@ -32,32 +32,42 @@ Analytics take store/secrets from that runtime. Testing uses
 `SocialRuntime.testing()`. Production refuses `InMemoryStore` and missing
 `MEITI_SECRET_DIR`.
 
+```bash
+python scripts/meiti.py bootstrap-production
+```
+
+Bootstrap checks `MEITI_SECRET_DIR` (0700), database, migrations, and
+provider prerequisites. It never generates platform credentials.
+
 ## Current production set
 
-- 小红书: official OAuth architecture exists; `write_notes` / direct server
-  publish is not live-verified. Meiti prepares a note package and persists
-  one `XHSHandoff` per `DistributionJob`. Direct publish is BLOCKED_EXTERNAL.
-  Remote reconciliation is NOT_APPLICABLE. Account status is `HANDOFF_READY`.
+- 小红书: official OAuth method inventory exists (`auth_info`, `authorize`,
+  `access_token`, `refresh_token`, `token_status`, `batch_get_min_user_info`).
+  `write_notes` is not live-verified. Meiti prepares a note package and
+  persists one `XHSHandoff` per `DistributionJob`. Direct publish is
+  BLOCKED_EXTERNAL. Remote reconciliation is NOT_APPLICABLE. Account status
+  is `HANDOFF_READY`.
 - 抖音: official OAuth + video/image upload + create. HTTP 200 create is
-  SUBMITTED/PROCESSING, not PUBLISHED. Image and video capabilities are
-  separate. Image status is NOT_APPLICABLE. PKCE is not part of the official
-  Douyin token exchange.
+  SUBMITTED/PROCESSING, not PUBLISHED. Chunk upload is suggested above 50MB
+  and required above 128MB, max 4GB. PKCE is not part of the official Douyin
+  token exchange.
 - 快手: official `user_video_publish` (`start_upload` -> runtime HTTPS upload
   -> multipart publish -> photo_id -> photo_info). Whole-file threshold is
   10MB. Publish success is PROCESSING until photo query. PKCE is not used.
-- 闲鱼: marketplace listing, not a social post. Production listing requires
-  `MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA`, explicit `CommerceDecision`, remote
-  media identifiers, and price/quantity/category validation. Local-bytes
-  media upload is not contract-verified.
+- 闲鱼: marketplace listing, not a social post. Listing states are DRAFT /
+  SUBMITTED / PUBLISHED / OFF_SHELF / FAILED / UNKNOWN. Production listing
+  requires `MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA`, explicit `CommerceDecision`,
+  remote media identifiers, and price/quantity/category validation.
 
 Do not claim production verified or real E2E unless evidence exists in
-`docs/audits/meiti-v4.4.4-cn-e2e.json`. Missing credentials are
+`docs/audits/meiti-v4.5-real-e2e.json`. Missing credentials are
 `BLOCKED_EXTERNAL`, not PASS.
 
 ```bash
 python -m pytest
 python scripts/social_doctor.py
 python scripts/meiti_doctor.py
+python scripts/meiti.py bootstrap-production
 python scripts/runtime_check.py
 python scripts/db/migrate.py verify
 python -m scripts.meiti social doctor

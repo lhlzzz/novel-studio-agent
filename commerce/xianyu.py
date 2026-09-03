@@ -8,22 +8,20 @@ from typing import Any
 
 LISTING_STATES = (
     "DRAFT",
-    "SUBMITTING",
-    "PROCESSING",
-    "ONLINE",
+    "SUBMITTED",
+    "PUBLISHED",
+    "OFF_SHELF",
     "FAILED",
-    "REMOVED",
     "UNKNOWN",
 )
 
 LISTING_TRANSITIONS = {
-    "DRAFT": {"SUBMITTING", "FAILED", "UNKNOWN"},
-    "SUBMITTING": {"PROCESSING", "FAILED", "UNKNOWN"},
-    "PROCESSING": {"ONLINE", "FAILED", "UNKNOWN"},
-    "ONLINE": {"REMOVED", "FAILED", "UNKNOWN"},
-    "FAILED": {"DRAFT", "SUBMITTING"},
-    "REMOVED": set(),
-    "UNKNOWN": {"PROCESSING", "ONLINE", "FAILED", "REMOVED"},
+    "DRAFT": {"SUBMITTED", "FAILED", "UNKNOWN"},
+    "SUBMITTED": {"PUBLISHED", "FAILED", "UNKNOWN", "OFF_SHELF"},
+    "PUBLISHED": {"OFF_SHELF", "FAILED", "UNKNOWN"},
+    "OFF_SHELF": set(),
+    "FAILED": {"DRAFT", "SUBMITTED"},
+    "UNKNOWN": {"SUBMITTED", "PUBLISHED", "FAILED", "OFF_SHELF"},
 }
 
 
@@ -34,19 +32,17 @@ class IllegalListingTransition(ValueError):
 def map_listing_status(raw: str) -> str:
     value = str(raw or "").lower()
     if value in {"0", "online", "onsale", "published", "sale", "online_success"}:
-        return "ONLINE"
-    if value in {"1", "offline", "downshelf", "instock", "removed"}:
-        return "REMOVED"
+        return "PUBLISHED"
+    if value in {"1", "offline", "downshelf", "instock", "removed", "off_shelf"}:
+        return "OFF_SHELF"
     if value in {"2", "deleted", "delete"}:
-        return "REMOVED"
-    if value in {"3", "reviewing", "audit", "pending", "processing", "submitted"}:
-        return "PROCESSING"
+        return "OFF_SHELF"
+    if value in {"3", "reviewing", "audit", "pending", "processing", "submitted", "submitting"}:
+        return "SUBMITTED"
     if value in {"4", "blocked", "punish", "failed", "fail"}:
         return "FAILED"
     if value in {"draft"}:
         return "DRAFT"
-    if value in {"submitting"}:
-        return "SUBMITTING"
     if value in {"unknown"}:
         return "UNKNOWN"
     return "UNKNOWN"

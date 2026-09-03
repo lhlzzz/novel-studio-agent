@@ -35,7 +35,13 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def job_uploaded_media(job) -> list[MediaUploadResult]:
+    uploads = list(getattr(job, "media_uploads", ()) or ())
+    return [item for item in uploads if getattr(item, "remote_id", "") or getattr(item, "provider_media_id", "")]
+
+
 class BaseSocialAdapter:
+
     provider = ""
     platform = ""
     api_base = ""
@@ -175,40 +181,12 @@ class BaseSocialAdapter:
         return []
 
     def ensure_media(self, job: DistributionJob) -> tuple[DistributionJob, list[MediaUploadResult]]:
-        uploaded: list[MediaUploadResult] = []
-        metadata = dict(job.variant.metadata or {})
-        existing = list(metadata.get("uploaded_media") or [])
+        uploaded: list[MediaUploadResult] = list(getattr(job, "media_uploads", ()) or ())
+        if uploaded:
+            return job, uploaded
         for path in job.variant.media:
-            found = next((item for item in existing if item.get("source_path") == path), None)
-            if found:
-                uploaded.append(
-                    MediaUploadResult(
-                        source_hash=str(found.get("source_hash") or ""),
-                        source_path=path,
-                        mime_type=str(found.get("mime_type") or "application/octet-stream"),
-                        size=int(found.get("size") or 0),
-                        provider=self.provider,
-                        remote_id=str(found.get("remote_id") or ""),
-                        remote_path=str(found.get("remote_path") or ""),
-                        uploaded_at=str(found.get("uploaded_at") or _utcnow()),
-                    )
-                )
-                continue
             uploaded.append(self.upload_media(path, account_id=job.account_id, idempotency_key=job.idempotency_key or job.job_id))
-        metadata["uploaded_media"] = [
-            {
-                "source_hash": item.source_hash,
-                "source_path": item.source_path,
-                "mime_type": item.mime_type,
-                "size": item.size,
-                "remote_id": item.remote_id,
-                "remote_path": item.remote_path,
-                "uploaded_at": item.uploaded_at,
-            }
-            for item in uploaded
-        ]
-        variant = replace(job.variant, metadata=metadata)
-        return replace(job, variant=variant), uploaded
+        return replace(job, media_uploads=tuple(uploaded)), uploaded
 
     def upload_media(self, source_path: str, *, account_id: str = "", idempotency_key: str = "") -> MediaUploadResult:
         path = Path(source_path)

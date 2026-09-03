@@ -1,0 +1,40 @@
+{
+  "commit": "9176cbf7eb7c2f952a9b5278c693556fe4f3e1dd",
+  "timestamp": "2026-09-03T02:44:25.202537+00:00",
+  "real_e2e": false,
+  "providers": {
+    "douyin": {
+      "oauth": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "reconciliation": "PASS",
+      "analytics": "PASS",
+      "real_e2e": false
+    },
+    "kuaishou": {
+      "oauth": "BLOCKED_EXTERNAL",
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "reconciliation": "PASS",
+      "analytics": "PASS",
+      "real_e2e": false
+    },
+    "xianyu": {
+      "oauth": "BLOCKED_EXTERNAL",
+      "jushita": "BLOCKED_EXTERNAL",
+      "listing": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "xiaohongshu": {
+      "handoff": "PASS",
+      "direct_publish": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    },
+    "lechuang": {
+      "contract": "BLOCKED_EXTERNAL",
+      "real_e2e": false
+    }
+  }
+}

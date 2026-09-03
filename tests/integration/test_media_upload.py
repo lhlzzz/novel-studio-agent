@@ -11,4 +11,4 @@ def test_media_upload_required_before_payload(tmp_path):
     assert uploaded[0].remote_path
     assert uploaded[0].source_hash
     assert uploaded[0].remote_id != str(media)
-    assert updated.variant.metadata["uploaded_media"][0]["remote_id"] == "media-1"
+    assert updated.media_uploads[0].remote_id == "media-1"

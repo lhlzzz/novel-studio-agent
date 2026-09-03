@@ -123,10 +123,11 @@ class KuaishouAdapter(BaseCNAdapter):
         account = self.get_account(job.account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
-        uploaded = list((job.variant.metadata or {}).get("uploaded_media") or [])
+        from social.providers.base import job_uploaded_media
+        uploaded = job_uploaded_media(job)
         upload_token = ""
         if uploaded:
-            upload_token = str(uploaded[0].get("remote_id") or uploaded[0].get("upload_token") or "")
+            upload_token = str(uploaded[0].remote_id or uploaded[0].provider_media_id or uploaded[0].remote_path)
         if not upload_token:
             raise ValidationError("Kuaishou publish requires upload_token from start_upload")
         payload = {
@@ -159,12 +160,15 @@ class KuaishouAdapter(BaseCNAdapter):
         photo = photo_from_payload(result if isinstance(result, dict) else {})
         if not photo.photo_id:
             raise PublishError("Kuaishou publish did not return photo_id; success is not PUBLISHED")
+        extra = result if isinstance(result, dict) else {}
+        request_id = str(extra.get("provider_request_id") or extra.get("request_id") or "") or None
         return {
-            "id": photo.photo_id,
+            "provider_object_id": photo.photo_id,
             "post_id": photo.photo_id,
             "external_id": photo.photo_id,
             "status": "processing",
             "provider_object_type": "photo",
+            "provider_request_id": request_id,
         }
 
     def get_status(self, provider_post_id: str, *, provider_object_type: str = "") -> dict[str, Any]:

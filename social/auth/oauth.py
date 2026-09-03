@@ -81,7 +81,7 @@ class OAuthStateStore:
         }
         return self.secrets.put_json(payload, ref=self._ref(start.state))
 
-    def consume(self, provider: str, state: str) -> dict[str, Any]:
+    def consume(self, provider: str, state: str, *, redirect_uri: str | None = None) -> dict[str, Any]:
         ref = self._ref(state)
         getter = getattr(self.secrets, "get_json", None)
         payload = getter(ref) if callable(getter) else None
@@ -91,6 +91,9 @@ class OAuthStateStore:
             raise AuthenticationError("OAuth state mismatch")
         if str(payload.get("provider") or "") != provider:
             raise AuthenticationError("OAuth state provider mismatch")
+        expected = str(payload.get("redirect_uri") or "")
+        if redirect_uri and expected and not states_equal(expected, redirect_uri):
+            raise AuthenticationError("OAuth redirect_uri mismatch")
         expires_at = payload.get("expires_at")
         if expires_at:
             expires = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))

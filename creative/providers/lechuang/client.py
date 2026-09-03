@@ -17,15 +17,33 @@ MAX_WAIT_SECONDS = 180
 BACKOFF_SECONDS = (1, 2, 4, 8, 15)
 
 
+def _lechuang_secret() -> tuple[str, str]:
+    root = os.getenv("MEITI_SECRET_DIR", "").strip()
+    if not root:
+        return "", ""
+    from pathlib import Path
+    from social.auth.secrets import RuntimeSecretStore, SecretStoreError, secret_id
+    path = Path(root)
+    if not path.is_dir():
+        return "", ""
+    try:
+        store = RuntimeSecretStore(path, production=True)
+        payload = store.get_json(secret_id("lechuang", "api")) or {}
+    except SecretStoreError:
+        return "", ""
+    return str(payload.get("api_url") or "").strip(), str(payload.get("api_key") or "").strip()
+
+
 class LechuangClient:
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         models = load_models()
         contract = models.get("contract") or {}
         self.contract_verified = bool(contract.get("verified")) and CONTRACT_VERIFIED
         self.contract_reason = str(contract.get("reason") or "Lechuang API contract unverified")
-        env_url = os.getenv("LECHUANG_API_URL", "").strip()
+        stored_url, stored_key = _lechuang_secret()
+        env_url = os.getenv("LECHUANG_API_URL", "").strip() or stored_url
         self.base_url = (base_url if base_url is not None else env_url).rstrip("/")
-        key = api_key if api_key is not None else os.getenv("LECHUANG_API_KEY", "")
+        key = api_key if api_key is not None else (os.getenv("LECHUANG_API_KEY", "") or stored_key)
         self.api_key = str(key or "")
         self.max_poll_count = MAX_POLL_COUNT
         self.max_wait_seconds = MAX_WAIT_SECONDS

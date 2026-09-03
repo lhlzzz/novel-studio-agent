@@ -63,7 +63,7 @@ class SocialHttpClient:
         hdrs = {key: value for key, value in (headers or {}).items() if value}
         if extra_headers:
             hdrs.update({key: value for key, value in extra_headers.items() if value})
-        hdrs.setdefault("User-Agent", "MeitiSocial/4.4.4")
+        hdrs.setdefault("User-Agent", "MeitiSocial/4.5")
         hdrs["X-Request-Id"] = request_id
         if idempotency_key:
             hdrs.setdefault("Idempotency-Key", idempotency_key)

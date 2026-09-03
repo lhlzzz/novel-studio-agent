@@ -85,7 +85,9 @@ class XHSHandoff:
         }
         payload["handoff_id"] = self.handoff_id
         payload["platform"] = self.platform
-        return payload
+        payload["expires_at"] = self.expires_at
+        forbidden = {"access_token", "refresh_token", "client_secret", "authorization_code", "token", "cookie", "app_secret"}
+        return {key: value for key, value in payload.items() if key not in forbidden}
 
 
 def transition_handoff(handoff: XHSHandoff, new_status: str, **changes: Any) -> XHSHandoff:
@@ -95,6 +97,20 @@ def transition_handoff(handoff: XHSHandoff, new_status: str, **changes: Any) -> 
     if new_status != handoff.status and new_status not in allowed:
         raise IllegalHandoffTransition(f"{handoff.status} -> {new_status} is not allowed")
     return replace(handoff, status=new_status, updated_at=_utcnow(), **changes)
+
+
+def expire_if_needed(handoff: "XHSHandoff") -> "XHSHandoff":
+    expires_at = handoff.expires_at
+    if not expires_at or handoff.status in {"EXPIRED", "CANCELLED", "PUBLISHED"}:
+        return handoff
+    expires = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) <= expires:
+        return handoff
+    if "EXPIRED" in HANDOFF_TRANSITIONS.get(handoff.status, set()) or handoff.status == "EXPIRED":
+        return transition_handoff(handoff, "EXPIRED") if handoff.status != "EXPIRED" else handoff
+    return replace(handoff, status="EXPIRED", updated_at=_utcnow())
 
 
 def is_handoff_result(result: dict[str, Any] | None) -> bool:

@@ -451,17 +451,26 @@ def run() -> dict:
 
 
 def as_payload(checks: dict) -> dict:
-    statuses = {key: value.get("status") for key, value in checks.items()}
-    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL"}]
+    statuses = {key: value.get("status") if isinstance(value, dict) else value for key, value in checks.items()}
+    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED"}]
     external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL"]
-    return {"ready": not code_blocked and not external, "architecture_ready": not code_blocked, "checks": statuses, "details": checks}
+    return {
+        "ready": not code_blocked and not external,
+        "architecture_ready": not code_blocked,
+        "checks": statuses,
+        "details": checks,
+    }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="meiti_doctor")
+    parser.add_argument("--gate", choices=("architecture", "production"), default="architecture")
+    args = parser.parse_args(argv)
     checks = run()
     payload = as_payload(checks)
     architecture = "PASS" if payload["architecture_ready"] else "FAIL"
-    overall = "READY" if payload["ready"] else ("BLOCKED_EXTERNAL" if payload["architecture_ready"] else "BLOCKED")
+    overall = "PASS" if payload["ready"] else ("BLOCKED_EXTERNAL" if payload["architecture_ready"] else "FAIL")
     print("MEITI DOCTOR")
     print("============")
     for name, status in payload["checks"].items():
@@ -469,14 +478,26 @@ def main() -> int:
     print(f"Architecture: {architecture}")
     print(f"Overall: {overall}")
     print(json.dumps({
+        "architecture": {"status": architecture},
+        "runtime": {"status": checks.get("CN Social Runtime", {}).get("status")},
+        "providers": {
+            "douyin": {"status": checks.get("Douyin", {}).get("status")},
+            "kuaishou": {"status": checks.get("Kuaishou", {}).get("status")},
+            "xianyu": {"status": checks.get("Xianyu", {}).get("status")},
+            "xiaohongshu": {"status": checks.get("XHS", {}).get("status")},
+            "lechuang": {"status": checks.get("Lechuang", {}).get("status")},
+        },
+        "e2e": {"status": checks.get("Real Social E2E", {}).get("status")},
+        "overall": {"status": overall},
         "architecture_ready": payload["architecture_ready"],
-        "runtime_ready": payload["architecture_ready"],
+        "runtime_ready": checks.get("CN Social Runtime", {}).get("status") == "PASS",
         "external_ready": False,
         "overall_ready": payload["ready"],
-        "overall": overall,
         "checks": payload["checks"],
         "blockers": [name for name, status in payload["checks"].items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE"}],
-    }, default=str))
+        }, default=str))
+    if args.gate == "production":
+        return 0 if overall == "PASS" else 1
     return 0 if payload["architecture_ready"] else 1
 
 

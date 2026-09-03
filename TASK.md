@@ -1,11 +1,13 @@
-# Meiti V4.4.4 Task
+# Meiti V4.5 Task
 
-**GOAL:** Code-layer production closure for CN social + Lechuang. Architecture,
-persistence, state machines, security, CI, and doctor semantics PASS. Live
-provider E2E stays BLOCKED_EXTERNAL without real credentials.
+**GOAL:** Production activation for CN social + Lechuang. Architecture,
+persistence, secret store, OAuth, MediaUpload, DistributionOutcome, CI, and
+doctor semantics are code-complete. Live provider E2E stays BLOCKED_EXTERNAL
+without real credentials.
 
-**VERIFY:** pytest, architecture tests, social_doctor, meiti_doctor. External
-credential absence is BLOCKED_EXTERNAL, not CI failure.
+**VERIFY:** pytest, architecture tests, bootstrap-production, social_doctor,
+meiti_doctor --gate architecture. Production gate exits non-zero until live
+evidence exists.
 
 ## Current boundary
 
@@ -13,5 +15,5 @@ credential absence is BLOCKED_EXTERNAL, not CI failure.
 - Creative live generation: BLOCKED_EXTERNAL until Lechuang API contract + key.
 - AI Judge: BLOCKED_EXTERNAL until a verified vision provider exists.
 - Distribution live publish: BLOCKED_EXTERNAL until native OAuth + verified account.
-- XHS remains HANDOFF_READY until write_notes is live-verified.
+- XHS remains HANDOFF_ONLY until write_notes is live-verified.
 - Content first. Product is optional and only when CommerceDecision is explicit.

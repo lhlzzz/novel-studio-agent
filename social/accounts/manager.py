@@ -14,7 +14,7 @@ from social.accounts.models import (
     transition_account,
 )
 from social.auth.oauth import OAuthStart, OAuthStateStore
-from social.auth.secrets import RuntimeSecretStore
+from social.auth.secrets import RuntimeSecretStore, secret_id
 from social.providers.errors import AuthenticationError, CapabilityUnsupported
 from social.providers.resolver import resolve_social_provider
 
@@ -74,7 +74,8 @@ class SocialAccountManager:
             code_verifier=str(payload.get("code_verifier") or ""),
             redirect_uri=str(payload.get("redirect_uri") or "") or None,
         )
-        ref = self.secrets.put(record)
+        account_key = record.provider_account_id or record.provider or provider
+        ref = self.secrets.put(record, ref=secret_id(provider, account_key))
         setattr(implementation, "_credential_ref", ref)
         if hasattr(implementation, "secrets") and implementation.secrets is None:
             implementation.secrets = self.secrets
@@ -177,6 +178,16 @@ class SocialAccountManager:
     def enable_account(self, account_id: str) -> SocialAccount:
         account = self.get_account(account_id)
         return self.save(enable_account(account))
+
+    def get_credentials(self, account_id: str):
+        """Read-only credential lookup. Does not refresh."""
+        account = self.get_account(account_id)
+        if not account.credential_ref:
+            return None
+        return self.secrets.get_record(account.credential_ref)
+
+    def revoke_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
+        return self.disconnect_account(account_id, adapter=adapter)
 
     def refresh_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
         account = self.get_account(account_id)

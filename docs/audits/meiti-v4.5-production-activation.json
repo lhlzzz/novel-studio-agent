@@ -1,0 +1,190 @@
+{
+  "commit": "9176cbf7eb7c2f952a9b5278c693556fe4f3e1dd",
+  "timestamp": "2026-09-03T02:44:25.202537+00:00",
+  "environment": "activation-without-external-credentials",
+  "architecture": "PASS",
+  "runtime": "BLOCKED_EXTERNAL",
+  "persistence": "PASS",
+  "security": "BLOCKED_EXTERNAL",
+  "scheduler": "BLOCKED_EXTERNAL",
+  "idempotency": "PASS",
+  "reconciliation": "PASS",
+  "analytics": "PASS",
+  "providers": {
+    "douyin": {
+      "status": "BLOCKED_EXTERNAL",
+      "account_fingerprint": null,
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "object_id_fingerprint": null,
+      "reconciliation": "PASS",
+      "analytics": "PASS"
+    },
+    "kuaishou": {
+      "status": "BLOCKED_EXTERNAL",
+      "account_fingerprint": null,
+      "capability": "BLOCKED_EXTERNAL",
+      "upload": "BLOCKED_EXTERNAL",
+      "publish": "BLOCKED_EXTERNAL",
+      "object_id_fingerprint": null,
+      "reconciliation": "PASS",
+      "analytics": "PASS"
+    },
+    "xianyu": {
+      "status": "BLOCKED_EXTERNAL",
+      "account_fingerprint": null,
+      "jushita": "BLOCKED_EXTERNAL",
+      "media": "BLOCKED_EXTERNAL",
+      "listing": "BLOCKED_EXTERNAL"
+    },
+    "xiaohongshu": {
+      "status": "HANDOFF_ONLY",
+      "handoff": "PASS",
+      "direct_publish": "BLOCKED_EXTERNAL"
+    },
+    "lechuang": {
+      "status": "BLOCKED_EXTERNAL"
+    }
+  },
+  "real_e2e": false,
+  "code_complete": true,
+  "external_ready": false,
+  "production_ready": false,
+  "report": {
+    "architecture": {
+      "status": "PASS"
+    },
+    "runtime": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "persistence": {
+      "status": "PASS"
+    },
+    "security": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "providers": {
+      "douyin": {
+        "status": "BLOCKED_EXTERNAL"
+      },
+      "kuaishou": {
+        "status": "BLOCKED_EXTERNAL"
+      },
+      "xianyu": {
+        "status": "BLOCKED_EXTERNAL"
+      },
+      "xiaohongshu": {
+        "status": "HANDOFF_ONLY"
+      },
+      "lechuang": {
+        "status": "BLOCKED_EXTERNAL"
+      }
+    },
+    "e2e": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "overall": {
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "details": {
+      "Runtime": {
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "MEITI_SECRET_DIR is required for production secret storage"
+      },
+      "Production Store": {
+        "status": "PASS",
+        "store": "DatabaseStore"
+      },
+      "Credential Store": {
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "MEITI_SECRET_DIR missing",
+        "env": "MEITI_SECRET_DIR"
+      },
+      "Scheduler": {
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "MEITI_SECRET_DIR is required for production secret storage"
+      },
+      "Publish Gate": {
+        "status": "PASS",
+        "failures": [
+          "approval invalid"
+        ]
+      },
+      "Reconciliation": {
+        "status": "PASS"
+      },
+      "Analytics": {
+        "status": "PASS"
+      },
+      "Xiaohongshu": {
+        "Adapter": "PASS",
+        "implemented": true,
+        "adapter": "XiaohongshuAdapter",
+        "OAuth": "BLOCKED_EXTERNAL",
+        "Account": "HANDOFF_READY",
+        "Handoff": "PASS",
+        "Direct Publish": "BLOCKED_EXTERNAL",
+        "Reconciliation": "NOT_APPLICABLE",
+        "Real E2E": "BLOCKED_EXTERNAL",
+        "status": "HANDOFF_ONLY",
+        "architecture_supported": true
+      },
+      "Douyin": {
+        "Adapter": "PASS",
+        "implemented": true,
+        "adapter": "DouyinAdapter",
+        "OAuth": "BLOCKED_EXTERNAL",
+        "Account": "BLOCKED_EXTERNAL",
+        "Capability": "BLOCKED_EXTERNAL",
+        "Upload": "BLOCKED_EXTERNAL",
+        "Publish": "BLOCKED_EXTERNAL",
+        "Reconciliation": "PASS",
+        "Analytics": "PASS",
+        "Real E2E": "BLOCKED_EXTERNAL",
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "DOUYIN_CLIENT_KEY/SECRET/REDIRECT_URI"
+      },
+      "Kuaishou": {
+        "Adapter": "PASS",
+        "implemented": true,
+        "adapter": "KuaishouAdapter",
+        "OAuth": "BLOCKED_EXTERNAL",
+        "Account": "BLOCKED_EXTERNAL",
+        "Capability": "BLOCKED_EXTERNAL",
+        "Upload": "BLOCKED_EXTERNAL",
+        "Publish": "BLOCKED_EXTERNAL",
+        "Reconciliation": "PASS",
+        "Analytics": "PASS",
+        "Real E2E": "BLOCKED_EXTERNAL",
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "KUAISHOU_APP_ID/SECRET/REDIRECT_URI"
+      },
+      "Xianyu": {
+        "Adapter": "PASS",
+        "implemented": true,
+        "adapter": "XianyuAdapter",
+        "OAuth": "BLOCKED_EXTERNAL",
+        "Jushita": "BLOCKED_EXTERNAL",
+        "Account": "BLOCKED_EXTERNAL",
+        "Capability": "BLOCKED_EXTERNAL",
+        "Media": "BLOCKED_EXTERNAL",
+        "Listing": "BLOCKED_EXTERNAL",
+        "Reconciliation": "PASS",
+        "Analytics": "PASS",
+        "Real E2E": "BLOCKED_EXTERNAL",
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "JUSHITA required"
+      },
+      "Social Accounts": {
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "MEITI_SECRET_DIR is required for production secret storage",
+        "accounts": []
+      },
+      "Lechuang": {
+        "status": "BLOCKED_EXTERNAL",
+        "reason": "LECHUANG_API_KEY missing"
+      }
+    }
+  }
+}

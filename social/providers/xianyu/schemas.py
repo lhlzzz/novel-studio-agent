@@ -39,15 +39,5 @@ def _unwrap(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def map_status(raw: str) -> str:
-    value = str(raw or "").lower()
-    if value in {"0", "online", "onsale", "published", "sale"}:
-        return "published"
-    if value in {"1", "offline", "downshelf", "instock"}:
-        return "offline"
-    if value in {"2", "deleted", "delete"}:
-        return "deleted"
-    if value in {"3", "reviewing", "audit", "pending"}:
-        return "reviewing"
-    if value in {"4", "blocked", "punish"}:
-        return "blocked"
-    return "unknown"
+    from commerce.xianyu import map_listing_status
+    return map_listing_status(raw)

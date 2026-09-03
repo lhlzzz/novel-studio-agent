@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 CN = ("xiaohongshu", "douyin", "kuaishou", "xianyu")
-AUDIT = ROOT / "docs/audits/meiti-v4.4.4-cn-e2e.json"
-STATUSES = {"PASS", "BLOCKED_EXTERNAL", "BLOCKED", "FAIL", "NOT_APPLICABLE", "HANDOFF_READY", "HANDOFF_ONLY"}
+AUDIT = ROOT / "docs/audits/meiti-v4.5-real-e2e.json"
+STATUSES = {"PASS", "BLOCKED_EXTERNAL", "BLOCKED", "FAIL", "NOT_APPLICABLE", "HANDOFF_READY", "HANDOFF_ONLY", "NOT_CONFIGURED", "SKIPPED"}
 
 
 def _status(value: str, **extra) -> dict:
@@ -43,7 +43,7 @@ def check_runtime() -> dict:
         pass
     runtime, error = _runtime()
     if runtime is None:
-        return _status("BLOCKED_EXTERNAL", reason=error, architecture="PASS")
+        return _status("BLOCKED_EXTERNAL", reason=error)
     if isinstance(runtime.store, InMemoryStore):
         return _status("FAIL", reason="production runtime used InMemoryStore")
     if isinstance(runtime.store, DatabaseStore) and runtime.production is True:
@@ -58,7 +58,7 @@ def check_production_store() -> dict:
         store.list_accounts()
         return _status("PASS", store="DatabaseStore")
     except Exception as exc:
-        return _status("BLOCKED_EXTERNAL", reason=str(exc), store="DatabaseStore", architecture="PASS")
+        return _status("BLOCKED_EXTERNAL", reason=str(exc), store="DatabaseStore")
 
 
 def check_credential_store() -> dict:
@@ -85,7 +85,7 @@ def check_scheduler() -> dict:
         return _status("FAIL", reason="scheduler still calls adapter.schedule")
     runtime, error = _runtime()
     if runtime is None:
-        return _status("BLOCKED_EXTERNAL", reason=error, architecture="PASS")
+        return _status("BLOCKED_EXTERNAL", reason=error)
     ok = callable(runtime.store.claim_due_job) and isinstance(runtime.scheduler, MeitiScheduler)
     return _status("PASS" if ok else "FAIL")
 
@@ -260,24 +260,58 @@ def check_lechuang() -> dict:
     return _status("PASS" if ready else "BLOCKED_EXTERNAL", reason=reason)
 
 
-def evaluate_production_readiness(checks: dict | None = None) -> dict:
+def structured_report(checks: dict | None = None) -> dict:
     checks = checks or run()
-    architecture_names = ("Runtime", "Production Store", "Scheduler", "Publish Gate", "Reconciliation", "Analytics")
-    architecture_fail = [name for name in architecture_names if checks[name].get("status") not in {"PASS", "BLOCKED_EXTERNAL"}]
+    architecture_names = ("Scheduler", "Publish Gate", "Reconciliation", "Analytics")
+    architecture_fail = [name for name in architecture_names if checks[name].get("status") not in {"PASS", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "NOT_APPLICABLE"}]
     architecture = "PASS" if not architecture_fail else "FAIL"
     runtime = checks["Runtime"].get("status")
-    external = "BLOCKED_EXTERNAL"
-    overall = "FAIL" if architecture == "FAIL" else "BLOCKED_EXTERNAL"
+    persistence = checks["Production Store"].get("status")
+    security = checks["Credential Store"].get("status")
+    providers = {
+        "douyin": {"status": checks["Douyin"].get("status")},
+        "kuaishou": {"status": checks["Kuaishou"].get("status")},
+        "xianyu": {"status": checks["Xianyu"].get("status")},
+        "xiaohongshu": {"status": checks["Xiaohongshu"].get("status")},
+        "lechuang": {"status": checks["Lechuang"].get("status")},
+    }
+    e2e_status = "PASS" if all(item.get("Real E2E") == "LIVE_VERIFIED" for item in (checks["Douyin"], checks["Kuaishou"], checks["Xianyu"])) else "BLOCKED_EXTERNAL"
+    required = [runtime, persistence, security] + [item["status"] for key, item in providers.items() if key != "xiaohongshu"]
+    if architecture == "FAIL":
+        overall = "FAIL"
+    elif e2e_status == "PASS" and all(status == "PASS" for status in required) and providers["xiaohongshu"]["status"] in {"PASS", "HANDOFF_ONLY"}:
+        overall = "PASS"
+    else:
+        overall = "BLOCKED_EXTERNAL"
+    return {
+        "architecture": {"status": architecture},
+        "runtime": {"status": runtime},
+        "persistence": {"status": persistence},
+        "security": {"status": security},
+        "providers": providers,
+        "e2e": {"status": e2e_status},
+        "overall": {"status": overall},
+        "details": checks,
+    }
+
+
+def evaluate_production_readiness(checks: dict | None = None) -> dict:
+    report = structured_report(checks)
+    architecture = report["architecture"]["status"]
+    runtime = report["runtime"]["status"]
+    overall = report["overall"]["status"]
+    architecture_fail = [] if architecture == "PASS" else ["architecture"]
     return {
         "architecture": architecture,
         "runtime": runtime,
-        "external": external,
+        "external": report["e2e"]["status"],
         "overall": overall,
         "architecture_ready": architecture == "PASS",
         "runtime_ready": runtime == "PASS",
-        "external_ready": False,
-        "overall_ready": False,
+        "external_ready": overall == "PASS",
+        "overall_ready": overall == "PASS",
         "blockers": architecture_fail,
+        "report": report,
     }
 
 
@@ -314,7 +348,11 @@ def _print_platform(name: str, item: dict) -> None:
         print(f"  reason: {item['reason']}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="social_doctor")
+    parser.add_argument("--gate", choices=("architecture", "production"), default="architecture")
+    args = parser.parse_args(argv)
     checks = run()
     readiness = evaluate_production_readiness(checks)
     print("MEITI CN SOCIAL DOCTOR")
@@ -348,7 +386,10 @@ def main() -> int:
         "evidence": {k: v.get("status") for k, v in checks.items()},
         "details": checks,
     }
+    payload["report"] = readiness.get("report")
     print(json.dumps(payload, default=str))
+    if args.gate == "production":
+        return 0 if readiness["overall"] == "PASS" else 1
     return 0 if readiness["architecture"] == "PASS" else 1
 
 

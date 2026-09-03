@@ -48,7 +48,7 @@ XIAOHONGSHU = PlatformMediaPolicy(
 # Douyin Open Platform video/image publish. Brand logo/watermark is a review risk.
 DOUYIN = PlatformMediaPolicy(
     platform="douyin",
-    max_size_bytes=128 * 1024 * 1024,
+    max_size_bytes=4 * 1024 * 1024 * 1024,
     mime=("video/mp4", "video/quicktime", "image/jpeg", "image/png"),
     duration_seconds=(3, 60 * 60),
     resolution=None,
@@ -58,7 +58,13 @@ DOUYIN = PlatformMediaPolicy(
     cover_required=False,
     title_limit=30,
     caption_limit=1000,
-    extra={"watermark_forbidden": True, "logo_review_risk": True, "content_types": ("VIDEO", "IMAGE")},
+    extra={
+        "watermark_forbidden": True,
+        "logo_review_risk": True,
+        "content_types": ("VIDEO", "IMAGE"),
+        "chunk_suggested_bytes": 50 * 1024 * 1024,
+        "chunk_required_bytes": 128 * 1024 * 1024,
+    },
 )
 
 # Kuaishou user_video_publish: start_upload -> upload -> publish. Cover optional.

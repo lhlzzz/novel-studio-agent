@@ -16,6 +16,12 @@ FORBIDDEN_COLUMNS = {"access_token", "refresh_token", "client_secret", "cookie",
 FORBIDDEN_LOG_KEYS = FORBIDDEN_COLUMNS | {"authorization", "bearer", "token", "id_token"}
 
 
+def secret_id(provider: str, account_id: str) -> str:
+    """Stable credential identity. Filenames never contain raw provider/account."""
+    digest = hashlib.sha256(f"{provider}:{account_id}".encode("utf-8")).hexdigest()
+    return f"cred:{digest}"
+
+
 class SecretStoreError(RuntimeError):
     """Secret storage is unusable."""
 
@@ -134,13 +140,24 @@ class RuntimeSecretStore:
         tmp = path.with_name(path.name + ".tmp")
         if tmp.exists():
             tmp.unlink()
-        with tmp.open("w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, 0o600)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(tmp, flags, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fd = None
+                json.dump(payload, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+        finally:
+            if fd is not None:
+                os.close(fd)
         os.replace(tmp, path)
-        os.chmod(path, 0o600)
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
     def _path(self, ref: str) -> Path:
         digest = hashlib.sha256(str(ref).encode("utf-8")).hexdigest()

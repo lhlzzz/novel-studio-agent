@@ -96,11 +96,8 @@ class XAdapter(BaseSocialAdapter):
         payload: dict[str, Any] = {}
         if job.variant.body.strip():
             payload["text"] = job.variant.body
-        media_ids = [
-            str(item.get("remote_id"))
-            for item in (job.variant.metadata or {}).get("uploaded_media") or []
-            if item.get("remote_id")
-        ]
+        from social.providers.base import job_uploaded_media
+        media_ids = [str(item.remote_id or item.provider_media_id) for item in job_uploaded_media(job)]
         if media_ids:
             payload["media"] = {"media_ids": media_ids}
         result = self.x_client.create_tweet(

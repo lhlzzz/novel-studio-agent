@@ -39,4 +39,9 @@ def materialize_handoff_export(handoff: XHSHandoff) -> XHSHandoff:
     os.chmod(tmp, 0o600)
     os.replace(tmp, path)
     os.chmod(path, 0o600)
+    dir_fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
     return replace(handoff, export_path=str(path), export_status="READY")

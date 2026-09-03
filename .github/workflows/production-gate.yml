@@ -1,0 +1,23 @@
+name: production-gate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Production bootstrap
+        run: python scripts/meiti.py bootstrap-production
+      - name: Social production gate
+        run: python scripts/social_doctor.py --gate production
+      - name: Meiti production gate
+        run: python scripts/meiti_doctor.py --gate production

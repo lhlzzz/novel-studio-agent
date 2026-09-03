@@ -5,6 +5,7 @@ from social.providers.kuaishou.adapter import KuaishouAdapter
 from social.providers.kuaishou.client import KuaishouClient
 from social.providers.kuaishou.contract import WHOLE_FILE_LIMIT
 from tests.fakes.social.http import FakeHttp
+from integrations.contracts.distribution import MediaUploadResult
 
 
 def _adapter(tmp_path, handler):
@@ -47,10 +48,10 @@ def test_publish_is_processing(tmp_path):
         return {"data": {"photo_id": "p1", "pending": True}}
     adapter, _ = _adapter(tmp_path, handler)
     from integrations.contracts.distribution import ContentVariant, DistributionJob
-    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}]}), idempotency_key="k", provider="kuaishou", platform="kuaishou")
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi"), idempotency_key="k", provider="kuaishou", platform="kuaishou", media_uploads=(MediaUploadResult(source_hash="h", source_path="a.mp4", mime_type="video/mp4", size=1, provider="kuaishou", remote_id="tok", remote_path="tok", uploaded_at="now"),))
     result = adapter.publish(job)
     assert result["status"] == "processing"
-    assert result["id"] == "p1"
+    assert result["provider_object_id"] == "p1"
 
 
 def test_cover_local_path_not_json(tmp_path):
@@ -62,7 +63,7 @@ def test_cover_local_path_not_json(tmp_path):
         return {"data": {"photo_id": "p1"}}
     adapter, _ = _adapter(tmp_path, handler)
     from integrations.contracts.distribution import ContentVariant, DistributionJob
-    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}], "cover": str(cover)}), idempotency_key="k")
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"cover": str(cover)}), idempotency_key="k", media_uploads=(MediaUploadResult(source_hash="h", source_path="a.mp4", mime_type="video/mp4", size=1, provider="kuaishou", remote_id="tok", remote_path="tok", uploaded_at="now"),))
     adapter.publish(job)
     assert "files" in seen
     assert seen["files"]["cover"][0] == "cover.jpg"
@@ -76,7 +77,7 @@ def test_publish_missing_photo_id_is_error(tmp_path):
     adapter, _ = _adapter(tmp_path, handler)
     from integrations.contracts.distribution import ContentVariant, DistributionJob
     from social.providers.errors import PublishError
-    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}]}), idempotency_key="k", provider="kuaishou", platform="kuaishou")
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi"), idempotency_key="k", provider="kuaishou", platform="kuaishou", media_uploads=(MediaUploadResult(source_hash="h", source_path="a.mp4", mime_type="video/mp4", size=1, provider="kuaishou", remote_id="tok", remote_path="tok", uploaded_at="now"),))
     import pytest
     with pytest.raises(PublishError):
         adapter.publish(job)
@@ -89,7 +90,7 @@ def test_publish_without_cover(tmp_path):
         return {"data": {"photo_id": "p1", "pending": True}}
     adapter, _ = _adapter(tmp_path, handler)
     from integrations.contracts.distribution import ContentVariant, DistributionJob
-    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi", metadata={"uploaded_media": [{"remote_id": "tok"}]}), idempotency_key="k", provider="kuaishou", platform="kuaishou")
+    job = DistributionJob("j", "p", "kuaishou:u1", ContentVariant("kuaishou:u1", "hi"), idempotency_key="k", provider="kuaishou", platform="kuaishou", media_uploads=(MediaUploadResult(source_hash="h", source_path="a.mp4", mime_type="video/mp4", size=1, provider="kuaishou", remote_id="tok", remote_path="tok", uploaded_at="now"),))
     result = adapter.publish(job)
     assert result["status"] == "processing"
     assert "cover" not in (seen.get("files") or {})

@@ -22,5 +22,9 @@ CREATE_VIDEO = "/api/douyin/v1/video/create_video/"
 CREATE_IMAGE_TEXT = "/api/douyin/v1/video/create_image_text/"
 VIDEO_DATA = "/api/douyin/v1/video/video_data/"
 VIDEO_LIST = "/api/douyin/v1/video/video_list/"
-SMALL_UPLOAD_LIMIT = 10 * 1024 * 1024
+# Official: >50MB suggested chunk; >128MB required; max 4GB.
+SUGGESTED_PART_LIMIT = 50 * 1024 * 1024
+REQUIRED_PART_LIMIT = 128 * 1024 * 1024
+MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024
+SMALL_UPLOAD_LIMIT = SUGGESTED_PART_LIMIT
 PART_SIZE = 5 * 1024 * 1024

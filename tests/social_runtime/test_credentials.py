@@ -33,3 +33,23 @@ def test_restart_persistence(tmp_path):
     loaded = again.get_record(ref)
     assert loaded.access_token == "tok"
     assert loaded.expires_at
+
+
+def test_secret_id_is_hashed_not_plaintext():
+    from social.auth.secrets import secret_id
+    value = secret_id("douyin", "open-id-1")
+    assert value.startswith("cred:")
+    assert "douyin" not in value
+    assert "open-id-1" not in value
+
+
+def test_get_credentials_does_not_refresh(tmp_path):
+    from social.accounts.models import SocialAccount
+    from social.auth.credentials import CredentialRecord
+    from social.runtime.container import SocialRuntime
+    runtime = SocialRuntime.testing()
+    ref = runtime.secrets.put(CredentialRecord.from_payload({"provider": "douyin", "access_token": "tok", "refresh_token": "rt", "provider_account_id": "x"}))
+    account = runtime.manager.save(SocialAccount("douyin:x", "douyin", "douyin", credential_ref=ref, provider_account_id="x", status="AUTHENTICATED"))
+    loaded = runtime.manager.get_credentials(account.account_id)
+    assert loaded.access_token == "tok"
+    assert runtime.secrets.get_record(ref).access_token == "tok"

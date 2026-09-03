@@ -74,8 +74,7 @@ def _approval_valid(job: DistributionJob, *, store: Any | None) -> bool:
 def _media_valid(job: DistributionJob, *, adapter: Any) -> tuple[bool, bool]:
     if not job.variant.media:
         return True, True
-    metadata = job.variant.metadata or {}
-    uploaded = list(metadata.get("uploaded_media") or [])
+    uploaded = list(getattr(job, "media_uploads", ()) or ())
     if uploaded and len(uploaded) >= len(job.variant.media):
         return True, True
     store_get = getattr(getattr(adapter, "store", None), "get_media", None)

@@ -190,8 +190,9 @@ class XianyuAdapter(BaseCNAdapter):
         account = self.get_account(job.account_id)
         creds = self._credentials(account)
         token = str(creds.get("access_token") or "")
-        uploaded = list((job.variant.metadata or {}).get("uploaded_media") or [])
-        images = [str(item.get("remote_id") or item.get("remote_path") or "") for item in uploaded if item.get("remote_id") or item.get("remote_path")]
+        from social.providers.base import job_uploaded_media
+        uploaded = job_uploaded_media(job)
+        images = [str(item.remote_id or item.provider_media_id or item.remote_path) for item in uploaded if item.remote_id or item.provider_media_id or item.remote_path]
         if not images:
             raise ValidationError("Xianyu listing requires uploaded remote media identifiers; local paths are blocked")
         if any(item.startswith("/") or item.startswith(".") for item in images):
@@ -217,8 +218,8 @@ class XianyuAdapter(BaseCNAdapter):
             raise PublishError("Xianyu item.publish did not return item_id; success is not online")
         return {
             "kind": "listing",
-            "id": item.item_id,
             "provider_object_id": item.item_id,
+            "item_id": item.item_id,
             "provider_request_id": str((result or {}).get("request_id") or "") or None,
             "external_id": item.item_id,
             "status": "processing",

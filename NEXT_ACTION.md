@@ -1,9 +1,10 @@
-# Meiti V4.4.4 Next Action
+# Meiti V4.5 Next Action
 
 **GOAL:** Keep live READY blocked until real CN credentials, Jushita, and
 the official Lechuang contract exist.
 
-1. Set `MEITI_SECRET_DIR` (0700) and PostgreSQL.
+1. Set `MEITI_SECRET_DIR` (0700) and PostgreSQL, then run
+   `python scripts/meiti.py bootstrap-production`.
 2. Douyin: `DOUYIN_CLIENT_KEY` / `DOUYIN_CLIENT_SECRET` / `DOUYIN_REDIRECT_URI`,
    OAuth, verify, enable, then one real video publish + reconcile.
 3. Kuaishou: `KUAISHOU_APP_ID` / `KUAISHOU_APP_SECRET` / `KUAISHOU_REDIRECT_URI`

@@ -219,6 +219,7 @@ class DistributionJob:
     claimed_at: str | None = None
     provider: str = ""
     platform: str = ""
+    media_uploads: tuple["MediaUploadResult", ...] = ()
 
     @property
     def integration_id(self) -> str:
@@ -298,6 +299,9 @@ class Publication:
         return self.account_id
 
 
+MEDIA_UPLOAD_STATES = ("PENDING", "UPLOADING", "UPLOADED", "FAILED", "UNKNOWN")
+
+
 @dataclass(frozen=True)
 class MediaUploadResult:
     source_hash: str
@@ -308,18 +312,58 @@ class MediaUploadResult:
     remote_id: str
     remote_path: str
     uploaded_at: str
-    status: str = "uploaded"
+    status: str = "UPLOADED"
     account_id: str = ""
     failure_code: str | None = None
     created_at: str | None = None
+    upload_id: str = ""
+    platform: str = ""
+    source_asset_id: str = ""
+    media_type: str = ""
+    provider_media_id: str = ""
+    provider_request_id: str = ""
+    checksum: str = ""
+    completed_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        status = str(self.status or "UPLOADED").upper()
+        if status == "UPLOADED" or self.status == "uploaded":
+            status = "UPLOADED"
+        if status not in MEDIA_UPLOAD_STATES:
+            status = "UNKNOWN"
+        object.__setattr__(self, "status", status)
+        if not self.checksum:
+            object.__setattr__(self, "checksum", self.source_hash)
+        if not self.provider_media_id:
+            object.__setattr__(self, "provider_media_id", self.remote_id)
+        if not self.upload_id:
+            object.__setattr__(self, "upload_id", f"{self.provider}:{self.account_id}:{self.source_hash}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", self.uploaded_at)
+        if status == "UPLOADED" and not self.completed_at:
+            object.__setattr__(self, "completed_at", self.uploaded_at)
+        if not self.error_code:
+            object.__setattr__(self, "error_code", self.failure_code)
+        if not self.media_type:
+            kind = "image" if str(self.mime_type).startswith("image/") else ("video" if str(self.mime_type).startswith("video/") else "")
+            object.__setattr__(self, "media_type", kind)
+
+    @property
+    def id(self) -> str:
+        return self.upload_id
 
     @property
     def remote_media_id(self) -> str:
-        return self.remote_id
+        return self.provider_media_id or self.remote_id
 
     @property
     def remote_media_path(self) -> str:
         return self.remote_path
+
+
+MediaUpload = MediaUploadResult
 
 
 @dataclass(frozen=True)

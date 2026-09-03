@@ -41,3 +41,14 @@ def test_complete_oauth_requires_state():
     runtime = SocialRuntime.testing()
     with pytest.raises(Exception):
         runtime.manager.connect_account("douyin", authorization={"code": "x"})
+
+
+def test_oauth_redirect_uri_binding(tmp_path):
+    secrets = RuntimeSecretStore(tmp_path)
+    store = OAuthStateStore(secrets)
+    store.save(OAuthStart(url="https://example/oauth", state="s3", provider="douyin", redirect_uri="https://cb/a"))
+    with pytest.raises(AuthenticationError):
+        store.consume("douyin", "s3", redirect_uri="https://cb/other")
+    store.save(OAuthStart(url="https://example/oauth", state="s4", provider="douyin", redirect_uri="https://cb/a"))
+    payload = store.consume("douyin", "s4", redirect_uri="https://cb/a")
+    assert payload["redirect_uri"] == "https://cb/a"

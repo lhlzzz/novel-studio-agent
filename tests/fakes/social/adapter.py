@@ -126,12 +126,7 @@ class FakeAdapter:
 
     def ensure_media(self, job):
         uploaded = [self.upload_media(path) for path in job.variant.media]
-        metadata = dict(job.variant.metadata or {})
-        metadata["uploaded_media"] = [
-            {"source_path": item.source_path, "remote_id": item.remote_id, "remote_path": item.remote_path, "source_hash": item.source_hash}
-            for item in uploaded
-        ]
-        return replace(job, variant=replace(job.variant, metadata=metadata)), uploaded
+        return replace(job, media_uploads=tuple(uploaded)), uploaded
 
     def publish(self, job):
         self.published = True
