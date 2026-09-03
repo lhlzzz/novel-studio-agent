@@ -50,15 +50,15 @@ class DouyinAdapter(BaseCNAdapter):
 
     def _discover_accounts(self, creds: dict[str, Any]) -> list[SocialAccount]:
         token = str(creds.get("access_token") or "")
+        open_id = str(creds.get("open_id") or creds.get("provider_account_id") or "")
         if not token:
             raise AuthenticationError("Douyin account discovery is BLOCKED: access token missing")
-        payload = self.auth.validate(token)
+        if not open_id:
+            raise AuthenticationError("Douyin account discovery is BLOCKED: open_id missing from token")
+        payload = self.auth.validate(token, open_id=open_id)
         user = user_from_payload(payload if isinstance(payload, dict) else {})
         if not user.open_id:
-            data = creds.get("open_id")
-            if not data:
-                raise AuthenticationError("Douyin userinfo did not return open_id")
-            user = user_from_payload({"open_id": data, "nickname": creds.get("nickname") or ""})
+            user = user_from_payload({"open_id": open_id, "nickname": creds.get("nickname") or ""})
         account = SocialAccount(
             account_id=f"douyin:{user.open_id}",
             provider="douyin",
@@ -82,7 +82,7 @@ class DouyinAdapter(BaseCNAdapter):
         now = datetime.now(timezone.utc).isoformat()
         try:
             token, open_id = self._token(account)
-            payload = self.auth.validate(token)
+            payload = self.auth.validate(token, open_id=open_id)
             user = user_from_payload(payload if isinstance(payload, dict) else {})
             if not (user.open_id or open_id):
                 raise AuthenticationError("open_id missing")
@@ -136,13 +136,13 @@ class DouyinAdapter(BaseCNAdapter):
         account = self.get_account(account_id) if account_id else None
         token, open_id = self._token(account)
         if mime_type.startswith("image/"):
-            result = self.dy_client.upload_image(token, open_id, data, account_id=account_id, idempotency_key=idempotency_key)
+            result = self.dy_client.upload_image(token, open_id, data, filename=filename, mime_type=mime_type, account_id=account_id, idempotency_key=idempotency_key)
             image_id = str(((result.get("data") or result) if isinstance(result, dict) else {}).get("image_id") or ((result.get("data") or {}) if isinstance(result, dict) else {}).get("id") or "")
             if not image_id:
                 raise MediaUploadError("Douyin image upload did not return image_id")
-            return {"id": image_id, "provider_object_type": "image_post"}
+            return {"id": image_id, "provider_object_type": "image_post", "provider_request_id": str(result.get("provider_request_id") or "")}
         if len(data) <= SMALL_UPLOAD_LIMIT:
-            result = self.dy_client.upload_video(token, open_id, data, account_id=account_id, idempotency_key=idempotency_key)
+            result = self.dy_client.upload_video(token, open_id, data, filename=filename, mime_type=mime_type, account_id=account_id, idempotency_key=idempotency_key)
         else:
             initialized = self.dy_client.init_part(token, open_id, account_id=account_id, idempotency_key=idempotency_key)
             upload_id = str(((initialized.get("data") or initialized) if isinstance(initialized, dict) else {}).get("upload_id") or "")
@@ -157,7 +157,7 @@ class DouyinAdapter(BaseCNAdapter):
         video_id = str(((result.get("data") or result) if isinstance(result, dict) else {}).get("video_id") or "")
         if not video_id:
             raise MediaUploadError("Douyin video upload did not return video_id")
-        return {"id": video_id}
+        return {"id": video_id, "provider_request_id": str(result.get("provider_request_id") or "")}
 
     def publish(self, job) -> dict[str, Any]:
         account = self.get_account(job.account_id)

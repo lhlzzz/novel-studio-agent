@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 from social.auth.credentials import CredentialRecord
 from social.auth.oauth import OAuthStart, RevokeResult, generate_state
+from social.providers.douyin.client import unwrap_douyin
 from social.providers.douyin.contract import AUTHORIZE_URL, REFRESH_URL, TOKEN_URL, USERINFO_URL
 from social.providers.errors import AuthenticationError
 from social.providers.http import SocialHttpClient
@@ -40,16 +41,21 @@ class DouyinAuth:
         return OAuthStart(url=f"{AUTHORIZE_URL}?{urlencode(params)}", state=params["state"], provider="douyin", redirect_uri=params["redirect_uri"], scopes=self.scopes())
 
     def exchange_code(self, code: str, *, code_verifier: str = "", redirect_uri: str | None = None) -> CredentialRecord:
-        payload = self.client.request(
-            "POST",
-            TOKEN_URL,
-            query={
-                "client_key": self.client_key,
-                "client_secret": self.client_secret,
-                "code": code,
-                "grant_type": "authorization_code",
-            },
-            absolute=True,
+        form = {
+            "client_key": self.client_key,
+            "client_secret": self.client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+        }
+        payload = unwrap_douyin(
+            self.client.request(
+                "POST",
+                TOKEN_URL,
+                data=urlencode(form).encode("utf-8"),
+                content_type="application/x-www-form-urlencoded",
+                absolute=True,
+            ),
+            kind="token",
         )
         data = payload.get("data") if isinstance(payload, dict) else payload
         data = data or payload
@@ -58,15 +64,20 @@ class DouyinAuth:
         return CredentialRecord.from_payload({**data, "provider": "douyin", "scope": data.get("scope") or self.scopes()})
 
     def refresh(self, refresh_token: str) -> CredentialRecord:
-        payload = self.client.request(
-            "POST",
-            REFRESH_URL,
-            query={
-                "client_key": self.client_key,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-            },
-            absolute=True,
+        form = {
+            "client_key": self.client_key,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+        payload = unwrap_douyin(
+            self.client.request(
+                "POST",
+                REFRESH_URL,
+                data=urlencode(form).encode("utf-8"),
+                content_type="application/x-www-form-urlencoded",
+                absolute=True,
+            ),
+            kind="refresh",
         )
         data = payload.get("data") if isinstance(payload, dict) else payload
         data = data or payload
@@ -77,12 +88,18 @@ class DouyinAuth:
     def revoke(self, token: str, *, token_type_hint: str = "access_token") -> RevokeResult:
         return RevokeResult(remote_revoked=False, unsupported=True, reason="Douyin has no public revoke endpoint; delete local credential_ref")
 
-    def validate(self, access_token: str) -> dict[str, Any]:
-        open_id = ""
-        payload = self.client.request(
-            "POST",
-            USERINFO_URL,
-            query={"access_token": access_token, "open_id": open_id},
-            absolute=True,
+    def validate(self, access_token: str, open_id: str = "") -> dict[str, Any]:
+        if not open_id:
+            raise AuthenticationError("Douyin userinfo is BLOCKED: open_id is required")
+        form = {"access_token": access_token, "open_id": open_id}
+        payload = unwrap_douyin(
+            self.client.request(
+                "POST",
+                USERINFO_URL,
+                data=urlencode(form).encode("utf-8"),
+                content_type="application/x-www-form-urlencoded",
+                absolute=True,
+            ),
+            kind="userinfo",
         )
         return payload if isinstance(payload, dict) else {"raw": payload}

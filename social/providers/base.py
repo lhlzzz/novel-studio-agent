@@ -58,14 +58,19 @@ class BaseSocialAdapter:
         env_id = os.getenv(f"{self.provider.upper()}_CLIENT_ID", "").strip()
         env_secret = os.getenv(f"{self.provider.upper()}_CLIENT_SECRET", "").strip()
         payload: dict[str, Any] = {}
+        ref = ""
         if account and account.credential_ref:
-            record = self.secrets.get_record(account.credential_ref)
+            ref = account.credential_ref
+        elif getattr(self, "_credential_ref", ""):
+            ref = str(self._credential_ref)
+        if ref:
+            record = self.secrets.get_record(ref)
             if record is not None:
                 if record.expired():
                     raise TokenExpired(f"{self.provider} access_token expired")
                 payload.update(record.to_payload())
             else:
-                payload.update(self.secrets.get(account.credential_ref) or {})
+                payload.update(self.secrets.get(ref) or {})
         if env_id:
             payload.setdefault("client_id", env_id)
         if env_secret:
@@ -119,6 +124,9 @@ class BaseSocialAdapter:
 
     def authenticate(self, authorization: dict[str, Any] | None = None) -> bool:
         authorization = authorization or {}
+        if authorization.get("credential_ref"):
+            self._credential_ref = str(authorization["credential_ref"])
+            return bool(self._credentials().get("access_token"))
         if authorization.get("access_token") or authorization.get("code"):
             return True
         return bool(self._credentials().get("access_token"))
@@ -214,10 +222,12 @@ class BaseSocialAdapter:
             mime_type=mime_type,
             size=len(data),
             provider=self.provider,
+            platform=self.platform or self.provider,
             remote_id=str(remote.get("id") or remote.get("media_id") or ""),
             remote_path=str(remote.get("url") or remote.get("path") or remote.get("upload_token") or ""),
             uploaded_at=_utcnow(),
             account_id=account_id,
+            provider_request_id=str(remote.get("provider_request_id") or ""),
         )
 
     def _upload_bytes(self, data: bytes, *, mime_type: str, filename: str, account_id: str, idempotency_key: str) -> dict[str, Any]:

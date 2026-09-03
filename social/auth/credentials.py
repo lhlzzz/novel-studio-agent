@@ -77,7 +77,13 @@ class CredentialRecord:
             scope=scope_text,
             scopes=scope_text,
             token_type=str(payload.get("token_type") or "Bearer"),
-            provider_account_id=str(payload.get("provider_account_id") or ""),
+            provider_account_id=str(
+                payload.get("provider_account_id")
+                or payload.get("open_id")
+                or payload.get("openid")
+                or payload.get("user_id")
+                or ""
+            ),
             account_id=str(payload.get("account_id") or ""),
             issued_at=issued_at,
             created_at=created_at,

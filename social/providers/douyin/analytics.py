@@ -16,11 +16,13 @@ class DouyinAnalyticsClient:
         stats = (items or [data or result])[0] if isinstance(items, list) and items else (data or result)
         if not isinstance(stats, dict):
             stats = {}
+        nested = stats.get("statistics") if isinstance(stats.get("statistics"), dict) else {}
+        source = {**nested, **{k: v for k, v in stats.items() if v is not None and k != "statistics"}}
         return {
-            "views": _maybe_int(stats.get("play_count") if stats.get("play_count") is not None else stats.get("view_count")),
-            "likes": _maybe_int(stats.get("digg_count") if stats.get("digg_count") is not None else stats.get("like_count")),
-            "comments": _maybe_int(stats.get("comment_count")),
-            "shares": _maybe_int(stats.get("share_count")),
+            "views": _maybe_int(source.get("play_count") if source.get("play_count") is not None else source.get("view_count")),
+            "likes": _maybe_int(source.get("digg_count") if source.get("digg_count") is not None else source.get("like_count")),
+            "comments": _maybe_int(source.get("comment_count")),
+            "shares": _maybe_int(source.get("share_count")),
             "followers_delta": None,
         }
 

@@ -52,8 +52,22 @@ class SocialAccountManager:
     def save(self, account: SocialAccount) -> SocialAccount:
         return self.store.save_account(replace(account, updated_at=_utcnow()))
 
+
+    def _prepare_adapter(self, implementation: Any, account: SocialAccount | None = None) -> Any:
+        current = getattr(implementation, "secrets", None)
+        if current is None or current.__class__.__name__ == "UnconfiguredSecretStore":
+            implementation.secrets = self.secrets
+        if account is not None:
+            bind = getattr(implementation, "bind_account", None)
+            if callable(bind):
+                bind(account)
+            if account.credential_ref:
+                setattr(implementation, "_credential_ref", account.credential_ref)
+        return implementation
+
     def start_oauth(self, provider: str, *, redirect_uri: str | None = None, adapter: Any | None = None) -> OAuthStart:
         implementation = adapter or resolve_social_provider(provider).implementation
+        implementation = self._prepare_adapter(implementation)
         auth = getattr(implementation, "auth", None)
         if auth is None or not callable(getattr(auth, "authorization_url", None)):
             raise CapabilityUnsupported(f"{provider} OAuth is NOT_SUPPORTED")
@@ -65,6 +79,7 @@ class SocialAccountManager:
 
     def complete_oauth(self, provider: str, *, code: str, state: str, adapter: Any | None = None) -> SocialAccount:
         implementation = adapter or resolve_social_provider(provider).implementation
+        implementation = self._prepare_adapter(implementation)
         auth = getattr(implementation, "auth", None)
         if auth is None or not callable(getattr(auth, "exchange_code", None)):
             raise CapabilityUnsupported(f"{provider} OAuth exchange is NOT_SUPPORTED")
@@ -78,19 +93,16 @@ class SocialAccountManager:
         account_key = record.provider_account_id or record.provider or provider
         ref = self.secrets.put(record, ref=secret_id(provider, account_key))
         setattr(implementation, "_credential_ref", ref)
-        if hasattr(implementation, "secrets") and implementation.secrets is None:
-            implementation.secrets = self.secrets
         return self.connect_account(provider, authorization={"credential_ref": ref}, adapter=implementation)
 
     def connect_account(self, provider: str, *, authorization: dict[str, Any] | None = None, adapter: Any | None = None) -> SocialAccount:
         implementation = adapter or resolve_social_provider(provider).implementation
+        implementation = self._prepare_adapter(implementation)
         authorization = dict(authorization or {})
         if authorization.get("code") and authorization.get("state"):
             return self.complete_oauth(provider, code=str(authorization["code"]), state=str(authorization["state"]), adapter=implementation)
         if authorization.get("code") and not authorization.get("state"):
             raise AuthenticationError(f"{provider} OAuth callback is BLOCKED: state is required")
-        if hasattr(implementation, "secrets") and getattr(implementation, "secrets", None) is None:
-            implementation.secrets = self.secrets
         authenticate = getattr(implementation, "authenticate", None)
         if callable(authenticate):
             connected = authenticate(authorization) if authorization else authenticate()
@@ -132,6 +144,7 @@ class SocialAccountManager:
     def verify_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
         account = self.get_account(account_id)
         implementation = adapter or resolve_social_provider(account.provider).implementation
+        implementation = self._prepare_adapter(implementation, account)
         if account.status in {"EXPIRED", "REVOKED", "BLOCKED", "IDENTITY_UNVERIFIED"}:
             return self.save(replace(account, blocked_reason=account.status, updated_at=_utcnow()))
         if account.status in {"HANDOFF_READY", "TARGET_ONLY"}:
@@ -195,6 +208,7 @@ class SocialAccountManager:
         if account.provider == "xiaohongshu" or account.status in {"HANDOFF_READY", "TARGET_ONLY"}:
             raise CapabilityUnsupported("Xiaohongshu refresh is NOT_SUPPORTED")
         implementation = adapter or resolve_social_provider(account.provider).implementation
+        implementation = self._prepare_adapter(implementation, account)
         auth = getattr(implementation, "auth", None)
         refresh = getattr(auth, "refresh", None)
         if not callable(refresh):
@@ -233,6 +247,7 @@ class SocialAccountManager:
     def disconnect_account(self, account_id: str, *, adapter: Any | None = None) -> SocialAccount:
         account = self.get_account(account_id)
         implementation = adapter or resolve_social_provider(account.provider).implementation
+        implementation = self._prepare_adapter(implementation, account)
         revoke_attempted = False
         remote_revoked = False
         remote_revoke_supported = False

@@ -103,3 +103,74 @@ def test_multi_account_analytics(tmp_path):
     blob = str(seen[0].get("headers") or "")
     assert "token-b" in blob
     assert "token-a" not in blob
+
+
+def test_open_id_maps_into_credential_record():
+    record = CredentialRecord.from_payload({"provider": "douyin", "access_token": "tok", "open_id": "open-live", "scope": "user_info"})
+    assert record.provider_account_id == "open-live"
+
+
+def test_image_upload_uses_multipart(tmp_path):
+    seen = []
+    def handler(method, path, kwargs):
+        seen.append(kwargs)
+        return {"data": {"image_id": "img-1"}, "extra": {"error_code": 0, "logid": "log-1"}}
+    adapter, _ = _adapter(tmp_path, handler)
+    result = adapter._upload_bytes(b"jpeg", mime_type="image/jpeg", filename="a.jpg", account_id="douyin:open", idempotency_key="k")
+    assert result["id"] == "img-1"
+    assert result["provider_request_id"] == "log-1"
+    assert "image" in (seen[0].get("files") or {})
+
+
+def test_http_200_error_code_is_not_success(tmp_path):
+    import pytest
+    from social.providers.errors import MediaUploadError
+    def handler(method, path, kwargs):
+        return {"data": {"error_code": 2100005, "description": "Parameter error"}, "extra": {"error_code": 2100005, "logid": "log-err"}}
+    adapter, _ = _adapter(tmp_path, handler)
+    with pytest.raises(MediaUploadError):
+        adapter._upload_bytes(b"jpeg", mime_type="image/jpeg", filename="a.jpg", account_id="douyin:open", idempotency_key="k")
+
+
+def test_analytics_reads_nested_statistics(tmp_path):
+    from integrations.contracts.distribution import Publication
+    def handler(method, path, kwargs):
+        return {"data": {"list": [{"item_id": "item-b", "statistics": {"play_count": 9, "digg_count": 3, "comment_count": 1, "share_count": 2}}]}}
+    adapter, _ = _adapter(tmp_path, handler)
+    metrics = adapter.analytics(Publication("job-b", "douyin:open", "douyin", "item-b", platform="douyin"))
+    assert metrics["views"] == 9
+    assert metrics["likes"] == 3
+    assert metrics["comments"] == 1
+    assert metrics["shares"] == 2
+    assert metrics["followers_delta"] is None
+
+
+def test_complete_oauth_binds_unconfigured_adapter_and_survives_restart(tmp_path, monkeypatch):
+    from social.auth.secrets import UnconfiguredSecretStore
+    from social.runtime.container import SocialRuntime
+    monkeypatch.setenv("DOUYIN_CLIENT_KEY", "key")
+    monkeypatch.setenv("DOUYIN_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("DOUYIN_REDIRECT_URI", "http://127.0.0.1:8787/oauth/douyin")
+    runtime = SocialRuntime.testing()
+    def handler(method, path, kwargs):
+        if "access_token" in path:
+            return {"data": {"access_token": "tok", "refresh_token": "rt", "open_id": "open-live", "scope": "user_info,video.create,video.data", "expires_in": 1296000, "error_code": 0}}
+        if "userinfo" in path:
+            return {"data": {"open_id": "open-live", "nickname": "meiti-e2e", "error_code": 0}}
+        return {"data": {"error_code": 0}}
+    adapter = DouyinAdapter(client=DouyinClient(http=FakeHttp(handler)), secrets=UnconfiguredSecretStore())
+    start = runtime.manager.start_oauth("douyin", adapter=adapter)
+    account = runtime.manager.complete_oauth("douyin", code="auth-code", state=start.state, adapter=adapter)
+    assert account.account_id == "douyin:open-live"
+    assert account.credential_ref
+    assert "tok" not in account.account_id
+    record = runtime.secrets.get_record(account.credential_ref)
+    assert record.access_token == "tok"
+    assert record.provider_account_id == "open-live"
+    loaded = runtime.manager.get_account(account.account_id)
+    assert loaded.account_id == account.account_id
+    fresh = DouyinAdapter(client=DouyinClient(http=FakeHttp(handler)), secrets=UnconfiguredSecretStore())
+    verified = runtime.manager.verify_account(loaded.account_id, adapter=fresh)
+    assert verified.status == "VERIFIED"
+    assert verified.capabilities.records["publish"].authorized is True
+    assert verified.capabilities.records["publish"].live_verified is False
