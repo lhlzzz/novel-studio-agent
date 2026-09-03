@@ -64,11 +64,12 @@ class SocialAccountManager:
         return start
 
     def complete_oauth(self, provider: str, *, code: str, state: str, adapter: Any | None = None) -> SocialAccount:
-        payload = self.oauth_states.consume(provider, state)
         implementation = adapter or resolve_social_provider(provider).implementation
         auth = getattr(implementation, "auth", None)
         if auth is None or not callable(getattr(auth, "exchange_code", None)):
             raise CapabilityUnsupported(f"{provider} OAuth exchange is NOT_SUPPORTED")
+        expected_redirect = str(getattr(auth, "redirect_uri", "") or "") or None
+        payload = self.oauth_states.consume(provider, state, redirect_uri=expected_redirect)
         record = auth.exchange_code(
             code,
             code_verifier=str(payload.get("code_verifier") or ""),
@@ -366,5 +367,6 @@ class SocialAccountManager:
                 "status": account.status,
                 "action": action,
                 "account_id": account.account_id,
+                "provider": account.provider,
             })
         return rows

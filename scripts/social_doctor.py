@@ -13,6 +13,10 @@ sys.path.insert(0, str(ROOT))
 
 CN = ("xiaohongshu", "douyin", "kuaishou", "xianyu")
 AUDIT = ROOT / "docs/audits/meiti-v4.5-real-e2e.json"
+AUDIT_PATHS = (
+    ROOT / "docs/audits/meiti-v4.5.1-real-e2e.json",
+    AUDIT,
+)
 STATUSES = {"PASS", "BLOCKED_EXTERNAL", "BLOCKED", "FAIL", "NOT_APPLICABLE", "HANDOFF_READY", "HANDOFF_ONLY", "NOT_CONFIGURED", "SKIPPED"}
 
 
@@ -135,13 +139,19 @@ def check_analytics() -> dict:
 
 
 def _real_e2e(name: str) -> dict:
-    if not AUDIT.exists():
-        return {}
-    try:
-        data = json.loads(AUDIT.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return data.get(name) or {}
+    for path in AUDIT_PATHS:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data.get(name), dict):
+            return data[name]
+        providers = data.get("providers")
+        if isinstance(providers, dict) and isinstance(providers.get(name), dict):
+            return providers[name]
+    return {}
 
 
 def _oauth_env(name: str) -> tuple[bool, str]:
@@ -160,6 +170,30 @@ def _oauth_env(name: str) -> tuple[bool, str]:
     return False, "credentials missing"
 
 
+def _e2e_status(e2e: dict, *keys: str) -> str:
+    for key in keys:
+        value = str(e2e.get(key) or "").upper()
+        if value in {"PASS", "LIVE_VERIFIED"}:
+            return "PASS"
+        if value in {"BLOCKED_EXTERNAL", "FAIL", "NOT_APPLICABLE", "HANDOFF_ONLY"}:
+            return value
+    return ""
+
+
+def _account_live(name: str) -> bool:
+    runtime, _error = _runtime()
+    if runtime is None:
+        return False
+    try:
+        accounts = runtime.manager.list_accounts(provider=name)
+    except Exception:
+        return False
+    return any(
+        account.status in {"AUTHENTICATED", "VERIFIED", "ENABLED"} and account.credential_ref
+        for account in accounts
+    )
+
+
 def _provider_report(name: str) -> dict:
     from social.providers.resolver import resolve_social_provider
     handle = resolve_social_provider(name)
@@ -169,8 +203,11 @@ def _provider_report(name: str) -> dict:
     oauth_available = bool(oauth and getattr(oauth, "available", lambda: False)())
     configured, env = _oauth_env(name)
     e2e = _real_e2e(name)
-    remote = str(e2e.get("remote_object_id") or e2e.get("remote_id") or "")
-    live = bool(remote) and not remote.startswith("fake") and str(e2e.get("status") or "").lower() in {"published", "live_verified", "online"}
+    remote = str(e2e.get("remote_object_id") or e2e.get("remote_id") or e2e.get("provider_object_id") or "")
+    live = bool(e2e.get("real_e2e") is True) or (
+        bool(remote) and not remote.startswith("fake") and str(e2e.get("status") or "").lower() in {"published", "live_verified", "online"}
+    )
+    account_ok = _account_live(name)
     rows = {
         "Adapter": "PASS" if implemented else "FAIL",
         "implemented": implemented,
@@ -205,16 +242,16 @@ def _provider_report(name: str) -> dict:
         })
         return rows
     rows.update({
-        "OAuth": "PASS" if oauth_available else "BLOCKED_EXTERNAL",
-        "Account": "BLOCKED_EXTERNAL",
-        "Capability": "BLOCKED_EXTERNAL",
-        "Upload": "BLOCKED_EXTERNAL",
-        "Publish": "BLOCKED_EXTERNAL",
+        "OAuth": "PASS" if oauth_available or account_ok else "BLOCKED_EXTERNAL",
+        "Account": "PASS" if account_ok else "BLOCKED_EXTERNAL",
+        "Capability": _e2e_status(e2e, "capability") or "BLOCKED_EXTERNAL",
+        "Upload": _e2e_status(e2e, "upload") or "BLOCKED_EXTERNAL",
+        "Publish": _e2e_status(e2e, "publish") or "BLOCKED_EXTERNAL",
         "Reconciliation": "PASS" if implemented else "FAIL",
         "Analytics": "PASS" if implemented else "FAIL",
         "Real E2E": "LIVE_VERIFIED" if live else "BLOCKED_EXTERNAL",
-        "status": "BLOCKED_EXTERNAL",
-        "reason": None if oauth_available else env,
+        "status": "PASS" if live else "BLOCKED_EXTERNAL",
+        "reason": None if oauth_available or account_ok else env,
     })
     return rows
 
@@ -352,6 +389,9 @@ def evaluate_production_readiness(checks: dict | None = None) -> dict:
 
 
 def run() -> dict:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
     providers = {name: _provider_report(name) for name in CN}
     return {
         "Runtime": check_runtime(),

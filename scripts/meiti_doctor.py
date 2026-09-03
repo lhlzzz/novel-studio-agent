@@ -410,6 +410,9 @@ def check_real_distribution_e2e() -> dict:
 
 def run() -> dict:
     from scripts import social_doctor
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
     lechuang_auth = check_lechuang_auth()
     lechuang_contract = check_lechuang_contract()
     social = social_doctor.run()

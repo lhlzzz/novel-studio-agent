@@ -29,7 +29,10 @@ def cmd_accounts(_args: argparse.Namespace) -> int:
         print("no social accounts")
         return 0
     for row in rows:
-        print(f"{row['label']}: {row['status']} ACTION: {row['action']}")
+        print(
+            f"provider={row.get('provider') or ''} account_id={row.get('account_id') or ''} "
+            f"status={row['status']} ACTION: {row['action']}"
+        )
     return 0
 
 
@@ -38,11 +41,13 @@ def cmd_connect(args: argparse.Namespace) -> int:
     authorization = {}
     if args.code:
         authorization["code"] = args.code
+    if getattr(args, "state", None):
+        authorization["state"] = args.state
     if args.username:
         authorization["username"] = args.username
         authorization["account_id"] = args.account_id or f"{args.platform}:{args.username}"
     account = runtime.manager.connect_account(args.platform, authorization=authorization or None)
-    print(f"{account.label()}: {account.status} id={account.account_id}")
+    print(f"provider={account.provider} account_id={account.account_id} status={account.status}")
     return 0
 
 
@@ -73,6 +78,61 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 def cmd_disconnect(args: argparse.Namespace) -> int:
     account = _manager().disconnect_account(args.account_id)
     print(f"{account.label()}: {account.status}")
+    return 0
+
+
+def _provider_redirect(provider: str) -> str:
+    import os
+    names = {
+        "douyin": "DOUYIN_REDIRECT_URI",
+        "kuaishou": "KUAISHOU_REDIRECT_URI",
+        "xianyu": "XIANYU_REDIRECT_URI",
+        "xiaohongshu": "XHS_REDIRECT_URI",
+    }
+    return os.getenv(names.get(provider, ""), "").strip()
+
+
+def cmd_oauth_start(args: argparse.Namespace) -> int:
+    from social.providers.errors import AuthenticationError, CapabilityUnsupported
+
+    try:
+        start = _manager().start_oauth(args.platform)
+    except (AuthenticationError, CapabilityUnsupported) as exc:
+        print(f'{{"status": "BLOCKED_EXTERNAL", "provider": "{args.platform}", "reason": "oauth_not_configured"}}')
+        print(str(exc))
+        return 1
+    print(f"provider={start.provider}")
+    print(f"authorization_url={start.url}")
+    print("请在浏览器打开授权链接。")
+    print("登录你的账号。")
+    print("完成授权。")
+    print("不要把密码或验证码发给我。")
+    print("完成后告诉我“授权完成”。")
+    if not args.listen:
+        return 0
+    args.redirect_uri = start.redirect_uri
+    return cmd_oauth_callback(args)
+
+
+def cmd_oauth_callback(args: argparse.Namespace) -> int:
+    from social.auth.oauth import listen_for_callback
+    from social.providers.errors import AuthenticationError, CapabilityUnsupported
+
+    redirect = getattr(args, "redirect_uri", None) or _provider_redirect(args.platform)
+    if not redirect:
+        print('{"status": "BLOCKED_EXTERNAL", "reason": "redirect_uri missing"}')
+        return 1
+    try:
+        payload = listen_for_callback(redirect, timeout=int(getattr(args, "timeout", 300) or 300))
+        if payload.get("error") or not payload.get("code") or not payload.get("state"):
+            print('{"status": "FAIL", "reason": "oauth callback missing code/state"}')
+            return 1
+        account = _manager().complete_oauth(args.platform, code=payload["code"], state=payload["state"])
+    except (AuthenticationError, CapabilityUnsupported, OSError) as exc:
+        print('{"status": "BLOCKED_EXTERNAL", "reason": "oauth_callback_blocked"}')
+        print(str(exc))
+        return 1
+    print(f"provider={account.provider} account_id={account.account_id} status={account.status}")
     return 0
 
 
@@ -134,6 +194,9 @@ def bootstrap_production() -> dict:
     import os
     import stat
     from pathlib import Path as _Path
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
 
     checks: dict = {}
 
@@ -253,6 +316,9 @@ def cmd_credentials_put(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(prog="meiti")
     sub = parser.add_subparsers(dest="group", required=True)
     boot = sub.add_parser("bootstrap-production")
@@ -268,9 +334,19 @@ def main() -> int:
     connect = social_sub.add_parser("connect")
     connect.add_argument("platform")
     connect.add_argument("--code")
+    connect.add_argument("--state")
     connect.add_argument("--username")
     connect.add_argument("--account-id")
     connect.set_defaults(func=cmd_connect)
+    oauth_start = social_sub.add_parser("oauth-start")
+    oauth_start.add_argument("platform")
+    oauth_start.add_argument("--listen", action="store_true")
+    oauth_start.add_argument("--timeout", type=int, default=300)
+    oauth_start.set_defaults(func=cmd_oauth_start)
+    oauth_cb = social_sub.add_parser("oauth-callback")
+    oauth_cb.add_argument("platform")
+    oauth_cb.add_argument("--timeout", type=int, default=300)
+    oauth_cb.set_defaults(func=cmd_oauth_callback)
     verify = social_sub.add_parser("verify")
     verify.add_argument("account_id", nargs="?")
     verify.set_defaults(func=cmd_verify)

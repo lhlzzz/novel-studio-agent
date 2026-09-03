@@ -6,9 +6,11 @@ import base64
 import hashlib
 import hmac
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
+from urllib.parse import parse_qs, urlparse
 
 from social.auth.credentials import CredentialRecord
 from social.auth.secrets import RuntimeSecretStore
@@ -114,3 +116,57 @@ def require_authorization_url(payload: dict[str, str], *, provider: str) -> dict
     if not payload.get("url") or not payload.get("state"):
         raise ValidationError(f"{provider} OAuth is BLOCKED: authorization URL/state must not be empty")
     return payload
+
+
+def parse_redirect_bind(redirect_uri: str) -> tuple[str, int, str]:
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValidationError("OAuth redirect_uri is invalid")
+    port = parsed.port or (80 if parsed.scheme == "http" else 443)
+    path = parsed.path or "/"
+    return parsed.hostname, port, path
+
+
+def listen_for_callback(redirect_uri: str, *, timeout: int = 300) -> dict[str, str]:
+    """One-shot HTTP callback. Returns code/state in memory; never logs them."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    host, port, expected_path = parse_redirect_bind(redirect_uri)
+    box: dict[str, str] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+        def do_GET(self) -> None:
+            incoming = urlparse(self.path)
+            if incoming.path != expected_path:
+                self.send_response(404)
+                self.end_headers()
+                return
+            query = parse_qs(incoming.query)
+            box["code"] = (query.get("code") or [""])[0]
+            box["state"] = (query.get("state") or [""])[0]
+            box["error"] = (query.get("error") or [""])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Meiti OAuth callback received. You can close this window.")
+
+    bind_host = host if host in {"127.0.0.1", "localhost", "::1"} else "0.0.0.0"
+    try:
+        server = HTTPServer((bind_host, port), Handler)
+    except OSError as exc:
+        raise AuthenticationError(
+            f"OAuth callback is BLOCKED_EXTERNAL: cannot bind {bind_host}:{port} for redirect_uri"
+        ) from exc
+    server.timeout = 1
+    deadline = time.time() + max(1, timeout)
+    try:
+        while time.time() < deadline and not box:
+            server.handle_request()
+    finally:
+        server.server_close()
+    if not box:
+        raise AuthenticationError("OAuth callback did not arrive")
+    return box
