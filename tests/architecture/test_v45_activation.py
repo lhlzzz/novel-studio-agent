@@ -113,8 +113,8 @@ REQUIRED_PRODUCTION_SECRETS = (
     "XHS_CLIENT_ID",
     "XHS_CLIENT_SECRET",
     "XHS_REDIRECT_URI",
-    "LECHUANG_API_URL",
-    "LECHUANG_API_KEY",
+    "XIAOLEAI_API_KEY",
+    "XIAOLEAI_BASE_URL",
 )
 
 
@@ -143,8 +143,8 @@ def test_no_provider_first_account_fallback():
 
 def test_bootstrap_is_read_only(tmp_path, monkeypatch):
     monkeypatch.setenv("MEITI_SECRET_DIR", str(tmp_path))
-    monkeypatch.setenv("LECHUANG_API_KEY", "must-not-be-written")
-    monkeypatch.setenv("LECHUANG_API_URL", "https://example.invalid")
+    monkeypatch.setenv("XIAOLEAI_API_KEY", "must-not-be-written")
+    monkeypatch.setenv("XIAOLEAI_BASE_URL", "https://example.invalid")
     tmp_path.chmod(0o700)
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
     from scripts.meiti import bootstrap_production
@@ -158,15 +158,15 @@ def test_bootstrap_is_read_only(tmp_path, monkeypatch):
 
 def test_bootstrap_does_not_write_lechuang_secret(tmp_path, monkeypatch):
     monkeypatch.setenv("MEITI_SECRET_DIR", str(tmp_path))
-    monkeypatch.setenv("LECHUANG_API_KEY", "lechuang-secret")
-    monkeypatch.setenv("LECHUANG_API_URL", "https://example.invalid")
+    monkeypatch.setenv("XIAOLEAI_API_KEY", "xiaole-secret")
+    monkeypatch.setenv("XIAOLEAI_BASE_URL", "https://example.invalid")
     tmp_path.chmod(0o700)
     from scripts.meiti import bootstrap_production
     from social.auth.secrets import secret_id
     bootstrap_production()
     digest_name = None
     from hashlib import sha256
-    ref = secret_id("lechuang", "api")
+    ref = secret_id("xiaole", "api")
     name = sha256(ref.encode("utf-8")).hexdigest() + ".json"
     assert not (tmp_path / name).exists()
 

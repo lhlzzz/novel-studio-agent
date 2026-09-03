@@ -158,7 +158,7 @@ RUN_TRANSITIONS = {
     "CANCELLED": set(),
 }
 
-TASK_STATES = ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED")
+TASK_STATES = ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT", "UNKNOWN", "BLOCKED")
 
 ASSET_TYPES = (
     "image",
@@ -240,9 +240,11 @@ def map_task_status(status: str) -> str:
         "failed": "FAILED",
         "cancelled": "CANCELLED",
         "canceled": "CANCELLED",
+        "timeout": "TIMEOUT",
+        "unknown": "UNKNOWN",
         "blocked": "BLOCKED",
     }
-    return lookup.get(raw.lower(), raw.upper() if raw else "QUEUED")
+    return lookup.get(raw.lower(), raw.upper() if raw else "UNKNOWN")
 
 
 @dataclass(frozen=True)
@@ -558,6 +560,16 @@ class AssetReference:
     character_id: str | None = None
     url: str | None = None
     path: str | None = None
+
+
+@dataclass(frozen=True)
+class CreativeResult:
+    status: str
+    asset_id: str | None = None
+    provider: str = ""
+    provider_task_id: str = ""
+    error: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

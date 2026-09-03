@@ -259,7 +259,7 @@ def bootstrap_production() -> dict:
     jushita = (os.getenv("MEITI_XIANYU_DEPLOYMENT_MODE") or "").strip().upper() == "JUSHITA"
     checks["xianyu_jushita"] = _item("PASS" if jushita else "BLOCKED_EXTERNAL")
     checks["xhs_oauth"] = _item("PASS" if _env(("XHS_CLIENT_ID", "XHS_CLIENT_SECRET", "XHS_REDIRECT_URI")) else "BLOCKED_EXTERNAL")
-    checks["lechuang"] = _item("PASS" if _env(("LECHUANG_API_URL", "LECHUANG_API_KEY")) else "BLOCKED_EXTERNAL")
+    checks["lechuang"] = _item("PASS" if _env(("XIAOLEAI_API_KEY",)) else "BLOCKED_EXTERNAL")
 
     try:
         from social.runtime.container import SocialRuntime
@@ -299,20 +299,84 @@ def cmd_bootstrap_production(_args: argparse.Namespace) -> int:
 def cmd_credentials_put(args: argparse.Namespace) -> int:
     """Explicit credential provisioning. Bootstrap never writes secrets."""
     import os
+    from creative.providers.lechuang.credentials import (
+        API_KEY_ENV,
+        BASE_URL_ENV,
+        DEFAULT_BASE_URL,
+        SECRET_ACCOUNT,
+        SECRET_PROVIDER,
+    )
     from social.auth.secrets import production_secret_store, secret_id
 
-    if args.provider != "lechuang":
+    if args.provider not in {"lechuang", "xiaole", "xiaoleai"}:
         print(f"unsupported provider: {args.provider}")
         return 1
-    key = os.getenv("LECHUANG_API_KEY", "").strip()
-    url = os.getenv("LECHUANG_API_URL", "").strip()
-    if not key or not url:
-        print('{"overall": {"status": "BLOCKED_EXTERNAL"}, "reason": "LECHUANG_API_URL/LECHUANG_API_KEY missing"}')
+    key = os.getenv(API_KEY_ENV, "").strip()
+    url = os.getenv(BASE_URL_ENV, "").strip() or DEFAULT_BASE_URL
+    if not key:
+        print(f'{{"overall": {{"status": "BLOCKED_EXTERNAL"}}, "reason": "{API_KEY_ENV} missing"}}')
         return 1
     store = production_secret_store()
-    store.put_json({"api_key": key, "api_url": url}, ref=secret_id("lechuang", "api"))
-    print('{"provider": "lechuang", "status": "STORED"}')
+    store.put_json(
+        {"api_key": key, "base_url": url, "provider": "xiaole", "service": "lechuang"},
+        ref=secret_id(SECRET_PROVIDER, SECRET_ACCOUNT),
+    )
+    print('{"provider": "xiaole-lechuang", "status": "STORED"}')
     return 0
+
+
+def cmd_creative_doctor(_args: argparse.Namespace) -> int:
+    from scripts.creative_doctor import main
+    return main()
+
+
+def cmd_creative_generate_image(args: argparse.Namespace) -> int:
+    from creative.errors import AuthError, ProviderBlocked, UnsupportedCapability
+    from creative.providers.lechuang.adapter import LechuangAdapter
+
+    adapter = LechuangAdapter()
+    try:
+        task = adapter.generate_image({
+            "prompt": args.prompt,
+            "model": args.model,
+            "image_size": args.image_size,
+            "aspect_ratio": args.aspect_ratio,
+            "n": 1,
+        })
+    except (ProviderBlocked, UnsupportedCapability, AuthError) as exc:
+        print(json.dumps({"status": "BLOCKED_EXTERNAL", "reason": str(exc)}, default=str))
+        return 1
+    asset = (task.result or {}).get("asset")
+    qa = (task.result or {}).get("qa") or {}
+    if task.status == "succeeded" and asset is not None:
+        from scripts.meiti_doctor import record_image_real_e2e
+        record_image_real_e2e(
+            asset_id=str(getattr(asset, "asset_id", "") or ""),
+            qa_decision=str(qa.get("decision") or ""),
+            sha256=str(getattr(asset, "sha256", "") or ""),
+            mime_type=str(getattr(asset, "mime_type", "") or ""),
+        )
+    payload = {
+        "status": task.status,
+        "provider": "xiaole-lechuang",
+        "provider_task_id": task.provider_task_id,
+        "asset_id": getattr(asset, "asset_id", None),
+        "path": getattr(asset, "path", None),
+        "sha256": getattr(asset, "sha256", None),
+        "width": getattr(asset, "width", None),
+        "height": getattr(asset, "height", None),
+        "mime_type": getattr(asset, "mime_type", None),
+        "size": getattr(asset, "size", None),
+        "qa": qa,
+    }
+    print(json.dumps(payload, default=str))
+    return 0 if task.status == "succeeded" else 1
+
+
+def cmd_creative_generate_video(_args: argparse.Namespace) -> int:
+    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
+    print(json.dumps({"status": "NOT_VERIFIED", "reason": VIDEO_NOT_VERIFIED}))
+    return 1
 
 
 def main() -> int:
@@ -326,8 +390,20 @@ def main() -> int:
     cred = sub.add_parser("credentials")
     cred_sub = cred.add_subparsers(dest="command", required=True)
     put = cred_sub.add_parser("put")
-    put.add_argument("--provider", required=True, choices=("lechuang",))
+    put.add_argument("--provider", required=True, choices=("lechuang", "xiaole", "xiaoleai"))
     put.set_defaults(func=cmd_credentials_put)
+    creative = sub.add_parser("creative")
+    creative_sub = creative.add_subparsers(dest="command", required=True)
+    creative_sub.add_parser("doctor").set_defaults(func=cmd_creative_doctor)
+    gen_image = creative_sub.add_parser("generate-image")
+    gen_image.add_argument("--prompt", required=True)
+    gen_image.add_argument("--model", default="gpt-image-2")
+    gen_image.add_argument("--image-size", default="2K")
+    gen_image.add_argument("--aspect-ratio", default="9:16")
+    gen_image.set_defaults(func=cmd_creative_generate_image)
+    gen_video = creative_sub.add_parser("generate-video")
+    gen_video.add_argument("--prompt", default="")
+    gen_video.set_defaults(func=cmd_creative_generate_video)
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)

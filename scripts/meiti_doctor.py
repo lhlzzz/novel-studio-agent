@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -169,18 +168,22 @@ def check_creative_engine() -> dict:
 
 def check_lechuang() -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
+    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
     adapter = LechuangAdapter()
     ready, reason = adapter.live_ready()
     auth = adapter.client.auth()
+    image = adapter.capability_status("text_to_image")
+    video = adapter.capability_status("text_to_video")
     return {
         "status": "PASS" if ready else "BLOCKED_EXTERNAL",
         "runtime": "PASS" if ready else "BLOCKED_EXTERNAL",
         "auth": "PASS" if auth.api_key_present else "BLOCKED_EXTERNAL",
-        "image": "PASS" if ready else "BLOCKED_EXTERNAL",
-        "video": "PASS" if ready else "BLOCKED_EXTERNAL",
+        "image": image.get("status"),
+        "video": video.get("status") or "NOT_VERIFIED",
         "reason": reason,
         "contract_verified": auth.contract_verified,
         "api_key_present": auth.api_key_present,
+        "video_reason": VIDEO_NOT_VERIFIED,
     }
 
 
@@ -250,33 +253,26 @@ def check_generation_resolver() -> dict:
 
 
 def check_lechuang_contract() -> dict:
-    from creative.providers.lechuang.client import CONTRACT_VERIFIED, LechuangClient
+    from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, LechuangClient
+    from creative.providers.lechuang.credentials import API_KEY_ENV, BASE_URL_ENV
     from creative.providers.lechuang.schemas import CreateImageRequest, CreateTaskResponse, ProviderError
     client = LechuangClient()
     typed = all((CreateImageRequest, CreateTaskResponse, ProviderError))
-    verified = bool(client.contract_verified and CONTRACT_VERIFIED and typed)
+    verified = bool(client.contract_verified and IMAGE_CONTRACT_VERIFIED and typed)
     if verified:
-        return _status(True, reason=client.contract_reason, env="LECHUANG_API_URL", service="lechuang")
-    return {"status": "BLOCKED_EXTERNAL", "reason": client.contract_reason, "env": "LECHUANG_API_URL", "service": "lechuang", "next": "Extract the official Lechuang HTTP contract from the operator workbench/docs. Do not guess endpoints."}
+        return _status(True, reason=client.contract_reason, env=BASE_URL_ENV, service="xiaole-lechuang", endpoint=client.base_url)
+    return {"status": "BLOCKED_EXTERNAL", "reason": client.contract_reason, "env": API_KEY_ENV, "service": "xiaole-lechuang"}
 
 
 def check_lechuang_auth() -> dict:
-    from creative.providers.lechuang.adapter import LechuangAdapter
-    adapter = LechuangAdapter()
-    auth = adapter.client.auth()
-    if auth.api_key_present:
-        return _status(True, reason="ok", env="LECHUANG_API_KEY")
-    return {"status": "BLOCKED_EXTERNAL", "reason": "LECHUANG_API_KEY missing", "env": "LECHUANG_API_KEY", "next": "Put a real LECHUANG_API_KEY in the operator environment after the contract is verified."}
+    from creative.providers.lechuang.credentials import credential_status
+    return credential_status()
 
 
 def check_lechuang_capability(name: str) -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
     adapter = LechuangAdapter()
-    ready, reason = adapter.live_ready()
-    verified = adapter.has_verified(name)
-    if ready and verified:
-        return _status(True, reason=reason, capability=name, verified=verified, env="LECHUANG_API_KEY", service="lechuang")
-    return {"status": "BLOCKED_EXTERNAL", "reason": reason, "capability": name, "verified": verified, "env": "LECHUANG_API_KEY", "service": "lechuang"}
+    return adapter.capability_status(name)
 
 
 def check_vision_provider() -> dict:
@@ -334,6 +330,10 @@ def check_reconciliation() -> dict:
 
 
 def e2e_path() -> Path:
+    return ROOT / "docs/audits/meiti-v4.5.3-real-e2e.json"
+
+
+def legacy_e2e_path() -> Path:
     return ROOT / "docs/audits/meiti-v4.4.4-cn-e2e.json"
 
 
@@ -349,51 +349,87 @@ def load_e2e() -> dict:
 
 def write_e2e_audit(checks: dict) -> dict:
     existing = load_e2e()
-    creative = existing.get("creative") if isinstance(existing.get("creative"), dict) else {}
-    distribution = existing.get("distribution") if isinstance(existing.get("distribution"), dict) else {}
+    image = existing.get("image") if isinstance(existing.get("image"), dict) else {}
+    video = existing.get("video") if isinstance(existing.get("video"), dict) else {}
+    i2v = existing.get("image_to_video") if isinstance(existing.get("image_to_video"), dict) else {}
+    image_e2e = bool(image.get("real_e2e"))
+    video_e2e = bool(video.get("real_e2e"))
     payload = {
-        "version": "4.4.4",
-        "overall": "BLOCKED_EXTERNAL" if any(item.get("status") == "BLOCKED_EXTERNAL" for item in checks.values()) else ("READY" if all(item.get("status") == "PASS" for item in checks.values()) else "BLOCKED"),
-        "creative": {
-            "workflow": creative.get("workflow") or "",
-            "provider": creative.get("provider") or "",
-            "image_asset_id": creative.get("image_asset_id") or "",
-            "video_asset_id": creative.get("video_asset_id") or "",
-            "judge": creative.get("judge") or "blocked",
-            "reason": checks.get("Real Creative E2E", {}).get("reason"),
+        "version": "4.5.3",
+        "provider": "xiaole-lechuang",
+        "credential": checks.get("Creative Credential", {}).get("status") or checks.get("Lechuang Auth", {}).get("status") or existing.get("credential") or "",
+        "contract": checks.get("Lechuang Contract", {}).get("status") or existing.get("contract") or "",
+        "image": {
+            **{key: value for key, value in image.items() if key not in {"capability", "real_generation", "media_asset", "qa", "real_e2e"}},
+            "capability": checks.get("Image Generation", {}).get("status") or image.get("capability") or "",
+            "real_generation": image.get("real_generation") or "",
+            "media_asset": image.get("media_asset") or "",
+            "qa": image.get("qa") or "",
+            "real_e2e": image_e2e,
         },
-        "distribution": {
-            "provider": distribution.get("provider") or "",
-            "account_id": distribution.get("account_id") or distribution.get("integration_id") or "",
-            "remote_post_id": distribution.get("remote_post_id") or "",
-            "status": distribution.get("status") or "blocked",
-            "reason": checks.get("Real Distribution E2E", {}).get("reason"),
+        "video": {
+            "capability": checks.get("Video Generation", {}).get("status") or video.get("capability") or "NOT_VERIFIED",
+            "real_generation": video.get("real_generation") or "NOT_VERIFIED",
+            "media_asset": video.get("media_asset") or "NOT_VERIFIED",
+            "qa": video.get("qa") or "NOT_VERIFIED",
+            "real_e2e": video_e2e,
         },
-        "reconciliation": existing.get("reconciliation") or {"status": "blocked"},
-        "analytics": existing.get("analytics") or {"ingested": False},
-        "memory": existing.get("memory") or {"written": False},
-        "blockers": [
-            {"check": name, "reason": value.get("reason") or value.get("error"), "env": value.get("env"), "service": value.get("service"), "next": value.get("next")}
-            for name, value in checks.items()
-            if value.get("status") != "PASS"
-        ],
+        "image_to_video": {
+            "capability": checks.get("Image-to-Video", {}).get("status") or i2v.get("capability") or "NOT_VERIFIED",
+            "real_e2e": bool(i2v.get("real_e2e")),
+        },
+        "overall": "BLOCKED_EXTERNAL",
     }
+    image_pass = image_e2e and str(payload["image"].get("media_asset") or "") == "PASS" and str(payload["image"].get("qa") or "") == "PASS"
+    if image_pass and video_e2e:
+        payload["overall"] = "READY"
+    elif image_pass:
+        payload["overall"] = "IMAGE_PRODUCTION_READY"
     path = e2e_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
     return payload
 
 
+def record_image_real_e2e(*, asset_id: str, qa_decision: str, sha256: str = "", mime_type: str = "") -> dict:
+    """Persist image E2E evidence. Never stores secrets or raw credential payloads."""
+    existing = load_e2e()
+    ok = bool(asset_id) and str(qa_decision).lower() == "pass" and bool(sha256)
+    image = {
+        "capability": "PASS",
+        "real_generation": "PASS" if ok else "BLOCKED_EXTERNAL",
+        "media_asset": "PASS" if ok else "BLOCKED_EXTERNAL",
+        "qa": "PASS" if ok else "BLOCKED_EXTERNAL",
+        "real_e2e": ok,
+        "asset_id": asset_id,
+        "sha256_prefix": sha256[:12] if sha256 else "",
+        "mime_type": mime_type,
+    }
+    existing["version"] = "4.5.3"
+    existing["provider"] = "xiaole-lechuang"
+    existing["image"] = image
+    existing.setdefault("video", {
+        "capability": "NOT_VERIFIED",
+        "real_generation": "NOT_VERIFIED",
+        "media_asset": "NOT_VERIFIED",
+        "qa": "NOT_VERIFIED",
+        "real_e2e": False,
+    })
+    existing.setdefault("image_to_video", {"capability": "NOT_VERIFIED", "real_e2e": False})
+    existing["overall"] = "IMAGE_PRODUCTION_READY" if ok else "BLOCKED_EXTERNAL"
+    path = e2e_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, indent=2, default=str) + "\n", encoding="utf-8")
+    return existing
+
+
 def check_real_creative_e2e() -> dict:
+    from creative.providers.lechuang.credentials import API_KEY_ENV
     data = load_e2e()
-    creative = data.get("creative") or {}
-    image = str(creative.get("image_asset_id") or "").strip()
-    video = str(creative.get("video_asset_id") or "").strip()
-    judge = str(creative.get("judge") or "").lower()
-    ok = bool(image and video and judge == "pass" and not image.startswith("fake") and not video.startswith("fake"))
-    if ok:
-        return _status(True, reason="ok", env="LECHUANG_API_KEY", service="lechuang")
-    return {"status": "BLOCKED_EXTERNAL", "reason": "no real creative E2E evidence", "env": "LECHUANG_API_KEY", "service": "lechuang", "next": "After the Lechuang contract is verified, run one image and one image-to-video workflow and persist real asset IDs."}
+    image = data.get("image") or {}
+    if bool(image.get("real_e2e")) and str(image.get("media_asset") or "") == "PASS" and str(image.get("qa") or "") == "PASS":
+        return _status(True, reason="ok", env=API_KEY_ENV, service="xiaole-lechuang", video="NOT_VERIFIED")
+    return {"status": "BLOCKED_EXTERNAL", "reason": "no real image E2E evidence", "env": API_KEY_ENV, "service": "xiaole-lechuang", "next": "Run python scripts/meiti.py creative generate-image with XIAOLEAI_API_KEY and persist MediaAsset + QA."}
 
 
 def check_real_distribution_e2e() -> dict:
@@ -422,6 +458,7 @@ def run() -> dict:
         "Credential": social["Credential Store"],
         "Creative Runtime": check_creative_runtime(),
         "Lechuang": social["Lechuang"],
+        "Creative Credential": lechuang_auth,
         "Lechuang Contract": lechuang_contract,
         "Lechuang Auth": lechuang_auth,
         "CN Social Runtime": social["Runtime"],
@@ -455,7 +492,7 @@ def run() -> dict:
 
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") if isinstance(value, dict) else value for key, value in checks.items()}
-    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED"}]
+    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED", "NOT_VERIFIED"}]
     external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL"]
     return {
         "ready": not code_blocked and not external,
@@ -480,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: {status}")
     print(f"Architecture: {architecture}")
     print(f"Overall: {overall}")
+    write_e2e_audit(checks)
     print(json.dumps({
         "architecture": {"status": architecture},
         "runtime": {"status": checks.get("CN Social Runtime", {}).get("status")},
@@ -491,13 +529,14 @@ def main(argv: list[str] | None = None) -> int:
             "lechuang": {"status": checks.get("Lechuang", {}).get("status")},
         },
         "e2e": {"status": checks.get("Real Social E2E", {}).get("status")},
+        "creative_e2e": {"status": checks.get("Real Creative E2E", {}).get("status")},
         "overall": {"status": overall},
         "architecture_ready": payload["architecture_ready"],
         "runtime_ready": checks.get("CN Social Runtime", {}).get("status") == "PASS",
         "external_ready": False,
         "overall_ready": payload["ready"],
         "checks": payload["checks"],
-        "blockers": [name for name, status in payload["checks"].items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE"}],
+        "blockers": [name for name, status in payload["checks"].items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "NOT_VERIFIED"}],
         }, default=str))
     if args.gate == "production":
         return 0 if overall == "PASS" else 1

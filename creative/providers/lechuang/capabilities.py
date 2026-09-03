@@ -1,4 +1,4 @@
-"""Claimed vs verified Lechuang capabilities. YAML never enables live generation."""
+"""Claimed vs verified Xiaole / Lechuang capabilities. YAML never enables video."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ def load_models(path: Path | None = None) -> dict[str, Any]:
 def claimed_capabilities() -> list[LechuangCapability]:
     data = load_models()
     verified_contract = bool((data.get("contract") or {}).get("verified"))
+    video = (data.get("contract") or {}).get("video") or {}
+    video_verified = bool(video.get("verified"))
     reason = str((data.get("contract") or {}).get("reason") or "")
     items = []
     seen: set[str] = set()
@@ -33,11 +35,12 @@ def claimed_capabilities() -> list[LechuangCapability]:
             if name in seen:
                 continue
             seen.add(name)
+            is_video = name in {"text_to_video", "image_to_video", "video_generation", "video_extend", "video_edit"}
             items.append(LechuangCapability(
                 name=str(name),
                 claimed=True,
-                verified=bool(spec.get("verified") and verified_contract),
-                async_mode=bool(spec.get("async", True)),
-                reason="" if verified_contract else reason,
+                verified=bool(spec.get("verified") and verified_contract and (video_verified if is_video else True)),
+                async_mode=bool(spec.get("async", False)),
+                reason="" if (spec.get("verified") and verified_contract) else reason,
             ))
     return items

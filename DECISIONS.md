@@ -7,6 +7,9 @@
 - **2026-09-01:** CreativeWorkflow is the canonical media production abstraction.
 - **2026-09-01:** Lechuang is a generation provider. Live methods stay BLOCKED
   until the official HTTP contract is extracted.
+- **2026-09-03 V4.5.3:** XiaoleAI and Lechuang share one Creative credential
+  (`XIAOLEAI_API_KEY` / `XIAOLEAI_BASE_URL`). Image generation is the verified
+  OpenAI-compatible contract. Video remains NOT_VERIFIED.
 - **2026-09-02:** Meiti owns native social accounts. Credentials are stored by
   credential_ref only.
 - **2026-09-02 V4.4.2:** Production social composition root is

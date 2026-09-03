@@ -116,10 +116,14 @@ def test_idempotent_publish():
 
 
 def test_v43_doctor_keeps_unverified_live_paths_blocked():
+    from creative.providers.lechuang.adapter import LechuangAdapter
     from scripts.meiti_doctor import check_lechuang_contract, check_real_creative_e2e, check_real_distribution_e2e
-    assert check_lechuang_contract()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
+    contract = check_lechuang_contract()
+    assert contract["status"] == "PASS"
     assert check_real_creative_e2e()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
     assert check_real_distribution_e2e()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
+    video = LechuangAdapter().capability_status("text_to_video")
+    assert video["status"] == "NOT_VERIFIED"
 
 
 def test_retry_policy():

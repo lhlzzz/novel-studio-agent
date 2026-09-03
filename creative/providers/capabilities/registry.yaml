@@ -1,26 +1,48 @@
 models:
   - provider: lechuang
-    model: lechuang.image.claimed
-    input_types: [text, image]
+    model: gpt-image-2
+    input_types: [text]
     output_types: [image]
-    supported_references: [image, character]
-    resolution: [720p, 1080p]
-    aspect_ratio: ["9:16", "16:9", "1:1"]
+    supported_references: []
+    resolution: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
     duration: []
-    async: true
-    verified: false
-    capabilities: [text_to_image, image_to_image]
+    async: false
+    verified: true
+    capabilities: [text_to_image, image_generation]
   - provider: lechuang
-    model: lechuang.video.claimed
-    input_types: [text, image, video]
-    output_types: [video]
-    supported_references: [image, video, character]
-    resolution: [720p, 1080p]
-    aspect_ratio: ["9:16", "16:9"]
-    duration: ["4", "5", "8", "10", "15"]
-    async: true
-    verified: false
-    capabilities: [text_to_video, image_to_video, video_extend, video_edit]
+    model: gemini-2.5-flash-image
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    resolution: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
+    async: false
+    verified: true
+    capabilities: [text_to_image, image_generation]
+  - provider: lechuang
+    model: gemini-3.1-flash-image-preview
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    resolution: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
+    async: false
+    verified: true
+    capabilities: [text_to_image, image_generation]
+  - provider: lechuang
+    model: gemini-3-pro-image-preview
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    resolution: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
+    async: false
+    verified: true
+    capabilities: [text_to_image, image_generation]
   - provider: mock
     model: mock.default
     input_types: [text, image, video]

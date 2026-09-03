@@ -24,8 +24,8 @@ jobs:
       XHS_CLIENT_ID: ${{ secrets.XHS_CLIENT_ID }}
       XHS_CLIENT_SECRET: ${{ secrets.XHS_CLIENT_SECRET }}
       XHS_REDIRECT_URI: ${{ secrets.XHS_REDIRECT_URI }}
-      LECHUANG_API_URL: ${{ secrets.LECHUANG_API_URL }}
-      LECHUANG_API_KEY: ${{ secrets.LECHUANG_API_KEY }}
+      XIAOLEAI_API_KEY: ${{ secrets.XIAOLEAI_API_KEY }}
+      XIAOLEAI_BASE_URL: ${{ secrets.XIAOLEAI_BASE_URL }}
       AI_GATEWAY_API_URL: ${{ secrets.AI_GATEWAY_API_URL }}
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       MEITI_XIANYU_DEPLOYMENT_MODE: ${{ secrets.MEITI_XIANYU_DEPLOYMENT_MODE }}

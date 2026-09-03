@@ -1,0 +1,25 @@
+{
+  "version": "4.5.3",
+  "provider": "xiaole-lechuang",
+  "credential": "BLOCKED_EXTERNAL",
+  "contract": "PASS",
+  "image": {
+    "capability": "BLOCKED_EXTERNAL",
+    "real_generation": "BLOCKED_EXTERNAL",
+    "media_asset": "BLOCKED_EXTERNAL",
+    "qa": "BLOCKED_EXTERNAL",
+    "real_e2e": false
+  },
+  "video": {
+    "capability": "NOT_VERIFIED",
+    "real_generation": "NOT_VERIFIED",
+    "media_asset": "NOT_VERIFIED",
+    "qa": "NOT_VERIFIED",
+    "real_e2e": false
+  },
+  "image_to_video": {
+    "capability": "NOT_VERIFIED",
+    "real_e2e": false
+  },
+  "overall": "BLOCKED_EXTERNAL"
+}

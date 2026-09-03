@@ -91,7 +91,7 @@ def block_reason_for(exc: BaseException) -> str:
     if code == "provider_blocked":
         text = str(getattr(exc, "reason", "") or exc)
         lowered = text.lower()
-        if "LECHUANG_API_KEY" in text or "auth" in lowered:
+        if "XIAOLEAI_API_KEY" in text or "LECHUANG_API_KEY" in text or "auth" in lowered:
             return "PROVIDER_AUTH_MISSING"
         if "contract" in lowered or "unverified" in lowered:
             return "PROVIDER_CONTRACT_UNVERIFIED"

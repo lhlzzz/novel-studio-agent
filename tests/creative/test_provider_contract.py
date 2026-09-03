@@ -28,16 +28,16 @@ def test_lechuang_auth_and_rate_limit(monkeypatch):
     assert adapter.health()["ok"] is False
     with pytest.raises((ProviderBlocked, AuthError)):
         adapter.create("generate_image", {"prompt": "x"})
-    client = LechuangClient(base_url="https://example.invalid", api_key="secret")
+    client = LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret")
     with pytest.raises(RateLimited):
         client.handle_rate_limit(429, {"Retry-After": "2"})
     ready, reason = adapter.live_ready()
     assert ready is False
-    assert "LECHUANG_API_KEY" in reason or "contract" in reason.lower() or "unverified" in reason.lower()
+    assert "XIAOLEAI_API_KEY" in reason
 
 
 def test_lechuang_timeout_and_error_do_not_guess():
-    adapter = LechuangAdapter(client=LechuangClient(base_url="https://example.invalid", api_key="secret"))
+    adapter = LechuangAdapter(client=LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret"))
     with pytest.raises((ProviderBlocked, UnsupportedCapability)):
         adapter.poll("missing")
     with pytest.raises((ProviderBlocked, UnsupportedCapability)):

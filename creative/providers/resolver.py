@@ -141,11 +141,13 @@ class GenerationProviderResolver:
             self.providers.pop("mock", None)
 
     def resolve(self, name: str, *, requirement: dict[str, Any] | None = None):
-        if name == "lechuang":
-            adapter = self.providers["lechuang"]
+        if name in {"lechuang", "xiaole", "xiaoleai"}:
+            adapter = self.providers.get("lechuang") or self.providers.get(name)
+            if adapter is None:
+                raise UnsupportedCapability(name, provider="resolver")
             live_ready = getattr(adapter, "live_ready", None)
             if not callable(live_ready):
-                return adapter, getattr(adapter, "name", name)
+                return adapter, getattr(adapter, "name", "lechuang")
             ready, reason = live_ready()
             if ready:
                 return adapter, "lechuang"
@@ -166,6 +168,8 @@ class GenerationProviderResolver:
         if chosen is not None and not chosen.verified and not self.allow_mock:
             raise ProviderBlocked(chosen.provider, f"{chosen.model} unverified")
         provider_name = chosen.provider if chosen else str(requirement.get("provider") or "lechuang")
+        if provider_name in {"xiaole", "xiaoleai"}:
+            provider_name = "lechuang"
         if provider_name == "mock" and not self.allow_mock:
             raise ProviderBlocked("mock", "mock is tests only")
         implementation, resolved = self.resolve(provider_name, requirement=requirement)

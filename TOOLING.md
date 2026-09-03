@@ -18,16 +18,16 @@ Environment (never commit secrets):
 
 ```env
 DATABASE_URL=
-LECHUANG_API_URL=
-LECHUANG_API_KEY=
+XIAOLEAI_API_KEY=
+XIAOLEAI_BASE_URL=https://api.xiaoleai.team/v1
 X_CLIENT_ID=
 X_CLIENT_SECRET=
 X_REDIRECT_URI=
 SCRAPECREATORS_API_KEY=
 ```
 
-Live generation stays BLOCKED while the official request/response schema is
-unverified. Do not guess endpoints.
+Image generation uses the verified XiaoleAI OpenAI-compatible contract.
+Video stays NOT_VERIFIED until a real video API exists. Do not guess endpoints.
 
 ## Meiti database
 

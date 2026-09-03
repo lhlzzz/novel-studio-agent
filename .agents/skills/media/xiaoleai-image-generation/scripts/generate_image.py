@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate images through the XiaoleAI OpenAI-compatible relay."""
+"""Contract reference for XiaoleAI OpenAI-compatible image generation.
+
+Production execution owner is `creative.providers.lechuang.LechuangAdapter`.
+This script remains the documented request/response contract. Do not use it as
+a second production media pipeline.
+"""
 
 from __future__ import annotations
 

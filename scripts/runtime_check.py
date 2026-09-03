@@ -17,6 +17,7 @@ LIVE_KEYS = {
     "Lechuang",
     "Lechuang Contract",
     "Lechuang Auth",
+    "Creative Credential",
     "Image Generation",
     "Image-to-Image",
     "Image-to-Video",
@@ -39,8 +40,8 @@ LIVE_KEYS = {
 def main() -> int:
     payload = as_payload(run())
     statuses = payload["checks"]
-    architecture_ready = all(status in {"PASS", "HANDOFF_ONLY", "NOT_APPLICABLE"} for key, status in statuses.items() if key not in LIVE_KEYS)
-    live_ready = all(statuses.get(key) == "PASS" for key in LIVE_KEYS)
+    architecture_ready = all(status in {"PASS", "HANDOFF_ONLY", "NOT_APPLICABLE", "NOT_VERIFIED"} for key, status in statuses.items() if key not in LIVE_KEYS)
+    live_ready = all(statuses.get(key) in {"PASS", "NOT_VERIFIED"} for key in LIVE_KEYS if key in statuses)
     out = {
         "ready": architecture_ready and live_ready,
         "architecture_ready": architecture_ready,

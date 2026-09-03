@@ -33,7 +33,7 @@ def test_invalid_transition_raises():
 
 def test_blocked_reason_is_structured():
     run = CreativeRun("r", "w", "1")
-    apply_block(run, "PROVIDER_AUTH_MISSING", "LECHUANG_API_KEY missing", retryable=False)
+    apply_block(run, "PROVIDER_AUTH_MISSING", "XIAOLEAI_API_KEY missing", retryable=False)
     assert run.status == "BLOCKED"
     assert run.blocked_reason == "PROVIDER_AUTH_MISSING"
     assert run.blocked_message
@@ -60,7 +60,7 @@ def test_cycle_workflow_blocks(tmp_path):
 
 
 def test_missing_provider_credential_blocks(tmp_path, monkeypatch):
-    monkeypatch.delenv("LECHUANG_API_KEY", raising=False)
+    monkeypatch.delenv("XIAOLEAI_API_KEY", raising=False)
     from creative.providers.lechuang.adapter import LechuangAdapter
     from creative.providers.lechuang.client import LechuangClient
     assets = AssetStore(root=tmp_path / "assets")

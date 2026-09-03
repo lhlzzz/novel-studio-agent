@@ -1,4 +1,4 @@
-"""Lechuang-facing shapes. No guessed request fields are treated as live."""
+"""Xiaole / Lechuang request and result shapes. Unverified video fields are not live."""
 
 from __future__ import annotations
 
@@ -33,11 +33,11 @@ class LechuangTaskView:
 @dataclass(frozen=True)
 class CreateImageRequest:
     prompt: str
-    width: int | None = None
-    height: int | None = None
-    aspect_ratio: str | None = None
-    model: str | None = None
-    negative_prompt: str | None = None
+    model: str | None = "gpt-image-2"
+    image_size: str | None = "2K"
+    aspect_ratio: str | None = "9:16"
+    n: int = 1
+    response_format: str = "b64_json"
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -105,8 +105,7 @@ class TaskStatusResponse:
 class TaskResultResponse:
     task_id: str
     status: str
-    media_url: str | None = None
-    media_urls: tuple[str, ...] = ()
+    asset_id: str | None = None
     mime_type: str | None = None
     request_id: str | None = None
     credits: float | None = None

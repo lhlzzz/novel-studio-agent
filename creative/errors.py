@@ -193,7 +193,7 @@ def user_message(exc: BaseException) -> str:
     if isinstance(exc, ProviderBlocked):
         reason = exc.reason
         lowered = reason.lower()
-        if "LECHUANG_API_KEY" in reason or "authentication" in lowered or "auth" in lowered:
+        if "XIAOLEAI_API_KEY" in reason or "LECHUANG_API_KEY" in reason or "authentication" in lowered or "auth" in lowered:
             return f"{exc.provider} unavailable: authentication required"
         return f"{exc.provider} unavailable: {reason}"
     if isinstance(exc, AuthError):

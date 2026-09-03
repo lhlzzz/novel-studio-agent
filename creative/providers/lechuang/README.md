@@ -1,33 +1,26 @@
-# Lechuang Provider
+# Xiaole / Lechuang Provider
 
 Lechuang is a generation provider, not an Agent and not a workspace.
+XiaoleAI and Lechuang share one Creative credential.
 
-Meiti calls a documented HTTP API. It does not drive the Lechuang canvas UI.
+```text
+XIAOLEAI_API_KEY
+XIAOLEAI_BASE_URL=https://api.xiaoleai.team/v1
+```
 
-## Live status
+Do not create `LECHUANG_API_KEY`. Image generation uses the verified
+OpenAI-compatible contract from `.agents/skills/media/xiaoleai-image-generation/`.
 
-The public web did not yield a reliable official API document during this
-implementation. Until an operator extracts `base_url`, authentication,
-endpoints, models, and request/response schema from Lechuang's own key/docs
-surface:
+## Verified
 
-- `LECHUANG_API_KEY` / `LECHUANG_API_URL` may be present
-- `LechuangAdapter` methods exist
-- live calls raise `ProviderBlocked` or `UnsupportedCapability`
-- doctor reports `Lechuang Live = BLOCKED`
+- Protocol: OpenAI-compatible
+- Endpoint: `POST /images/generations`
+- Request: `model`, `prompt`, `response_format=b64_json`, `image_size`, `aspect_ratio`, `n`
+- Response: `data[].b64_json`
+- Output: decoded image bytes persisted as `MediaAsset`
 
-Do not guess URLs, models, or payloads.
+## NOT_VERIFIED
 
-## Contract
-
-`generate_text`, `generate_image`, `edit_image`, `generate_video`,
-`extend_video`, `edit_video`, `upload_asset`, `create_task`, `get_task`,
-`cancel_task`, `get_result`.
-
-Claimed capabilities live in `models.yaml` with `verified: false`.
-
-## Typed contract
-
-Meiti-side request/response types live in `schemas.py`. HTTP endpoints stay empty
-in `models.yaml` until the official Lechuang contract is extracted. `verified: true`
-is forbidden without a real create/poll/result cycle.
+Video generation, image-to-video, video extend, video edit, and image editing
+are not present in repository evidence. They stay `NOT_VERIFIED`. Do not guess
+those endpoints.

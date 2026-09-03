@@ -17,7 +17,22 @@ Prompt construction is provided by the separately installed
 `685469889fb72fd5adefae45e1645d527edcb5e7`. Read its `SKILL.md` and
 `references/style-library.md` before selecting a template or style.
 
-Use the bundled `scripts/generate_image.py` for deterministic calls to the XiaoleAI image relay. It sends a non-streaming request, decodes each returned `data[].b64_json`, validates the image signature, and writes the files locally.
+Production image generation is owned by the Meiti Creative Engine
+(`creative.providers.lechuang`). This skill documents the XiaoleAI
+OpenAI-compatible contract, models, and prompt constraints. Do not run a
+second production media pipeline from this skill.
+
+The historical `scripts/generate_image.py` is the source of the verified
+request/response contract. Creative Provider reuses that contract:
+
+- `XIAOLEAI_API_KEY`
+- `XIAOLEAI_BASE_URL` default `https://api.xiaoleai.team/v1`
+- `POST /images/generations`
+- `response_format=b64_json`
+- decode `data[].b64_json`, validate image signature, persist `MediaAsset`
+
+Use `python scripts/meiti.py creative generate-image --prompt "..."` for
+production execution.
 
 ## Preconditions
 

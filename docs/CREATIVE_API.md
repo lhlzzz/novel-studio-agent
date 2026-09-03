@@ -41,7 +41,9 @@ Replay creates a new run with `replay_of` set. Identical inputs reuse `idempoten
 - `resolve(name)` — production never falls back to mock
 - `select(requirement)` — ranks capability, model, node type, workflow, content type, health, cost, latency, success rate
 
-Lechuang HTTP lives only in `LechuangClient`. Live calls stay BLOCKED until the official contract is verified.
+Xiaole / Lechuang HTTP lives only in `LechuangClient`. Image generation uses the
+verified OpenAI-compatible `/images/generations` contract and persists a
+`MediaAsset`. Video stays `NOT_VERIFIED`.
 
 ## Judge API
 

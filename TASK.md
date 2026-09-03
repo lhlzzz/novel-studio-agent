@@ -1,4 +1,4 @@
-# Meiti V4.5.1 Task
+# Meiti V4.5.3 Task
 
 **GOAL:** Production activation hardening. Architecture, persistence, secret
 store, account-scoped reconciliation, doctor probe/gate split, CI secret
@@ -12,7 +12,8 @@ evidence exists.
 ## Current boundary
 
 - Research remains read-only intelligence and is unavailable without credentials.
-- Creative live generation: BLOCKED_EXTERNAL until Lechuang API contract + key.
+- Creative live image: BLOCKED_EXTERNAL until `XIAOLEAI_API_KEY` and real image E2E.
+- Creative live video: NOT_VERIFIED. Do not guess a video API.
 - AI Judge: BLOCKED_EXTERNAL until a verified vision provider exists.
 - Distribution live publish: BLOCKED_EXTERNAL until native OAuth + verified account.
 - XHS remains HANDOFF_ONLY until write_notes is live-verified.

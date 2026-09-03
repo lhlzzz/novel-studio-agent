@@ -1,4 +1,4 @@
-"""Claimed Lechuang models. verified=false until the official schema is extracted."""
+"""Xiaole / Lechuang models. Image models are verified from the XiaoleAI skill contract."""
 
 from creative.providers.lechuang.capabilities import claimed_capabilities, load_models
 

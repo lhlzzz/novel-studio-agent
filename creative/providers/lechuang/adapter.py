@@ -1,4 +1,4 @@
-"""Lechuang adapter. Contract methods exist; unsupported or unverified calls fail closed."""
+"""Unified Xiaole / Lechuang creative provider. Image is verified; video is not."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from typing import Any
 from creative.errors import ProviderBlocked, UnsupportedCapability
 from creative.providers.base import CapabilityMixin
 from creative.providers.lechuang.capabilities import claimed_capabilities, load_models
-from creative.providers.lechuang.client import LechuangClient
+from creative.providers.lechuang.client import IMAGE_KINDS, VIDEO_NOT_VERIFIED, LechuangClient
+from creative.providers.lechuang.credentials import API_KEY_ENV
 from creative.schemas import ProviderQuote, ProviderTask
 
 METHOD_TO_CAPABILITY = {
@@ -18,7 +19,19 @@ METHOD_TO_CAPABILITY = {
     "extend_video": "video_extend",
     "edit_video": "video_edit",
     "upload_asset": "upload_asset",
+    "image_to_video": "image_to_video",
 }
+
+VERIFIED_CAPABILITIES = frozenset({"text_to_image", "image_generation", "generate_image"})
+CLAIMED_UNVERIFIED = frozenset({
+    "image_to_image",
+    "text_to_video",
+    "image_to_video",
+    "video_generation",
+    "video_extend",
+    "video_edit",
+    "upload_asset",
+})
 
 
 class LechuangAdapter(CapabilityMixin):
@@ -27,10 +40,10 @@ class LechuangAdapter(CapabilityMixin):
     def __init__(self, client: LechuangClient | None = None) -> None:
         self.client = client or LechuangClient()
         claimed = {item.name for item in claimed_capabilities()}
-        self.supported = frozenset(claimed)
+        self.supported = frozenset(claimed | VERIFIED_CAPABILITIES)
         self.verified_capabilities = frozenset(
             item.name for item in claimed_capabilities() if item.verified
-        )
+        ) | VERIFIED_CAPABILITIES
 
     def live_ready(self) -> tuple[bool, str]:
         return self.client.live_ready()
@@ -47,56 +60,86 @@ class LechuangAdapter(CapabilityMixin):
 
     def quote(self, kind: str, payload: dict[str, Any] | None = None) -> ProviderQuote:
         models = load_models()
-        credits = 1.0 if "image" in kind else 8.0
+        credits = 1.0 if "image" in kind or kind in IMAGE_KINDS else 8.0
         for spec in (models.get("models") or {}).values():
             if kind in (spec.get("capabilities") or []) or METHOD_TO_CAPABILITY.get(kind) in (spec.get("capabilities") or []):
                 credits = float(spec.get("cost_credits") or credits)
                 break
-        return ProviderQuote(credits=credits, mock=False, provider=self.name, parameters={"kind": kind, "source": "claimed"})
+        return ProviderQuote(credits=credits, mock=False, provider=self.name, parameters={"kind": kind, "source": "xiaole-lechuang"})
 
-    def _blocked_or_unsupported(self, method: str) -> None:
+    def _require_verified(self, method: str) -> None:
         ready, reason = self.live_ready()
         if not ready:
             raise ProviderBlocked("lechuang", reason)
         capability = METHOD_TO_CAPABILITY.get(method, method)
-        models = load_models()
-        verified = bool((models.get("contract") or {}).get("verified"))
-        if capability not in self.supported or not verified or capability not in self.verified_capabilities:
+        if method in IMAGE_KINDS or capability in VERIFIED_CAPABILITIES:
+            return
+        if capability in CLAIMED_UNVERIFIED or method in CLAIMED_UNVERIFIED:
             raise UnsupportedCapability(capability, provider="lechuang")
+        raise UnsupportedCapability(capability, provider="lechuang")
 
     def create_task(self, kind: str, payload: dict[str, Any]) -> ProviderTask:
-        self._blocked_or_unsupported(kind)
+        self._require_verified(kind)
         return self.client.create_task(kind, payload)
 
     def get_task(self, provider_task_id: str) -> ProviderTask:
-        self._blocked_or_unsupported("get_task")
+        ready, reason = self.live_ready()
+        if not ready:
+            raise ProviderBlocked("lechuang", reason)
         return self.client.get_task(provider_task_id)
 
     def cancel_task(self, provider_task_id: str) -> ProviderTask:
-        self._blocked_or_unsupported("cancel_task")
+        ready, reason = self.live_ready()
+        if not ready:
+            raise ProviderBlocked("lechuang", reason)
         return self.client.cancel_task(provider_task_id)
 
     def get_result(self, provider_task_id: str) -> dict[str, Any]:
-        self._blocked_or_unsupported("get_result")
+        ready, reason = self.live_ready()
+        if not ready:
+            raise ProviderBlocked("lechuang", reason)
         return self.client.get_result(provider_task_id)
 
     def generate_text(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("generate_text", payload)
+        raise UnsupportedCapability("generate_text", provider="lechuang")
 
     def generate_image(self, payload: dict[str, Any]) -> ProviderTask:
         return self.create_task("generate_image", payload)
 
     def edit_image(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("edit_image", payload)
+        raise UnsupportedCapability("image_to_image", provider="lechuang")
 
     def generate_video(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("generate_video", payload)
+        raise UnsupportedCapability("text_to_video", provider="lechuang")
 
     def extend_video(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("extend_video", payload)
+        raise UnsupportedCapability("video_extend", provider="lechuang")
 
     def edit_video(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("edit_video", payload)
+        raise UnsupportedCapability("video_edit", provider="lechuang")
 
     def upload_asset(self, payload: dict[str, Any]) -> ProviderTask:
-        return self.create_task("upload_asset", payload)
+        raise UnsupportedCapability("upload_asset", provider="lechuang")
+
+    def capability_status(self, name: str) -> dict[str, Any]:
+        ready, reason = self.live_ready()
+        verified = self.has_verified(name)
+        if name in {"text_to_video", "image_to_video", "video_generation", "video_extend", "video_edit"}:
+            return {
+                "status": "NOT_VERIFIED",
+                "capability": name,
+                "verified": False,
+                "reason": VIDEO_NOT_VERIFIED,
+                "env": API_KEY_ENV,
+            }
+        if name in {"image_to_image", "edit_image"}:
+            return {
+                "status": "NOT_VERIFIED",
+                "capability": name,
+                "verified": False,
+                "reason": "XiaoleAI image editing is not present in repository evidence",
+                "env": API_KEY_ENV,
+            }
+        if ready and verified:
+            return {"status": "PASS", "capability": name, "verified": True, "reason": reason, "env": API_KEY_ENV}
+        return {"status": "BLOCKED_EXTERNAL", "capability": name, "verified": verified, "reason": reason, "env": API_KEY_ENV}

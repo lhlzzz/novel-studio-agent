@@ -1,26 +1,80 @@
 contract:
-  verified: false
-  reason: "Official Lechuang request/response schema was not extractable; live calls stay BLOCKED."
+  verified: true
+  reason: "XiaoleAI OpenAI-compatible image API: POST /images/generations, response_format=b64_json."
+  protocol: openai-compatible
+  provider: xiaole
+  service: lechuang
+  credential_env: XIAOLEAI_API_KEY
+  base_url_env: XIAOLEAI_BASE_URL
+  default_base_url: https://api.xiaoleai.team/v1
   endpoints:
-    create_task: ""
-    get_task: ""
-    cancel_task: ""
-    get_result: ""
-    upload: ""
-models:
-  lechuang.image.claimed:
-    type: image
-    async: true
+    images_generations: /images/generations
+    image_created: /image/created
+  video:
     verified: false
+    reason: "No XiaoleAI/Lechuang video API is present in repository evidence."
+models:
+  gpt-image-2:
+    provider: xiaole
+    service: lechuang
+    type: image
+    async: false
+    verified: true
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    image_size: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
     capabilities:
       - text_to_image
-      - image_to_image
+      - image_generation
     cost_credits: 1
-  lechuang.video.claimed:
-    type: video
-    async: true
-    verified: false
+  gemini-2.5-flash-image:
+    provider: xiaole
+    service: lechuang
+    type: image
+    async: false
+    verified: true
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    image_size: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
     capabilities:
-      - text_to_video
-      - image_to_video
-    cost_credits: 8
+      - text_to_image
+      - image_generation
+    cost_credits: 1
+  gemini-3.1-flash-image-preview:
+    provider: xiaole
+    service: lechuang
+    type: image
+    async: false
+    verified: true
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    image_size: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
+    capabilities:
+      - text_to_image
+      - image_generation
+    cost_credits: 1
+  gemini-3-pro-image-preview:
+    provider: xiaole
+    service: lechuang
+    type: image
+    async: false
+    verified: true
+    input_types: [text]
+    output_types: [image]
+    supported_references: []
+    image_size: [512, 1K, 2K, 4K]
+    aspect_ratio: ["1:1", "16:9", "9:16", "3:4"]
+    duration: []
+    capabilities:
+      - text_to_image
+      - image_generation
+    cost_credits: 1
