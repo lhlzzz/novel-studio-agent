@@ -9,6 +9,7 @@ from typing import Any
 METRIC_KEYS = (
     "platform", "post_id", "views", "likes", "comments", "shares", "clicks",
     "impressions", "saves", "followers_delta", "published_time", "published_at",
+    "account_id", "episode_id", "package_id", "analytics_id", "observed_at",
 )
 
 

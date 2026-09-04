@@ -18,6 +18,10 @@ class AnalyticsAgent:
 
     def run(self, task: dict[str, Any]) -> dict[str, Any]:
         raw = dict(task.get("raw") or {})
+        if task.get("account_id"):
+            raw.setdefault("account_id", task.get("account_id"))
+        if task.get("episode_id"):
+            raw.setdefault("episode_id", task.get("episode_id"))
         metrics = normalize_metrics(str(task.get("publication_id") or ""), raw, platform=task.get("platform"), post_id=task.get("post_id"))
         persist_metrics(metrics)
         persist_metric_snapshot(metrics)

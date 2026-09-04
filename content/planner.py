@@ -43,6 +43,9 @@ class EpisodePlanner:
         requested = (request or "").strip()
         topic = requested or _rotate_topic(recent_topics, profile=profile, dna=dna)
         if _too_similar(topic, recent_topics) and not _serial_allowed(series):
+            if requested and _too_similar(requested, recent_topics):
+                from content.models import ConfigurationBlocked
+                raise ConfigurationBlocked("TOPIC_ROTATION", "consecutive identical topic/scene/action is blocked unless series allows continuation")
             topic = _differentiate(topic, recent_topics)
         title = topic[:40] or "今日内容"
         refs = []

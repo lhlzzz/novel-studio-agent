@@ -21,6 +21,7 @@ from content.models import (
     ExistingAssetError,
     FRESHNESS_INTENTS,
     IsolationError,
+    ManualOverride,
     PACKAGE_ASSET_ROLES,
     PRIMARY_ASSET_ROLES,
     PlatformAssetPool,
@@ -253,6 +254,9 @@ class PlatformAssetService:
         generation_mode: str = "MANUAL_CREATIVE_TOOL",
         generation_timestamp: str | None = None,
         no_prompt_reference: bool = False,
+        no_prompt_reason: str = "",
+        operator: str = "operator",
+        production_run_id: str | None = None,
         root: Path | None = None,
     ) -> dict[str, Any]:
         if asset_role not in ASSET_ROLES:
@@ -270,6 +274,20 @@ class PlatformAssetService:
         episode = self.store.get_episode(episode_id, account_id=account_id)
         if episode is None:
             raise IsolationError(f"episode {episode_id} is not owned by {account_id}")
+        if asset_role in PRIMARY_ASSET_ROLES and not prompt_id and no_prompt_reference:
+            self.store.save_override(ManualOverride(
+                override_id=uuid4().hex,
+                account_id=account_id,
+                platform=platform,
+                target_kind="asset_import",
+                target_id=episode_id,
+                field_name="prompt_id",
+                old_value=None,
+                new_value="NO_PROMPT_REFERENCE",
+                changed_by=operator,
+                reason=no_prompt_reason or "explicit NO_PROMPT_REFERENCE",
+                source="USER_OVERRIDE",
+            ))
         source = Path(path)
         if not source.is_file():
             raise FileNotFoundError(str(source))
@@ -351,9 +369,10 @@ class PlatformAssetService:
             prompt_id=prompt_id,
             tool=tool or "lechuang",
             model=model or "UNKNOWN",
-            operator="operator",
+            operator=operator,
             source_asset_id=source_asset_id or parent,
             generation_mode=generation_mode,
+            production_run_id=production_run_id or episode.production_run_id,
         ))
         self.store.save_evidence(ProductionEvidence(
             evidence_id=uuid4().hex,

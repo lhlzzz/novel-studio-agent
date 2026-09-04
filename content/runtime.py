@@ -228,6 +228,64 @@ class ContinuityRuntime:
         ))
         return saved
 
+    def continue_yesterday(self, *, account_id: str, request: str = "继续昨天") -> dict[str, Any]:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        series = self.store.active_series(account_id)
+        if series is None:
+            raise ConfigurationBlocked("MISSING_SERIES", "continue yesterday requires an active series")
+        previous = self.store.latest_episode(series.series_id)
+        episode = self.continue_series(
+            account_id=account_id,
+            series_id=series.series_id,
+            brief=request,
+            title=(request or "下一条")[:40],
+        )
+        prompt = self.compile_prompt(
+            account_id=account_id,
+            platform=account.platform,
+            request=request,
+            episode=episode,
+            intent="CONTINUE",
+        )
+        return {
+            "previous_episode": previous,
+            "episode": episode,
+            "prompt": prompt,
+            "character_id": account.character_id,
+            "world_id": account.world_id,
+            "freshness": "NEW_PRIMARY_REQUIRED",
+        }
+
+    def change_topic(self, *, account_id: str, request: str) -> dict[str, Any]:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        series = self.store.active_series(account_id)
+        if series is None:
+            raise ConfigurationBlocked("MISSING_SERIES", "change topic requires an active series")
+        episode = self.continue_series(
+            account_id=account_id,
+            series_id=series.series_id,
+            brief=request,
+            title=(request or "换一种")[:40],
+        )
+        prompt = self.compile_prompt(
+            account_id=account_id,
+            platform=account.platform,
+            request=request,
+            episode=episode,
+            intent="GENERATE",
+        )
+        return {
+            "account_id": account_id,
+            "character_id": account.character_id,
+            "world_id": account.world_id,
+            "episode": episode,
+            "prompt": prompt,
+        }
+
     def continue_series(self, *, account_id: str, series_id: str, brief: str = "", title: str = "") -> Episode:
         episode = self.engine.create_next_episode(series_id, account_id=account_id, brief=brief, title=title)
         account = self.store.get_account(account_id)
@@ -392,19 +450,36 @@ class ContinuityRuntime:
             )
             plan = next((item for item in tasks if item.task_type == "CONTENT_PLAN"), None)
             prompt_task = next((item for item in tasks if item.task_type == "PROMPT_GENERATION"), None)
+            os = TaskOS(self.store)
             if plan:
-                TaskOS(self.store).transition(plan.task_id, to_status="DONE")
+                os.complete_type(account_id=account_id, episode_id=episode.episode_id, task_type="CONTENT_PLAN")
             if prompt_task:
-                TaskOS(self.store).complete_type(account_id=account_id, episode_id=episode.episode_id, task_type="PROMPT_GENERATION", prompt_id=prompt.prompt_id)
-                TaskOS(self.store).waiting_operator(account_id=account_id, episode_id=episode.episode_id)
-            current_task = TaskOS(self.store).get_next_action(account_id=account_id)
+                os.complete_type(account_id=account_id, episode_id=episode.episode_id, task_type="PROMPT_GENERATION", prompt_id=prompt.prompt_id)
+                os.waiting_operator(account_id=account_id, episode_id=episode.episode_id)
+            current_task = TaskOS(self.store).get_next_action(account_id=account_id, episode_id=episode.episode_id)
+            live_tasks = self.store.list_tasks(account_id=account_id, episode_id=episode.episode_id)
+            bound_task = (
+                next((item for item in live_tasks if item.task_type == "CREATIVE_EXECUTION"), None)
+                or current_task
+                or (self.store.get_task(prompt_task.task_id) if prompt_task else None)
+            )
+            if bound_task and bound_task.episode_id and bound_task.episode_id != episode.episode_id:
+                raise IsolationError("production run and task episode mismatch")
             self.store.save_production_run(ProductionRun(**{
                 **run.__dict__,
                 "prompt_id": prompt.prompt_id,
-                "task_id": current_task.task_id if current_task else (prompt_task.task_id if prompt_task else None),
+                "task_id": bound_task.task_id if bound_task else None,
                 "status": "AWAITING_CREATIVE",
                 "updated_at": utcnow(),
             }))
+            if bound_task is not None:
+                live = self.store.get_task(bound_task.task_id) or bound_task
+                self.store.save_task(CreatorTask(**{
+                    **live.__dict__,
+                    "prompt_id": prompt.prompt_id,
+                    "production_run_id": run.run_id,
+                    "updated_at": utcnow(),
+                }))
             EpisodePlanner(self.store).ensure_calendar(
                 account_id=account_id,
                 date=today_iso(),
@@ -451,6 +526,18 @@ class ContinuityRuntime:
         asset = imported.get("asset")
         qa = imported.get("qa") or {}
         asset_id = getattr(asset, "asset_id", None)
+        episode = self.store.get_episode(episode_id, account_id=account_id) if episode_id and account_id else None
+        if episode and episode.production_run_id:
+            run = self.store.get_production_run(episode.production_run_id)
+            if run is not None:
+                if run.episode_id and episode_id and run.episode_id != episode_id:
+                    raise IsolationError("production run episode mismatch")
+                self.store.save_production_run(ProductionRun(**{
+                    **run.__dict__,
+                    "asset_id": asset_id,
+                    "prompt_id": fields.get("prompt_id") or run.prompt_id,
+                    "updated_at": utcnow(),
+                }))
         tasks = TaskOS(self.store)
         tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="CREATIVE_EXECUTION", asset_id=asset_id)
         tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="ASSET_IMPORT", asset_id=asset_id)
@@ -499,6 +586,8 @@ class ContinuityRuntime:
                     reference_ids.append(asset_id)
                 continue
             primary_ids.append(asset_id)
+        if len(primary_ids) > 1:
+            raise ConfigurationBlocked("UNIQUE_PRIMARY_REQUIRED", "package requires exactly one primary asset")
         package = ContentPackage(
             package_id=package_id or uuid4().hex,
             title=title or context.creative_request or context.user_request,
@@ -553,6 +642,16 @@ class ContinuityRuntime:
                     prompt_id=prompt_id,
                     asset_id=primary_ids[0] if primary_ids else None,
                 )
+                if episode.production_run_id:
+                    run = self.store.get_production_run(episode.production_run_id)
+                    if run is not None:
+                        self.store.save_production_run(ProductionRun(**{
+                            **run.__dict__,
+                            "package_id": package.package_id,
+                            "asset_id": primary_ids[0] if primary_ids else run.asset_id,
+                            "prompt_id": prompt_id or run.prompt_id,
+                            "updated_at": utcnow(),
+                        }))
                 current = TaskOS(self.store).get_next_action(account_id=context.account_id)
                 sync_operating_state(
                     self.store,
@@ -949,8 +1048,11 @@ class ContinuityRuntime:
         evidence_status = record.evidence_status
         sources = tuple(item for item in (record.episode_id, record.analytics_id, record.prompt_id, record.asset_id) if item)
         source_episodes = record.source_episode_ids or ((record.episode_id,) if record.episode_id else ())
-        if evidence_status == "NOT_VERIFIED":
-            if record.analytics_id and (record.episode_id or source_episodes):
+        analytics = self.store.get_analytics(record.analytics_id) if record.analytics_id else None
+        if evidence_status == "VERIFIED" and (analytics is None or not record.episode_id):
+            evidence_status = "NOT_ENOUGH_EVIDENCE"
+        elif evidence_status == "NOT_VERIFIED":
+            if analytics is not None and (record.episode_id or source_episodes):
                 evidence_status = "VERIFIED"
             elif sources:
                 evidence_status = "NOT_ENOUGH_EVIDENCE"
@@ -1114,6 +1216,49 @@ class ContinuityRuntime:
         ))
         return saved
 
+    def override_world(
+        self,
+        account_id: str,
+        *,
+        field_name: str,
+        value: Any,
+        reason: str,
+        changed_by: str = "operator",
+    ) -> AccountWorld:
+        account = self.store.get_account(account_id)
+        if account is None or not account.world_id:
+            raise IsolationError("world override requires a bound world")
+        world = self.store.get_world(account.world_id, account_id=account_id)
+        if world is None:
+            raise IsolationError("world not found")
+        if not hasattr(world, field_name):
+            raise ConfigurationBlocked("UNKNOWN_WORLD_FIELD", f"cannot override {field_name}")
+        old_value = getattr(world, field_name)
+        next_version = int(world.version or 1) + 1
+        payload = {**world.__dict__, field_name: value, "version": next_version, "updated_at": utcnow()}
+        saved = self.store.save_world(AccountWorld(**payload))
+        self.store.save_world_revision(WorldRevision(
+            revision_id=uuid4().hex,
+            world_id=saved.world_id,
+            account_id=account_id,
+            version=saved.version,
+            snapshot={"name": saved.name, "city": saved.city, field_name: value},
+        ))
+        self.store.save_override(ManualOverride(
+            override_id=uuid4().hex,
+            account_id=account_id,
+            platform=account.platform,
+            target_kind="world",
+            target_id=saved.world_id,
+            field_name=field_name,
+            old_value=old_value,
+            new_value=value,
+            changed_by=changed_by,
+            reason=reason,
+            source="USER_OVERRIDE",
+        ))
+        return saved
+
     def override_character(
         self,
         account_id: str,
@@ -1163,8 +1308,8 @@ class ContinuityRuntime:
     def get_blocked_tasks(self, *, account_id: str | None = None, platform: str | None = None) -> list[CreatorTask]:
         return TaskOS(self.store).get_blocked_tasks(account_id=account_id, platform=platform)
 
-    def get_next_action(self, *, account_id: str | None = None, platform: str | None = None) -> CreatorTask | None:
-        return TaskOS(self.store).get_next_action(account_id=account_id, platform=platform)
+    def get_next_action(self, *, account_id: str | None = None, platform: str | None = None, episode_id: str | None = None) -> CreatorTask | None:
+        return TaskOS(self.store).get_next_action(account_id=account_id, platform=platform, episode_id=episode_id)
 
     def plan_next(self, *, account_id: str, request: str = "", format: str = "image"):
         return EpisodePlanner(self.store).plan_next(account_id=account_id, request=request, format=format)
@@ -1172,8 +1317,8 @@ class ContinuityRuntime:
     def tomorrow(self, *, account_id: str) -> dict[str, Any]:
         return EpisodePlanner(self.store).tomorrow(account_id=account_id)
 
-    def production_readiness(self, *, account_id: str | None = None, persist: bool = True) -> dict[str, Any]:
-        return ProductionReadinessService(self.store).evaluate(account_id=account_id, persist=persist)
+    def production_readiness(self, *, account_id: str | None = None, episode_id: str | None = None, persist: bool = True) -> dict[str, Any]:
+        return ProductionReadinessService(self.store).evaluate(account_id=account_id, episode_id=episode_id, persist=persist)
 
     def dashboard(self, *, account_id: str | None = None, platform: str | None = None) -> dict[str, Any]:
         account = self.store.get_account(account_id) if account_id else self.store.active_account(platform=platform)
@@ -1186,11 +1331,14 @@ class ContinuityRuntime:
         episode = view.get("episode")
         series = view.get("series")
         task = view.get("current_task") or self.get_next_action(account_id=account.account_id)
-        tasks = self.get_today_tasks(account_id=account.account_id)
+        buckets = TaskOS(self.store).classify_open_tasks(account_id=account.account_id)
+        today_tasks = buckets.get("TODAY") or []
         learning = self.store.list_learning(account_id=account.account_id, platform=account.platform)
-        pending_creative = [item for item in tasks if item.task_type == "CREATIVE_EXECUTION" and item.status in {"WAITING_OPERATOR", "READY", "IN_PROGRESS"}]
-        pending_import = [item for item in tasks if item.task_type == "ASSET_IMPORT" and item.status in {"READY", "TODO", "IN_PROGRESS"}]
-        pending_handoff = [item for item in tasks if item.task_type == "HANDOFF" and item.status in {"READY", "TODO", "IN_PROGRESS"}]
+        prompt = self.store.get_prompt(episode.prompt_id) if episode and episode.prompt_id else None
+        pending_creative = [item for item in buckets.get("WAITING_OPERATOR") or [] if item.task_type == "CREATIVE_EXECUTION"]
+        pending_import = [item for item in (buckets.get("TODAY") or []) + (buckets.get("OVERDUE") or []) if item.task_type == "ASSET_IMPORT"]
+        pending_handoff = [item for item in (buckets.get("TODAY") or []) + (buckets.get("OVERDUE") or []) if item.task_type == "HANDOFF"]
+        waiting_external = buckets.get("WAITING_EXTERNAL") or []
         return {
             "account": account.label(),
             "account_id": account.account_id,
@@ -1199,6 +1347,9 @@ class ContinuityRuntime:
             "current_series": series.name if series else (state.current_series if state else None),
             "current_episode": episode.title if episode else None,
             "current_episode_id": episode.episode_id if episode else None,
+            "today_tasks": [{"task_id": item.task_id, "task_type": item.task_type, "status": item.status} for item in today_tasks],
+            "waiting_operator": [{"task_id": item.task_id, "task_type": item.task_type, "status": item.status} for item in buckets.get("WAITING_OPERATOR") or []],
+            "waiting_external": [{"task_id": item.task_id, "task_type": item.task_type, "status": item.status} for item in waiting_external],
             "current_task": None if task is None else {
                 "task_id": task.task_id,
                 "task_type": task.task_type,
@@ -1209,6 +1360,8 @@ class ContinuityRuntime:
             "pending_creative": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_creative],
             "pending_import": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_import],
             "pending_handoff": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_handoff],
+            "recent_prompt": None if prompt is None else {"prompt_id": prompt.prompt_id, "kind": prompt.kind, "copy_ready": bool(prompt.copy_ready)},
+            "recent_asset": episode.primary_asset_id if episode else None,
             "recent_learning": [{"learning_id": item.learning_id, "reason": item.reason, "next_recommendation": item.next_recommendation} for item in learning[:5]],
             "next_recommended_action": None if task is None else {
                 "task_type": task.task_type,
@@ -1316,12 +1469,29 @@ class ContinuityRuntime:
             "ACCOUNT_OS": _arch(ready, owner="content.models.AccountProfile"),
             "TASK_OS": _arch(ready, owner="content.tasks.TaskOS"),
             "CONTENT_CALENDAR": _arch(ready, owner="content.planner.EpisodePlanner"),
+            "CONTENT_PLANNER": _arch(True, owner="content.planner.EpisodePlanner"),
             "EPISODE_PLANNER": _arch(True, owner="content.planner.EpisodePlanner"),
-            "CORE_PRODUCTION": {"status": "READY" if ready else "NOT_CONFIGURED", "lane": "ARCHITECTURE"},
+            "PACKAGE": _arch(ready, owner="content.models.ContentPackage"),
+            "HANDOFF": _arch(True, note="XHS is HANDOFF_ONLY"),
+            "MANUAL_LECHUANG": _arch(True, owner="content.assets.PlatformAssetService"),
+            "SYSTEM_CAPABILITY": _arch(ready),
+            "ACCOUNT_CONFIGURATION": {"status": "PASS" if accounts else "NOT_CONFIGURED", "lane": "CONFIGURATION"},
+            "CORE_PRODUCTION": {
+                "status": self.production_readiness(persist=False).get("CORE_PRODUCTION") if ready else "NOT_CONFIGURED",
+                "lane": "ARCHITECTURE",
+            },
             "POST_PRODUCTION": _prod("ANALYTICS_IMPORTED"),
-            "FULL_LOOP": _prod("LEARNING_WRITTEN"),
+            "FULL_LOOP": {"status": "NOT_VERIFIED", "lane": "PRODUCTION_EVIDENCE"},
             "LEARNING_RUNTIME": _prod("LEARNING_WRITTEN"),
-            "PRODUCTION_EVIDENCE": _arch(ready, count=len(evidence)),
+            "PRODUCTION_EVIDENCE": {
+                "status": "NOT_VERIFIED" if not evidence else (
+                    "PASS" if ("XHS_HANDOFF" in evidence_kinds or "HANDOFF" in evidence_kinds) and any(
+                        kind.endswith("REAL_ASSET_IMPORTED") for kind in evidence_kinds
+                    ) else "NOT_VERIFIED"
+                ),
+                "lane": "PRODUCTION_EVIDENCE",
+                "count": len(evidence),
+            },
             "REAL_DAY_1": _prod("DAY_001_REAL_ASSET_IMPORTED"),
             "REAL_DAY_2": _prod("DAY_002_REAL_ASSET_IMPORTED"),
             "REAL_DAY_3": _prod("DAY_003_REAL_ASSET_IMPORTED"),

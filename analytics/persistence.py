@@ -2,6 +2,8 @@
 
 Canonical analytics owner is content.models.AnalyticsRecord via ContinuityStore.
 AgentRecord and MetricSnapshotRecord are adapter / projection paths only.
+Canonical write must succeed before any projection. Canonical failure fails the
+entire operation.
 """
 
 from __future__ import annotations
@@ -18,6 +20,10 @@ from scripts.db.models import AgentRecord
 CANONICAL_ANALYTICS_STORE = "content.models.AnalyticsRecord"
 
 
+class CanonicalAnalyticsError(RuntimeError):
+    """Canonical AnalyticsRecord write failed. Projection must not continue."""
+
+
 def persist_publication(publication: Publication) -> None:
     """Persist the provider-neutral publication without inventing IDs."""
     from integrations.persistence import DatabaseStore
@@ -26,8 +32,13 @@ def persist_publication(publication: Publication) -> None:
 
 
 def persist_metrics(metrics: NormalizedMetrics) -> None:
-    """Project native metrics. Canonical write is AnalyticsRecord when account-scoped."""
-    _persist_canonical_analytics(metrics)
+    """Write canonical AnalyticsRecord first, then AgentRecord projection."""
+    try:
+        _persist_canonical_analytics(metrics)
+    except CanonicalAnalyticsError:
+        raise
+    except Exception as exc:
+        raise CanonicalAnalyticsError(str(exc)) from exc
     with SessionLocal() as session:
         key = f"analytics:{metrics.publication_id}"
         row = session.query(AgentRecord).filter_by(record_key=key).one_or_none()
@@ -53,34 +64,46 @@ def persist_metrics(metrics: NormalizedMetrics) -> None:
         session.commit()
 
 
+def _metric_int(values: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = values.get(key)
+        if value is None:
+            continue
+        return int(value)
+    return None
+
+
 def _persist_canonical_analytics(metrics: NormalizedMetrics) -> None:
     account_id = metrics.values.get("account_id")
     platform = metrics.values.get("platform")
     if not account_id or not platform:
-        return
-    try:
-        from content.models import AnalyticsRecord
-        from content.store import ContinuityStore
+        raise CanonicalAnalyticsError("canonical analytics requires account_id and platform")
+    from content.models import AnalyticsRecord
+    from content.store import ContinuityStore
 
-        store = ContinuityStore.production()
-        store.save_analytics(AnalyticsRecord(
-            analytics_id=str(metrics.values.get("analytics_id") or f"pub-{metrics.publication_id}" or uuid4().hex),
-            account_id=str(account_id),
-            platform=str(platform),
-            episode_id=metrics.values.get("episode_id"),
-            package_id=metrics.values.get("package_id"),
-            publication_id=metrics.publication_id,
-            impressions=metrics.values.get("impressions") if metrics.values.get("impressions") is not None else metrics.values.get("views"),
-            likes=metrics.values.get("likes"),
-            comments=metrics.values.get("comments"),
-            shares=metrics.values.get("shares"),
-            clicks=metrics.values.get("clicks"),
-            followers_delta=metrics.values.get("followers_delta"),
-            published_at=metrics.values.get("published_at") or metrics.values.get("published_time"),
-            source="native",
-        ))
-    except Exception:
+    store = ContinuityStore.production()
+    observed_at = metrics.values.get("observed_at") or datetime.now(timezone.utc).isoformat()
+    publication_id = metrics.publication_id
+    existing = store.get_analytics_observation(publication_id, observed_at) if publication_id else None
+    if existing is not None:
         return
+    store.save_analytics(AnalyticsRecord(
+        analytics_id=str(metrics.values.get("analytics_id") or uuid4().hex),
+        account_id=str(account_id),
+        platform=str(platform),
+        episode_id=metrics.values.get("episode_id"),
+        package_id=metrics.values.get("package_id"),
+        publication_id=publication_id,
+        impressions=_metric_int(metrics.values, "impressions", "views"),
+        likes=_metric_int(metrics.values, "likes"),
+        comments=_metric_int(metrics.values, "comments"),
+        shares=_metric_int(metrics.values, "shares"),
+        clicks=_metric_int(metrics.values, "clicks"),
+        followers_delta=_metric_int(metrics.values, "followers_delta"),
+        published_at=metrics.values.get("published_at") or metrics.values.get("published_time"),
+        observed_at=observed_at,
+        source="native",
+    ))
 
 
 def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native") -> list[dict[str, Any]]:
@@ -105,24 +128,21 @@ def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native
             "source": source,
             "publication_id": metrics.publication_id,
             "durable": bool(durable_publication),
+            "canonical_store": CANONICAL_ANALYTICS_STORE,
+            "projection": True,
         }
         created.append(snapshot)
         if not durable_publication:
             continue
-        try:
-            with SessionLocal() as session:
-                from scripts.db.models import MetricSnapshotRecord
+        with SessionLocal() as session:
+            from scripts.db.models import MetricSnapshotRecord
 
-                session.add(MetricSnapshotRecord(
-                    publication_id=metrics.publication_id,
-                    metric_name=name,
-                    value=value,
-                    observed_at=datetime.fromisoformat(observed_at.replace("Z", "+00:00")).replace(tzinfo=None),
-                    source=source,
-                ))
-                session.commit()
-        except Exception as exc:
-            if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
-                continue
-            raise
+            session.add(MetricSnapshotRecord(
+                publication_id=metrics.publication_id,
+                metric_name=name,
+                value=value,
+                observed_at=datetime.fromisoformat(observed_at.replace("Z", "+00:00")).replace(tzinfo=None),
+                source=source,
+            ))
+            session.commit()
     return created

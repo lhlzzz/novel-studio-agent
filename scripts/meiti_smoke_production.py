@@ -45,8 +45,14 @@ def run() -> dict:
             "status": next_action.status,
         },
         "dashboard": dashboard.get("next_recommended_action"),
+        "SYSTEM_CAPABILITY": readiness.get("SYSTEM_CAPABILITY"),
+        "ACCOUNT_CONFIGURATION": readiness.get("ACCOUNT_CONFIGURATION"),
         "CORE_PRODUCTION": readiness.get("CORE_PRODUCTION"),
         "POST_PRODUCTION": readiness.get("POST_PRODUCTION"),
+        "PRODUCTION_EVIDENCE": readiness.get("PRODUCTION_EVIDENCE"),
+        "ANALYTICS": readiness.get("ANALYTICS"),
+        "LEARNING": readiness.get("LEARNING"),
+        "FULL_LOOP": readiness.get("FULL_LOOP"),
         "REAL_E2E": "NOT_VERIFIED",
         "note": "Smoke stops at COPY READY. Operator Lechuang import is required for REAL_DAY evidence.",
     }
@@ -59,6 +65,10 @@ def main() -> int:
     if not payload.get("copy_ready"):
         return 1
     if (payload.get("next_action") or {}).get("task_type") != "CREATIVE_EXECUTION":
+        return 1
+    if payload.get("CORE_PRODUCTION") != "READY":
+        return 1
+    if payload.get("PRODUCTION_EVIDENCE") not in {None, "NOT_VERIFIED"}:
         return 1
     return 0
 

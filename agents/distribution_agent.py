@@ -256,9 +256,12 @@ class DistributionAgent:
             raw = adapter.analytics(Publication(publication_id, account_id, provider, post_id, platform=platform))
         else:
             raw = adapter.get_analytics(post_id, account_id=account_id)
+        payload = dict(raw or {})
+        if account_id:
+            payload.setdefault("account_id", account_id)
         metrics = normalize_metrics(
             publication_id,
-            raw,
+            payload,
             platform=platform,
             post_id=post_id,
         )

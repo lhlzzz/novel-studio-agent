@@ -357,9 +357,14 @@ def test_seed_sandbox_creates_profile_and_state(runtime):
 
 def test_doctor_does_not_claim_full_loop_without_evidence(runtime):
     report = runtime.doctor()
-    assert report["CORE_PRODUCTION"]["status"] == "READY"
+    assert report["SYSTEM_CAPABILITY"]["status"] == "PASS"
+    assert report["CORE_PRODUCTION"]["status"] == "NOT_CONFIGURED"
     assert report["POST_PRODUCTION"]["status"] == "NOT_VERIFIED"
     assert report["REAL_DAY_1"]["status"] == "NOT_VERIFIED"
+    _account(runtime)
+    report = runtime.doctor()
+    assert report["CORE_PRODUCTION"]["status"] == "READY"
+    assert report["PRODUCTION_EVIDENCE"]["status"] == "NOT_VERIFIED"
 
 
 def test_pattern_promotion_still_fail_closed(runtime):

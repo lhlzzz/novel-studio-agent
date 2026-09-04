@@ -1730,6 +1730,7 @@ class AnalyticsRecordRow(Base):
     __table_args__ = (
         Index("idx_meiti_analytics_records_account", "account_id"),
         Index("idx_meiti_analytics_records_episode", "episode_id"),
+        Index("uq_meiti_analytics_observation", "publication_id", "observed_at", unique=True),
     )
 
 
@@ -1779,11 +1780,13 @@ class CreativeExecutionReceiptRecord(Base):
     operator = Column(String(120), nullable=False, default="operator")
     source_asset_id = Column(String(255))
     generation_mode = Column(String(80), nullable=False, default="MANUAL_CREATIVE_TOOL")
+    production_run_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
         Index("idx_meiti_creative_receipts_asset", "asset_id"),
         Index("idx_meiti_creative_receipts_prompt", "prompt_id"),
+        Index("idx_meiti_creative_receipts_run", "production_run_id"),
     )
 
 
@@ -1865,11 +1868,15 @@ class LifecycleTransitionRecord(Base):
     to_status = Column(String(40), nullable=False)
     owner = Column(String(80), nullable=False)
     evidence_id = Column(String(255))
+    task_id = Column(String(255))
+    reason = Column(Text, nullable=False, default="")
+    operator = Column(String(120), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
         Index("idx_meiti_lifecycle_transitions_episode", "episode_id"),
         Index("idx_meiti_lifecycle_transitions_account", "account_id"),
+        Index("idx_meiti_lifecycle_transitions_task", "task_id"),
     )
 
 

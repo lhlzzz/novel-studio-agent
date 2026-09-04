@@ -874,14 +874,14 @@ PATTERN_PROMOTION_STATES = ("PLATFORM", "GLOBAL_CANDIDATE", "GLOBAL_PATTERN", "R
 PRODUCTION_RUN_STATES = ("OPEN", "AWAITING_CREATIVE", "IMPORTED", "PACKAGED", "HANDED_OFF", "LEARNED", "CLOSED", "BLOCKED")
 EVIDENCE_SOURCES = ("code", "operator", "lechuang", "analytics", "memory", "audit")
 KNOWLEDGE_SOURCES = (
-    "USER_OVERRIDE",
     "USER_DEFINED",
-    "LEARNED",
     "SYSTEM_DERIVED",
     "SYSTEM_RECOMMENDED",
-    "DEFAULT",
+    "LEARNED",
     "TEMPORARY",
     "UNKNOWN",
+    "USER_OVERRIDE",
+    "DEFAULT",
 )
 TASK_TYPES = (
     "ACCOUNT_SETUP",
@@ -910,6 +910,37 @@ TASK_STATES = (
     "DONE",
     "CANCELLED",
 )
+ALLOWED_TASK_TRANSITIONS = {
+    "TODO": frozenset({"READY", "CANCELLED"}),
+    "READY": frozenset({"IN_PROGRESS", "BLOCKED", "CANCELLED"}),
+    "IN_PROGRESS": frozenset({"WAITING_OPERATOR", "WAITING_EXTERNAL", "BLOCKED", "DONE"}),
+    "WAITING_OPERATOR": frozenset({"IN_PROGRESS"}),
+    "WAITING_EXTERNAL": frozenset({"IN_PROGRESS"}),
+    "BLOCKED": frozenset({"READY"}),
+    "DONE": frozenset(),
+    "CANCELLED": frozenset(),
+}
+TASK_TRANSITION_PATHS = {
+    ("TODO", "READY"): ("READY",),
+    ("TODO", "IN_PROGRESS"): ("READY", "IN_PROGRESS"),
+    ("TODO", "WAITING_OPERATOR"): ("READY", "IN_PROGRESS", "WAITING_OPERATOR"),
+    ("TODO", "DONE"): ("READY", "IN_PROGRESS", "DONE"),
+    ("TODO", "CANCELLED"): ("CANCELLED",),
+    ("READY", "IN_PROGRESS"): ("IN_PROGRESS",),
+    ("READY", "WAITING_OPERATOR"): ("IN_PROGRESS", "WAITING_OPERATOR"),
+    ("READY", "DONE"): ("IN_PROGRESS", "DONE"),
+    ("READY", "BLOCKED"): ("BLOCKED",),
+    ("READY", "CANCELLED"): ("CANCELLED",),
+    ("IN_PROGRESS", "WAITING_OPERATOR"): ("WAITING_OPERATOR",),
+    ("IN_PROGRESS", "WAITING_EXTERNAL"): ("WAITING_EXTERNAL",),
+    ("IN_PROGRESS", "BLOCKED"): ("BLOCKED",),
+    ("IN_PROGRESS", "DONE"): ("DONE",),
+    ("WAITING_OPERATOR", "IN_PROGRESS"): ("IN_PROGRESS",),
+    ("WAITING_OPERATOR", "DONE"): ("IN_PROGRESS", "DONE"),
+    ("WAITING_EXTERNAL", "IN_PROGRESS"): ("IN_PROGRESS",),
+    ("WAITING_EXTERNAL", "DONE"): ("IN_PROGRESS", "DONE"),
+    ("BLOCKED", "READY"): ("READY",),
+}
 TASK_PRIORITIES = ("CRITICAL", "HIGH", "NORMAL", "LOW")
 PRODUCTION_CHAIN = (
     "CONTENT_PLAN",
@@ -1088,6 +1119,7 @@ class CreativeExecutionReceipt:
     operator: str = "operator"
     source_asset_id: str | None = None
     generation_mode: str = "MANUAL_CREATIVE_TOOL"
+    production_run_id: str | None = None
     created_at: str | None = None
 
     def __post_init__(self) -> None:
@@ -1193,6 +1225,9 @@ class LifecycleTransition:
     to_status: str
     owner: str
     evidence_id: str | None = None
+    task_id: str | None = None
+    reason: str = ""
+    operator: str = ""
     created_at: str | None = None
 
     def __post_init__(self) -> None:

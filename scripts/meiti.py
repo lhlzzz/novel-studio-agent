@@ -640,18 +640,22 @@ def cmd_task_next(args: argparse.Namespace) -> int:
 
 def cmd_task_today(args: argparse.Namespace) -> int:
     runtime = _continuity()
-    rows = runtime.get_today_tasks(account_id=args.account_id, platform=args.platform)
-    _print_json([
-        {
-            "task_id": item.task_id,
-            "task_type": item.task_type,
-            "status": item.status,
-            "title": item.title,
-            "due_at": item.due_at,
-            "episode_id": item.episode_id,
-        }
-        for item in rows
-    ])
+    from content.tasks import TaskOS
+    buckets = TaskOS(runtime.store).classify_open_tasks(account_id=args.account_id, platform=args.platform)
+    _print_json({
+        key: [
+            {
+                "task_id": item.task_id,
+                "task_type": item.task_type,
+                "status": item.status,
+                "title": item.title,
+                "due_at": item.due_at,
+                "episode_id": item.episode_id,
+            }
+            for item in rows
+        ]
+        for key, rows in buckets.items()
+    })
     return 0
 
 

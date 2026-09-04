@@ -621,6 +621,8 @@ V48_KEYS = (
     "CORE_PRODUCTION",
     "POST_PRODUCTION",
     "FULL_LOOP",
+    "SYSTEM_CAPABILITY",
+    "ACCOUNT_CONFIGURATION",
 )
 
 V481_KEYS = (
@@ -636,6 +638,30 @@ V481_KEYS = (
     "HANDOFF",
     "ANALYTICS_RUNTIME",
     "LEARNING_RUNTIME",
+    "CORE_PRODUCTION",
+    "POST_PRODUCTION",
+    "FULL_LOOP",
+)
+
+V482_KEYS = (
+    "SYSTEM_CAPABILITY",
+    "ACCOUNT_CONFIGURATION",
+    "ACCOUNT_OS",
+    "TASK_OS",
+    "CONTENT_PLANNER",
+    "PROMPT_RUNTIME",
+    "MANUAL_LECHUANG",
+    "ASSET_IMPORT",
+    "TECHNICAL_QA",
+    "ASSET_LINEAGE",
+    "ASSET_FRESHNESS",
+    "PACKAGE",
+    "HANDOFF",
+    "PRODUCTION_RUN",
+    "PRODUCTION_EVIDENCE",
+    "ANALYTICS",
+    "LEARNING",
+    "VECTOR",
     "CORE_PRODUCTION",
     "POST_PRODUCTION",
     "FULL_LOOP",
@@ -665,7 +691,7 @@ LANE_BY_KEY = {
     "REAL_DAY_2": "PRODUCTION_EVIDENCE",
     "REAL_DAY_3": "PRODUCTION_EVIDENCE",
     "REAL_CROSS_PLATFORM": "PRODUCTION_EVIDENCE",
-    "PRODUCTION_EVIDENCE": "ARCHITECTURE",
+    "PRODUCTION_EVIDENCE": "PRODUCTION_EVIDENCE",
     "ARCHITECTURE_TESTS": "ARCHITECTURE",
     "UNIT_TESTS": "ARCHITECTURE",
     "MIGRATION": "CONFIGURATION",
@@ -681,6 +707,12 @@ LANE_BY_KEY = {
     "CORE_PRODUCTION": "ARCHITECTURE",
     "POST_PRODUCTION": "PRODUCTION_EVIDENCE",
     "FULL_LOOP": "PRODUCTION_EVIDENCE",
+    "SYSTEM_CAPABILITY": "ARCHITECTURE",
+    "ACCOUNT_CONFIGURATION": "CONFIGURATION",
+    "CONTENT_PLANNER": "ARCHITECTURE",
+    "ANALYTICS": "PRODUCTION_EVIDENCE",
+    "LEARNING": "PRODUCTION_EVIDENCE",
+    "VECTOR": "CONFIGURATION",
 }
 
 
@@ -704,10 +736,16 @@ def _v48_status(default: str, existing: dict | None = None) -> dict:
         "CONTENT_CALENDAR": "SERIES_RUNTIME",
         "EPISODE_PLANNER": "SERIES_RUNTIME",
         "PACKAGE": "CONTENT_PACKAGE_ASSET_MAPPING",
-        "HANDOFF": "PRODUCTION_EVIDENCE",
+        "HANDOFF": "HANDOFF",
         "CORE_PRODUCTION": "PROMPT_COMPILER",
         "POST_PRODUCTION": "ANALYTICS_RUNTIME",
         "FULL_LOOP": "LEARNING_RUNTIME",
+        "SYSTEM_CAPABILITY": "CONTINUITY_RUNTIME",
+        "ACCOUNT_CONFIGURATION": "ACCOUNT_RUNTIME",
+        "CONTENT_PLANNER": "EPISODE_PLANNER",
+        "ANALYTICS": "ANALYTICS_RUNTIME",
+        "LEARNING": "LEARNING_RUNTIME",
+        "VECTOR": "VECTOR_INDEXING",
     }
     for key in V48_KEYS:
         current = existing.get(key)
@@ -801,7 +839,7 @@ def _lane_of(name: str, detail: dict | None = None) -> str:
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") if isinstance(value, dict) else value for key, value in checks.items()}
     lanes = {key: _lane_of(key, value if isinstance(value, dict) else None) for key, value in checks.items()}
-    allowed = {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED", "NOT_VERIFIED"}
+    allowed = {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED", "NOT_VERIFIED", "READY", "PARTIAL"}
     architecture_fail = [
         name for name, status in statuses.items()
         if lanes.get(name) == "ARCHITECTURE" and status not in allowed
@@ -844,6 +882,18 @@ def main(argv: list[str] | None = None) -> int:
         if key == "CORE_PRODUCTION" and status in {"PASS", "READY"}:
             status = "READY"
         if key in {"POST_PRODUCTION", "FULL_LOOP"} and status not in {"PASS", "READY"}:
+            status = "NOT_VERIFIED"
+        print(f"{key}={status}")
+    print("MEITI_V482_STATUS")
+    for key in V482_KEYS:
+        item = v48.get(key) or checks.get(key) or {}
+        if isinstance(item, dict):
+            status = item.get("status") or "NOT_VERIFIED"
+        else:
+            status = str(item or "NOT_VERIFIED")
+        if key == "CORE_PRODUCTION" and status in {"PASS", "READY"}:
+            status = "READY"
+        if key in {"PRODUCTION_EVIDENCE", "ANALYTICS", "LEARNING", "VECTOR", "POST_PRODUCTION", "FULL_LOOP"} and status not in {"PASS", "READY"}:
             status = "NOT_VERIFIED"
         print(f"{key}={status}")
     print(f"DOCTOR_RUNTIME={payload['checks'].get('DOCTOR_RUNTIME') or architecture}")

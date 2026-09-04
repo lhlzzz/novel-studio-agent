@@ -1279,6 +1279,10 @@ class ContinuityStore:
         from scripts.db.models import AnalyticsRecordRow
 
         self._require_account(record.account_id)
+        if record.publication_id and record.observed_at:
+            existing = self.get_analytics_observation(record.publication_id, record.observed_at)
+            if existing is not None:
+                return existing
         self._upsert(AnalyticsRecordRow, "analytics_id", record.analytics_id, {
             "account_id": record.account_id,
             "platform": record.platform,
@@ -1309,6 +1313,78 @@ class ContinuityStore:
         with self._session() as session:
             row = session.get(AnalyticsRecordRow, analytics_id)
             return _analytics_from_row(row) if row else None
+
+    def get_analytics_observation(self, publication_id: str, observed_at: str) -> AnalyticsRecord | None:
+        from scripts.db.models import AnalyticsRecordRow
+
+        with self._session() as session:
+            row = session.execute(
+                select(AnalyticsRecordRow).where(
+                    AnalyticsRecordRow.publication_id == publication_id,
+                    AnalyticsRecordRow.observed_at == observed_at,
+                )
+            ).scalar_one_or_none()
+            return _analytics_from_row(row) if row else None
+
+    def list_analytics(self, *, account_id: str, platform: str | None = None) -> list[AnalyticsRecord]:
+        from scripts.db.models import AnalyticsRecordRow
+
+        with self._session() as session:
+            stmt = select(AnalyticsRecordRow).where(AnalyticsRecordRow.account_id == account_id)
+            if platform:
+                stmt = stmt.where(AnalyticsRecordRow.platform == platform)
+            return [_analytics_from_row(row) for row in session.execute(stmt).scalars()]
+
+    def list_task_history(self, *, account_id: str, task_id: str | None = None) -> list[LifecycleTransition]:
+        from scripts.db.models import LifecycleTransitionRecord
+
+        with self._session() as session:
+            stmt = select(LifecycleTransitionRecord).where(LifecycleTransitionRecord.account_id == account_id)
+            if task_id:
+                stmt = stmt.where(
+                    (LifecycleTransitionRecord.task_id == task_id)
+                    | (LifecycleTransitionRecord.evidence_id == task_id)
+                )
+            rows = list(session.execute(stmt).scalars())
+        return [
+            LifecycleTransition(
+                transition_id=row.transition_id,
+                episode_id=row.episode_id,
+                account_id=row.account_id,
+                from_status=row.from_status,
+                to_status=row.to_status,
+                owner=row.owner,
+                evidence_id=row.evidence_id,
+                task_id=getattr(row, "task_id", None),
+                reason=getattr(row, "reason", "") or "",
+                operator=getattr(row, "operator", "") or "",
+                created_at=_iso(row.created_at),
+            )
+            for row in rows
+        ]
+
+    def get_receipt_for_asset(self, asset_id: str) -> CreativeExecutionReceipt | None:
+        from scripts.db.models import CreativeExecutionReceiptRecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(CreativeExecutionReceiptRecord).where(CreativeExecutionReceiptRecord.asset_id == asset_id)
+            ).scalars().first()
+            if row is None:
+                return None
+            return CreativeExecutionReceipt(
+                receipt_id=row.receipt_id,
+                asset_id=row.asset_id,
+                prompt_id=row.prompt_id,
+                tool=row.tool,
+                model=row.model or "UNKNOWN",
+                generated_at=_iso(row.generated_at),
+                operator=row.operator,
+                source_asset_id=row.source_asset_id,
+                generation_mode=row.generation_mode,
+                production_run_id=getattr(row, "production_run_id", None),
+                created_at=_iso(row.created_at),
+            )
 
     def save_learning(self, record: LearningRecord) -> LearningRecord:
         from scripts.db.models import LearningRecordRow
@@ -1361,6 +1437,7 @@ class ContinuityStore:
             "operator": receipt.operator,
             "source_asset_id": receipt.source_asset_id,
             "generation_mode": receipt.generation_mode,
+            "production_run_id": receipt.production_run_id,
         })
         return receipt
 
@@ -1407,6 +1484,25 @@ class ContinuityStore:
         })
         return revision
 
+    def list_world_revisions(self, world_id: str) -> list[WorldRevision]:
+        from scripts.db.models import WorldRevisionRecord
+
+        with self._session() as session:
+            stmt = select(WorldRevisionRecord).where(WorldRevisionRecord.world_id == world_id)
+            rows = list(session.execute(stmt).scalars())
+        rows.sort(key=lambda item: item.version)
+        return [
+            WorldRevision(
+                revision_id=row.revision_id,
+                world_id=row.world_id,
+                account_id=row.account_id,
+                version=int(row.version or 1),
+                snapshot=_json(row.snapshot, {}),
+                created_at=_iso(row.created_at),
+            )
+            for row in rows
+        ]
+
     def save_reference_snapshot(self, snapshot: AssetReferenceSnapshot) -> AssetReferenceSnapshot:
         from scripts.db.models import AssetReferenceSnapshotRecord
 
@@ -1445,6 +1541,9 @@ class ContinuityStore:
             "to_status": transition.to_status,
             "owner": transition.owner,
             "evidence_id": transition.evidence_id,
+            "task_id": transition.task_id,
+            "reason": transition.reason,
+            "operator": transition.operator,
         })
         return transition
 
