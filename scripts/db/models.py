@@ -422,6 +422,10 @@ class ContentPackageRecord(Base):
     creative_context_id = Column(String(255))
     revision = Column(Integer, nullable=False, default=1)
     current_revision = Column(String(255))
+    reference_assets = Column(JSONType, nullable=False, default=list)
+    primary_assets = Column(JSONType, nullable=False, default=list)
+    published_assets = Column(JSONType, nullable=False, default=list)
+    prompt_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -905,6 +909,15 @@ class MediaAssetRecord(Base):
     provider = Column(String(120), nullable=False, default="")
     provider_task_id = Column(String(255), nullable=False, default="")
     model = Column(String(120), nullable=False, default="")
+    platform = Column(String(120), nullable=False, default="")
+    scope_type = Column(String(40), nullable=False, default="PLATFORM_ACCOUNT")
+    asset_role = Column(String(40), nullable=False, default="")
+    lifecycle = Column(String(40), nullable=False, default="DRAFT")
+    pool_id = Column(String(255))
+    parent_asset_id = Column(String(255))
+    source_asset_id = Column(String(255))
+    generation_mode = Column(String(80), nullable=False, default="")
+    tool = Column(String(80), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -912,6 +925,9 @@ class MediaAssetRecord(Base):
         Index("idx_media_assets_type", "type"),
         Index("idx_media_assets_account", "account_id"),
         Index("idx_media_assets_episode", "episode_id"),
+        Index("idx_media_assets_platform", "platform"),
+        Index("idx_media_assets_role", "asset_role"),
+        Index("idx_media_assets_pool", "pool_id"),
     )
 
 
@@ -1092,6 +1108,21 @@ class VirtualCharacterRecord(Base):
     visual_identity_rules = Column(JSONType, nullable=False, default=dict)
     forbidden_changes = Column(JSONType, nullable=False, default=list)
     reference_asset_ids = Column(JSONType, nullable=False, default=list)
+    derived_from_character_id = Column(String(255))
+    occupation = Column(Text, nullable=False, default="")
+    location = Column(Text, nullable=False, default="")
+    values = Column(JSONType, nullable=False, default=list)
+    behavior = Column(Text, nullable=False, default="")
+    speech = Column(Text, nullable=False, default="")
+    style = Column(JSONType, nullable=False, default=dict)
+    accessories = Column(JSONType, nullable=False, default=list)
+    photography = Column(Text, nullable=False, default="")
+    lighting = Column(Text, nullable=False, default="")
+    platform_personality = Column(Text, nullable=False, default="")
+    content_behavior = Column(Text, nullable=False, default="")
+    audience_relationship = Column(Text, nullable=False, default="")
+    continuity_rules = Column(JSONType, nullable=False, default=dict)
+    character_dna = Column(JSONType, nullable=False, default=dict)
     status = Column(String(40), nullable=False, default="ACTIVE")
     version = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1119,6 +1150,13 @@ class AccountWorldRecord(Base):
     audience = Column(Text, nullable=False, default="")
     taboos = Column(JSONType, nullable=False, default=list)
     brand_rules = Column(JSONType, nullable=False, default=list)
+    city = Column(Text, nullable=False, default="")
+    season = Column(Text, nullable=False, default="")
+    time_of_day = Column(Text, nullable=False, default="")
+    lighting = Column(Text, nullable=False, default="")
+    lifestyle = Column(Text, nullable=False, default="")
+    social_relations = Column(JSONType, nullable=False, default=list)
+    world_dna = Column(JSONType, nullable=False, default=dict)
     status = Column(String(40), nullable=False, default="ACTIVE")
     version = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1172,6 +1210,8 @@ class EpisodeRecord(Base):
     content_status = Column(String(40), nullable=False, default="IDEA")
     campaign_id = Column(String(255))
     content_package_id = Column(String(255))
+    primary_asset_id = Column(String(255))
+    prompt_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1370,6 +1410,15 @@ class AssetLineageRecord(Base):
     selected_for_package = Column(Boolean, nullable=False, default=False)
     source_asset_id = Column(String(255))
     workflow_id = Column(String(255))
+    reference_asset_ids = Column(JSONType, nullable=False, default=list)
+    origin_episode_id = Column(String(255))
+    target_episode_id = Column(String(255))
+    origin_platform = Column(String(120), nullable=False, default="")
+    target_platform = Column(String(120), nullable=False, default="")
+    reuse_mode = Column(String(40), nullable=False, default="NONE")
+    generation_mode = Column(String(80), nullable=False, default="")
+    tool = Column(String(80), nullable=False, default="")
+    prompt_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -1428,5 +1477,163 @@ class KnowledgeDocumentRecord(Base):
         Index("idx_meiti_knowledge_documents_scope", "scope_type", "scope_id"),
         Index("idx_meiti_knowledge_documents_hash", "content_hash"),
         Index("idx_meiti_knowledge_documents_platform", "platform"),
+    )
+
+
+class PlatformAssetPoolRecord(Base):
+    __tablename__ = "platform_asset_pools"
+
+    pool_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "platform", name="uq_meiti_platform_asset_pool"),
+        Index("idx_meiti_platform_asset_pools_account", "account_id"),
+        Index("idx_meiti_platform_asset_pools_platform", "platform"),
+    )
+
+
+class PlatformCreativeDNARecord(Base):
+    __tablename__ = "platform_creative_dna"
+
+    dna_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    visual_style = Column(JSONType, nullable=False, default=dict)
+    copy_style = Column(JSONType, nullable=False, default=dict)
+    hook_style = Column(Text, nullable=False, default="")
+    camera_style = Column(Text, nullable=False, default="")
+    motion_style = Column(Text, nullable=False, default="")
+    emotion_style = Column(Text, nullable=False, default="")
+    audience_relationship = Column(Text, nullable=False, default="")
+    cta_style = Column(Text, nullable=False, default="")
+    content_frequency = Column(Text, nullable=False, default="")
+    asset_freshness_policy = Column(String(80), nullable=False, default="NEW_PRIMARY_ASSET_REQUIRED")
+    prompt_dna = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "platform", name="uq_meiti_platform_creative_dna"),
+        Index("idx_meiti_platform_creative_dna_account", "account_id"),
+    )
+
+
+class PromptPackageRecord(Base):
+    __tablename__ = "prompt_packages"
+
+    prompt_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    kind = Column(String(40), nullable=False, default="IMAGE")
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    character_lock = Column(Text, nullable=False, default="")
+    world_lock = Column(Text, nullable=False, default="")
+    scene_prompt = Column(Text, nullable=False, default="")
+    visual_style = Column(Text, nullable=False, default="")
+    camera = Column(Text, nullable=False, default="")
+    motion = Column(Text, nullable=False, default="")
+    composition = Column(Text, nullable=False, default="")
+    lighting = Column(Text, nullable=False, default="")
+    negative_prompt = Column(Text, nullable=False, default="")
+    lens = Column(Text, nullable=False, default="")
+    material_texture = Column(Text, nullable=False, default="")
+    authenticity = Column(Text, nullable=False, default="")
+    shot_list = Column(JSONType, nullable=False, default=list)
+    temporal_sequence = Column(Text, nullable=False, default="")
+    camera_movement = Column(Text, nullable=False, default="")
+    character_motion = Column(Text, nullable=False, default="")
+    environment_motion = Column(Text, nullable=False, default="")
+    start_state = Column(Text, nullable=False, default="")
+    end_state = Column(Text, nullable=False, default="")
+    duration = Column(Text, nullable=False, default="")
+    aspect_ratio = Column(Text, nullable=False, default="")
+    copy_ready = Column(Text, nullable=False, default="")
+    reference_assets = Column(JSONType, nullable=False, default=list)
+    source_assets = Column(JSONType, nullable=False, default=list)
+    source_asset_id = Column(String(255))
+    recommended_model = Column(Text, nullable=False, default="")
+    recommended_size = Column(Text, nullable=False, default="")
+    recommended_ratio = Column(Text, nullable=False, default="")
+    recommended_duration = Column(Text, nullable=False, default="")
+    learning_basis = Column(JSONType, nullable=False, default=list)
+    prompt_patterns = Column(JSONType, nullable=False, default=list)
+    lechuang_parameters = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_prompt_packages_account", "account_id"),
+        Index("idx_meiti_prompt_packages_episode", "episode_id"),
+        Index("idx_meiti_prompt_packages_platform", "platform"),
+    )
+
+
+class PromptPatternRecord(Base):
+    __tablename__ = "prompt_patterns"
+
+    pattern_id = Column(String(255), primary_key=True)
+    platform = Column(String(120), nullable=False)
+    account_id = Column(String(255))
+    category = Column(String(120), nullable=False, default="")
+    prompt_fragment = Column(Text, nullable=False, default="")
+    positive_count = Column(Integer, nullable=False, default=0)
+    negative_count = Column(Integer, nullable=False, default=0)
+    confidence = Column(Numeric(18, 6), nullable=False, default=0)
+    source_episode_ids = Column(JSONType, nullable=False, default=list)
+    global_pattern = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_prompt_patterns_platform", "platform"),
+        Index("idx_meiti_prompt_patterns_account", "account_id"),
+    )
+
+
+class PlatformLearningProfileRecord(Base):
+    __tablename__ = "platform_learning_profiles"
+
+    profile_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    successful_patterns = Column(JSONType, nullable=False, default=list)
+    failed_patterns = Column(JSONType, nullable=False, default=list)
+    high_performance_topics = Column(JSONType, nullable=False, default=list)
+    high_performance_hooks = Column(JSONType, nullable=False, default=list)
+    high_performance_visuals = Column(JSONType, nullable=False, default=list)
+    audience_preferences = Column(JSONType, nullable=False, default=list)
+    avoid_patterns = Column(JSONType, nullable=False, default=list)
+    prompt_patterns = Column(JSONType, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "platform", name="uq_meiti_platform_learning_profile"),
+        Index("idx_meiti_platform_learning_profiles_account", "account_id"),
+        Index("idx_meiti_platform_learning_profiles_platform", "platform"),
+    )
+
+
+class ContentPackageAssetRecord(Base):
+    __tablename__ = "content_package_assets"
+
+    mapping_id = Column(String(255), primary_key=True)
+    package_id = Column(String(255), nullable=False)
+    asset_id = Column(String(255), nullable=False)
+    role = Column(String(40), nullable=False, default="PRIMARY")
+    selected = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("package_id", "asset_id", "role", name="uq_meiti_package_asset_role"),
+        Index("idx_meiti_content_package_assets_package", "package_id"),
+        Index("idx_meiti_content_package_assets_asset", "asset_id"),
     )
 

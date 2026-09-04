@@ -303,6 +303,8 @@ class MemoryService:
 def _visible_to(document: KnowledgeDocument, account_id: str, *, platform: str = "") -> bool:
     if document.scope_type == "GLOBAL":
         return True
+    if document.platform and platform and document.platform not in {platform, "GLOBAL"}:
+        return False
     if document.scope_type == "PLATFORM":
         if not document.platform:
             return False

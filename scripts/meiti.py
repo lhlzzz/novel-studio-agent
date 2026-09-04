@@ -593,11 +593,8 @@ def cmd_content_calendar(_args: argparse.Namespace) -> int:
 
 
 def cmd_creative_continue(args: argparse.Namespace) -> int:
-    from agents.media.runtime import MediaAgent
-    from content.models import IsolationError
+    from content.models import AssetFreshnessError, IsolationError
     from creative.errors import SchemaNotReady
-    from creative.runtime.container import CreativeRuntime
-    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
 
     text = " ".join(getattr(args, "text", None) or ()) or getattr(args, "prompt", None) or "继续昨天"
     try:
@@ -616,79 +613,140 @@ def cmd_creative_continue(args: argparse.Namespace) -> int:
         return 1
     results = []
     overall = 0
-    creative = CreativeRuntime.create(allow_mock=False)
-    agent = MediaAgent(runtime=creative)
     for prepared in prepared_list:
-        extras = dict(prepared["target"].extras or {})
         context = prepared["context"]
-        generated = agent.run({
-            "kind": "generate",
-            "brief": context.normalized_prompt,
-            "creative_context": context,
-            "account_id": context.account_id,
-            "series_id": context.series_id,
-            "episode_id": context.episode_id,
-            "platform": context.platform,
-            "character_id": context.character_id,
-            "world_id": context.world_id,
-            "aspect_ratio": (context.platform_context or {}).get("aspect_ratio") or getattr(args, "aspect_ratio", None) or "9:16",
-            "model": getattr(args, "model", None),
-            "variant_count": 1,
-            "workflow_id": "creator-image-to-video-v1" if extras.get("video") else "creator-lifestyle-v1",
-        })
-        run = generated.get("run")
-        blocked = bool(generated.get("blocked"))
-        status = getattr(run, "status", None) or ("BLOCKED" if blocked else "FAILED")
-        if extras.get("video") or status == "BLOCKED":
-            reason = generated.get("error") or generated.get("blocked_reason") or VIDEO_NOT_VERIFIED
+        episode = prepared.get("episode")
+        try:
+            prompt = runtime.compile_prompt(
+                account_id=context.account_id,
+                platform=context.platform,
+                request=text,
+                kind=getattr(args, "kind", None),
+                episode=episode,
+                intent=str((prepared["target"].extras or {}).get("intent") or "CONTINUE"),
+                source_asset_id=getattr(args, "source_asset_id", None),
+            )
+        except AssetFreshnessError as exc:
+            overall = 1
             results.append({
-                "status": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else "BLOCKED_EXTERNAL",
-                "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
-                "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
-                "reason": reason,
-                "resolved_target": context.resolved_target,
-                "workflow_id": generated.get("workflow_id"),
+                "status": "FAIL",
+                "code": getattr(exc, "code", "") or "DUPLICATE_CONTENT",
+                "reason": str(exc),
                 "account_id": context.account_id,
                 "episode_id": context.episode_id,
             })
-            overall = 1
             continue
-        assets = generated.get("assets") or []
-        asset = assets[0] if assets else None
-        package = generated.get("package") or runtime.package_from_generation(
-            context=context,
-            assets=assets,
-            title=prepared["episode"].title if prepared.get("episode") else text,
-        )
-        if asset is not None:
-            runtime.record_lineage(
-                asset=asset,
-                context=context,
-                qa_decision="",
-                provider=getattr(asset, "provider", "") or "",
-                provider_task_id=getattr(asset, "provider_task_id", "") or "",
-                model=getattr(asset, "model", "") or "",
-                package_id=getattr(package, "package_id", None),
-            )
-        if status != "SUCCEEDED":
-            overall = 1
         results.append({
-            "status": status,
-            "resolved_target": context.resolved_target,
-            "platform": context.platform,
-            "account_id": context.account_id,
-            "series_id": context.series_id,
-            "episode_id": context.episode_id,
-            "episode_no": prepared["episode"].episode_no if prepared.get("episode") else None,
-            "package_id": getattr(package, "package_id", None),
-            "workflow_id": generated.get("workflow_id"),
-            "asset_id": getattr(asset, "asset_id", None),
-            "path": getattr(asset, "path", None),
+            "status": "COPY_READY",
+            "prompt_id": prompt.prompt_id,
+            "kind": prompt.kind,
+            "platform": prompt.platform,
+            "account_id": prompt.account_id,
+            "series_id": prompt.series_id,
+            "episode_id": prompt.episode_id,
+            "episode_no": episode.episode_no if episode else None,
+            "character_id": prompt.character_id,
+            "world_id": prompt.world_id,
+            "copy_ready": prompt.copy_ready,
+            "recommended_model": prompt.recommended_model,
             "isolation": prepared["isolation"],
             "character_qa": prepared["character_qa"],
+            "execution": "manual-lechuang",
         })
     _print_json(results[0] if len(results) == 1 else results)
     return overall
+
+
+def cmd_creative_compile_prompt(args: argparse.Namespace) -> int:
+    from content.models import AssetFreshnessError, IsolationError
+
+    runtime = _continuity()
+    text = " ".join(getattr(args, "text", None) or ()) or getattr(args, "prompt", None) or ""
+    if not text:
+        print(json.dumps({"status": "FAIL", "reason": "prompt is required"}, default=str))
+        return 1
+    try:
+        prepared = runtime.prepare(text, platform=args.platform, account_id=args.account_id)
+        prompt = runtime.compile_prompt(
+            account_id=prepared["account"].account_id,
+            platform=prepared["account"].platform,
+            request=text,
+            kind=args.kind,
+            episode=prepared.get("episode"),
+            source_asset_id=args.source_asset_id,
+        )
+    except IsolationError as exc:
+        print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
+        return 1
+    except AssetFreshnessError as exc:
+        print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}, default=str))
+        return 1
+    _print_json({
+        "status": "COPY_READY",
+        "prompt_id": prompt.prompt_id,
+        "kind": prompt.kind,
+        "copy_ready": prompt.copy_ready,
+        "account_id": prompt.account_id,
+        "platform": prompt.platform,
+        "episode_id": prompt.episode_id,
+        "execution": "manual-lechuang",
+    })
+    return 0
+
+
+def cmd_creative_import_asset(args: argparse.Namespace) -> int:
+    from content.models import AssetFreshnessError, CrossPlatformAssetReuse, ExistingAssetError, IsolationError
+
+    runtime = _continuity()
+    try:
+        imported = runtime.import_asset(
+            args.path,
+            account_id=args.account_id,
+            platform=args.platform,
+            episode_id=args.episode_id,
+            asset_role=args.role,
+            reuse_mode=args.reuse_mode,
+            intent=args.intent,
+            parent_asset_id=args.parent_asset_id,
+            source_asset_id=args.source_asset_id,
+            prompt_id=args.prompt_id,
+            model=args.model,
+            tool=args.tool,
+        )
+    except FileNotFoundError as exc:
+        print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
+        return 1
+    except IsolationError as exc:
+        print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
+        return 1
+    except ExistingAssetError as exc:
+        print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}, default=str))
+        return 1
+    except AssetFreshnessError as exc:
+        print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}, default=str))
+        return 1
+    except CrossPlatformAssetReuse as exc:
+        print(json.dumps({"status": "FAIL", "code": "CROSS_PLATFORM_ASSET_REUSE", "reason": str(exc)}, default=str))
+        return 1
+    asset = imported["asset"]
+    lineage = imported["lineage"]
+    _print_json({
+        "status": imported["status"],
+        "asset_id": asset.asset_id,
+        "sha256": asset.sha256,
+        "asset_role": asset.asset_role,
+        "lifecycle": asset.lifecycle,
+        "platform": asset.platform,
+        "account_id": asset.account_id,
+        "episode_id": asset.episode_id,
+        "pool_id": asset.pool_id,
+        "parent_asset_id": asset.parent_asset_id,
+        "lineage_id": lineage.lineage_id,
+        "reuse_mode": lineage.reuse_mode,
+        "qa": imported["qa"],
+        "generation_mode": "MANUAL_CREATIVE_TOOL",
+    })
+    return 0 if (imported.get("qa") or {}).get("decision") == "pass" else 1
 
 
 def cmd_creative_series(args: argparse.Namespace) -> int:
@@ -811,7 +869,31 @@ def main() -> int:
     cont.add_argument("--model", default="gpt-image-2")
     cont.add_argument("--image-size", default="2K")
     cont.add_argument("--aspect-ratio", default="9:16")
+    cont.add_argument("--kind", choices=("IMAGE", "VIDEO", "IMAGE_TO_VIDEO"))
+    cont.add_argument("--source-asset-id")
     cont.set_defaults(func=cmd_creative_continue)
+    compile_prompt = creative_sub.add_parser("compile-prompt")
+    compile_prompt.add_argument("text", nargs="*")
+    compile_prompt.add_argument("--platform")
+    compile_prompt.add_argument("--account-id")
+    compile_prompt.add_argument("--prompt")
+    compile_prompt.add_argument("--kind", choices=("IMAGE", "VIDEO", "IMAGE_TO_VIDEO"))
+    compile_prompt.add_argument("--source-asset-id")
+    compile_prompt.set_defaults(func=cmd_creative_compile_prompt)
+    import_asset = creative_sub.add_parser("import-asset")
+    import_asset.add_argument("--path", required=True)
+    import_asset.add_argument("--account-id", required=True)
+    import_asset.add_argument("--platform", required=True)
+    import_asset.add_argument("--episode-id", required=True)
+    import_asset.add_argument("--role", default="GENERATED_PRIMARY")
+    import_asset.add_argument("--reuse-mode", default="NONE")
+    import_asset.add_argument("--intent", default="GENERATE")
+    import_asset.add_argument("--parent-asset-id")
+    import_asset.add_argument("--source-asset-id")
+    import_asset.add_argument("--prompt-id")
+    import_asset.add_argument("--model", default="UNKNOWN")
+    import_asset.add_argument("--tool", default="lechuang")
+    import_asset.set_defaults(func=cmd_creative_import_asset)
     series = creative_sub.add_parser("series")
     series.add_argument("--platform")
     series.add_argument("--account-id")

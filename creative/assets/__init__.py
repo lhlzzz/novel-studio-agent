@@ -55,6 +55,15 @@ def persist_bytes(
     provider: str = "",
     provider_task_id: str = "",
     model: str = "",
+    platform: str = "",
+    scope_type: str = "PLATFORM_ACCOUNT",
+    asset_role: str = "",
+    lifecycle: str = "DRAFT",
+    pool_id: str | None = None,
+    parent_asset_id: str | None = None,
+    source_asset_id: str | None = None,
+    generation_mode: str = "",
+    tool: str = "",
 ) -> MediaAsset:
     if asset_type not in ASSET_TYPES:
         raise ValueError(asset_type)
@@ -93,6 +102,15 @@ def persist_bytes(
         provider=provider,
         provider_task_id=provider_task_id,
         model=model,
+        platform=platform,
+        scope_type=scope_type,
+        asset_role=asset_role,
+        lifecycle=lifecycle,
+        pool_id=pool_id,
+        parent_asset_id=parent_asset_id,
+        source_asset_id=source_asset_id,
+        generation_mode=generation_mode,
+        tool=tool,
     )
 
 
@@ -196,6 +214,15 @@ def media_asset_from_dict(data: dict[str, Any]) -> MediaAsset:
         provider=str(data.get("provider") or ""),
         provider_task_id=str(data.get("provider_task_id") or ""),
         model=str(data.get("model") or ""),
+        platform=str(data.get("platform") or ""),
+        scope_type=str(data.get("scope_type") or "PLATFORM_ACCOUNT"),
+        asset_role=str(data.get("asset_role") or ""),
+        lifecycle=str(data.get("lifecycle") or "DRAFT"),
+        pool_id=data.get("pool_id"),
+        parent_asset_id=data.get("parent_asset_id"),
+        source_asset_id=data.get("source_asset_id"),
+        generation_mode=str(data.get("generation_mode") or ""),
+        tool=str(data.get("tool") or ""),
         technical_score=data.get("technical_score"),
         visual_score=data.get("visual_score"),
         content_score=data.get("content_score"),

@@ -70,9 +70,10 @@ User -> MediaAgent -> CreativeWorkflowResolver -> CreativeRun -> DB
 -> Publication -> Analytics -> Experiment -> Memory -> Strategy
 ```
 
-Meiti = Brain + Memory + Workflow + Judgment + Learning
-Lechuang = Generation Provider
+Meiti = Creator Brain + Prompt Compiler + Asset/Continuity/Learning System
+Lechuang = manual image / video execution tool unless a verified API adapter exists
 Native social adapters = X / Instagram / YouTube / TikTok / LinkedIn
+grok-4.6 = engineering agent for this repository, never a video generation model
 
 The unique creative composition root is `creative.runtime.container.CreativeRuntime`.
 MediaAgent, Creative API, Creative Worker, Doctor, and CLI obtain runtime

@@ -1,10 +1,16 @@
-# Meiti V4.7
+# Meiti V4.7.1
 
-Meiti is an AI Creator Operating System.
+Meiti is prompt-first.
+
+Meiti is an AI Creator Operating System: Creator Brain + Prompt Compiler +
+Asset / Continuity / Learning System. External generation can be manual.
+Lechuang is a manual creative execution tool unless a verified API adapter
+exists. The system never fabricates external generation evidence. grok-4.6
+is the engineering agent for this repository, not a video generation model.
 
 ```text
-Lechuang = Image generation provider
-xAI = Video generation provider (grok-imagine-video-1.5)
+Meiti = Creator Brain + Prompt Compiler + Asset/Continuity/Learning System
+Lechuang = manual image / video execution tool (API only when verified)
 Xiaohongshu = Handoff
 Douyin = Native API
 Kuaishou = Native API
@@ -14,25 +20,25 @@ Postiz = does not exist
 
 ```text
 User -> Intent -> AccountContext
+-> Platform Character / World / Creative DNA / Learning DNA
 -> PostgreSQL operational state
 -> Obsidian knowledge brain
--> pgvector retrieval
--> Strategy -> Content -> CreativeWorkflowEngine
--> Provider Resolver
-   ├── Lechuang image
-   └── xAI video / grok-imagine-video-1.5
--> MediaAsset -> Technical QA -> AI Judge
--> ContentPackage -> Platform Variant
+-> pgvector retrieval (account + platform + GLOBAL only)
+-> PromptCompiler -> COPY READY PromptPackage
+-> Human Lechuang execution
+-> creative import-asset (EXISTING_ASSET / lineage / QA)
+-> MediaAsset -> Technical QA -> ContentPackage
 -> Publish Gate -> DistributionJob
 -> CN Social Provider Resolver
 -> XHS Handoff / Douyin Publication / Kuaishou Publication / Xianyu Listing
 -> Reconciliation -> Analytics -> MemoryService writeback
--> Obsidian + pgvector
+-> Next Prompt
 ```
 
-Creative generates media. Social publishes or hands off. Creative never
-publishes. Social never generates media. Handoff is not a Publication.
-Content is not commerce. Listing is not a social post.
+Creative never publishes. Social never generates media. Handoff is not a
+Publication. Content is not commerce. Listing is not a social post. Each
+platform account owns its own character, world, asset pool, and learning.
+Old assets may be references; a new episode requires a new primary asset.
 
 ## Production composition
 
@@ -46,12 +52,11 @@ Analytics take store/secrets from that runtime. Testing uses
 python scripts/meiti.py bootstrap-production
 ```
 
-V4.7 hardens the long-running creator loop: MemoryService owns retrieval and
-writeback, Obsidian is the knowledge brain, PostgreSQL stays operational state,
-AccountContext is explicit, same-platform accounts can all be ACTIVE with a
-single current selection, episodes are transactional, and video generation is
-xAI `grok-imagine-video-1.5` (unverified until real E2E). Bootstrap remains
-read-only preflight and never writes credentials.
+V4.7.1 hardens platform asset DNA. MemoryService owns retrieval and writeback,
+Obsidian is the knowledge brain, PostgreSQL stays operational state,
+AccountContext is explicit, and PromptCompiler is the human-execution creative
+bridge. Unverified video APIs stay NOT_VERIFIED. Bootstrap remains read-only
+preflight and never writes credentials.
 
 ## Current production set
 

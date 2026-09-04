@@ -47,3 +47,12 @@
   live in PostgreSQL. ContinuityEngine builds CreativeContext. Same campaign
   produces independent platform ContentPackages. MediaAsset lineage is required.
   Lechuang remains the only generation provider. Video stays NOT_VERIFIED.
+- **2026-09-04 V4.7.1:** Meiti is prompt-first. Each PlatformAccount owns an
+  independent character, world, creative DNA, learning DNA, and asset pool.
+  Production primary assets require account_id + platform. CREATE/CONTINUE/
+  GENERATE episodes require a new primary asset; same sha256 is the same
+  immutable asset (EXISTING_ASSET), not a new identity. Cross-platform primary
+  reuse is forbidden; reference and derived lineage are allowed. PromptCompiler
+  outputs COPY READY packages for manual Lechuang execution. grok-4.6 is the
+  engineering agent, never a video generation model. Unverified video APIs stay
+  NOT_VERIFIED. The system never fabricates external generation evidence.

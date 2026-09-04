@@ -40,6 +40,54 @@ MEMORY_KINDS = (
     "episode",
     "performance",
 )
+ASSET_SCOPE_TYPES = (
+    "PLATFORM_ACCOUNT",
+    "CHARACTER",
+    "WORLD",
+    "SERIES",
+    "EPISODE",
+    "GLOBAL",
+)
+ASSET_ROLES = (
+    "CHARACTER_REFERENCE",
+    "WORLD_REFERENCE",
+    "STYLE_REFERENCE",
+    "SCENE_REFERENCE",
+    "SOURCE_REFERENCE",
+    "GENERATED_PRIMARY",
+    "GENERATED_VARIANT",
+    "COVER",
+    "THUMBNAIL",
+    "PUBLISHED",
+    "ARCHIVED",
+)
+ASSET_LIFECYCLES = (
+    "DRAFT",
+    "IMPORTED",
+    "GENERATED",
+    "QA_PENDING",
+    "QA_PASSED",
+    "QA_FAILED",
+    "SELECTED",
+    "PUBLISHED",
+    "ARCHIVED",
+    "REJECTED",
+)
+REUSE_MODES = (
+    "NONE",
+    "REFERENCE",
+    "DERIVED",
+    "REUSE",
+    "REPUBLISH",
+    "REMIX_WITHOUT_NEW_MEDIA",
+)
+PACKAGE_ASSET_ROLES = ("PRIMARY", "COVER", "THUMBNAIL", "REFERENCE")
+LEARNING_SOURCES = ("generated", "published", "analytics", "manual", "research", "review")
+GENERATION_MODES = ("MANUAL_CREATIVE_TOOL", "PROVIDER_API", "UNKNOWN")
+PROMPT_KINDS = ("IMAGE", "VIDEO", "IMAGE_TO_VIDEO")
+PRIMARY_ASSET_ROLES = frozenset({"GENERATED_PRIMARY", "PUBLISHED"})
+FRESHNESS_INTENTS = frozenset({"CREATE", "CONTINUE", "GENERATE", "REMIX"})
+REUSE_INTENTS = frozenset({"REUSE", "REPUBLISH", "REMIX_WITHOUT_NEW_MEDIA"})
 
 
 def utcnow() -> str:
@@ -103,6 +151,10 @@ class ContentPackage:
     creative_context_id: str | None = None
     revision: int = 1
     current_revision: str | None = None
+    reference_assets: tuple[str, ...] = ()
+    primary_assets: tuple[str, ...] = ()
+    published_assets: tuple[str, ...] = ()
+    prompt_id: str | None = None
 
     @property
     def id(self) -> str:
@@ -163,6 +215,21 @@ class VirtualCharacter:
     visual_identity_rules: dict[str, Any] = field(default_factory=dict)
     forbidden_changes: tuple[str, ...] = ()
     reference_asset_ids: tuple[str, ...] = ()
+    derived_from_character_id: str | None = None
+    occupation: str = ""
+    location: str = ""
+    values: tuple[str, ...] = ()
+    behavior: str = ""
+    speech: str = ""
+    style: dict[str, Any] = field(default_factory=dict)
+    accessories: tuple[str, ...] = ()
+    photography: str = ""
+    lighting: str = ""
+    platform_personality: str = ""
+    content_behavior: str = ""
+    audience_relationship: str = ""
+    continuity_rules: dict[str, Any] = field(default_factory=dict)
+    character_dna: dict[str, Any] = field(default_factory=dict)
     status: str = "ACTIVE"
     version: int = 1
     created_at: str | None = None
@@ -197,6 +264,13 @@ class AccountWorld:
     audience: str = ""
     taboos: tuple[str, ...] = ()
     brand_rules: tuple[str, ...] = ()
+    city: str = ""
+    season: str = ""
+    time_of_day: str = ""
+    lighting: str = ""
+    lifestyle: str = ""
+    social_relations: tuple[str, ...] = ()
+    world_dna: dict[str, Any] = field(default_factory=dict)
     status: str = "ACTIVE"
     version: int = 1
     created_at: str | None = None
@@ -264,6 +338,8 @@ class Episode:
     account_id: str = ""
     campaign_id: str | None = None
     content_package_id: str | None = None
+    primary_asset_id: str | None = None
+    prompt_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -408,11 +484,26 @@ class AssetLineage:
     selected_for_package: bool = False
     source_asset_id: str | None = None
     workflow_id: str | None = None
+    reference_asset_ids: tuple[str, ...] = ()
+    origin_episode_id: str | None = None
+    target_episode_id: str | None = None
+    origin_platform: str = ""
+    target_platform: str = ""
+    reuse_mode: str = "NONE"
+    generation_mode: str = ""
+    tool: str = ""
+    prompt_id: str | None = None
     created_at: str | None = None
 
     def __post_init__(self) -> None:
+        if self.reuse_mode not in REUSE_MODES:
+            raise ValueError(f"invalid reuse_mode: {self.reuse_mode}")
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
+        if not self.target_episode_id:
+            object.__setattr__(self, "target_episode_id", self.episode_id)
+        if not self.origin_episode_id:
+            object.__setattr__(self, "origin_episode_id", self.episode_id)
 
     @property
     def id(self) -> str:
@@ -519,6 +610,206 @@ class AmbiguousTarget(IsolationError):
 
 class EpisodeConflict(ContinuityError):
     """Raised when concurrent episode or attempt allocation collides."""
+
+
+class AssetFreshnessError(ContinuityError):
+    """Raised when a candidate primary asset is stale or reused without intent."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ExistingAssetError(AssetFreshnessError):
+    """Raised when an imported file already exists as an immutable asset."""
+
+
+class CrossPlatformAssetReuse(IsolationError):
+    """Raised when a primary asset is reused across platforms."""
+
+
+@dataclass(frozen=True)
+class PlatformAssetPool:
+    pool_id: str
+    account_id: str
+    platform: str
+    character_id: str | None = None
+    world_id: str | None = None
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.pool_id
+
+
+@dataclass(frozen=True)
+class PlatformCreativeDNA:
+    dna_id: str
+    account_id: str
+    platform: str
+    visual_style: dict[str, Any] = field(default_factory=dict)
+    copy_style: dict[str, Any] = field(default_factory=dict)
+    hook_style: str = ""
+    camera_style: str = ""
+    motion_style: str = ""
+    emotion_style: str = ""
+    audience_relationship: str = ""
+    cta_style: str = ""
+    content_frequency: str = ""
+    asset_freshness_policy: str = "NEW_PRIMARY_ASSET_REQUIRED"
+    prompt_dna: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.dna_id
+
+
+@dataclass(frozen=True)
+class PromptPackage:
+    prompt_id: str
+    account_id: str
+    platform: str
+    kind: str = "IMAGE"
+    character_id: str | None = None
+    world_id: str | None = None
+    series_id: str | None = None
+    episode_id: str | None = None
+    character_lock: str = ""
+    world_lock: str = ""
+    scene_prompt: str = ""
+    visual_style: str = ""
+    camera: str = ""
+    motion: str = ""
+    composition: str = ""
+    lighting: str = ""
+    negative_prompt: str = ""
+    lens: str = ""
+    material_texture: str = ""
+    authenticity: str = ""
+    shot_list: tuple[str, ...] = ()
+    temporal_sequence: str = ""
+    camera_movement: str = ""
+    character_motion: str = ""
+    environment_motion: str = ""
+    start_state: str = ""
+    end_state: str = ""
+    duration: str = ""
+    aspect_ratio: str = ""
+    copy_ready: str = ""
+    reference_assets: tuple[str, ...] = ()
+    source_assets: tuple[str, ...] = ()
+    source_asset_id: str | None = None
+    recommended_model: str = ""
+    recommended_size: str = ""
+    recommended_ratio: str = ""
+    recommended_duration: str = ""
+    learning_basis: tuple[str, ...] = ()
+    prompt_patterns: tuple[str, ...] = ()
+    lechuang_parameters: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in PROMPT_KINDS:
+            raise ValueError(f"invalid prompt kind: {self.kind}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.prompt_id
+
+
+@dataclass(frozen=True)
+class PromptPattern:
+    pattern_id: str
+    platform: str
+    account_id: str | None = None
+    category: str = ""
+    prompt_fragment: str = ""
+    positive_count: int = 0
+    negative_count: int = 0
+    confidence: float = 0.0
+    source_episode_ids: tuple[str, ...] = ()
+    global_pattern: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.global_pattern and self.platform not in ACCOUNT_PLATFORMS and self.platform != "GLOBAL":
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.pattern_id
+
+
+@dataclass(frozen=True)
+class PlatformLearningProfile:
+    profile_id: str
+    account_id: str
+    platform: str
+    successful_patterns: tuple[str, ...] = ()
+    failed_patterns: tuple[str, ...] = ()
+    high_performance_topics: tuple[str, ...] = ()
+    high_performance_hooks: tuple[str, ...] = ()
+    high_performance_visuals: tuple[str, ...] = ()
+    audience_preferences: tuple[str, ...] = ()
+    avoid_patterns: tuple[str, ...] = ()
+    prompt_patterns: tuple[str, ...] = ()
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.profile_id
+
+
+@dataclass(frozen=True)
+class ContentPackageAsset:
+    mapping_id: str
+    package_id: str
+    asset_id: str
+    role: str = "PRIMARY"
+    selected: bool = False
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role not in PACKAGE_ASSET_ROLES:
+            raise ValueError(f"invalid package asset role: {self.role}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.mapping_id
 
 
 def with_status(package: ContentPackage, status: str) -> ContentPackage:

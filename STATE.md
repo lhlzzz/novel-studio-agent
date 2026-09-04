@@ -1,8 +1,8 @@
-# Meiti V4.7 State
+# Meiti V4.7.1 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
-Image Provider: Lechuang
-Video Provider: xAI grok-imagine-video-1.5 (contract implemented, live E2E NOT_VERIFIED)
+Image / video execution: Lechuang is a manual creative execution tool unless a verified API adapter exists
+Video API: unverified contracts stay NOT_VERIFIED; grok-4.6 is not a video model
 Postiz: REMOVED
 
 V4.5.1 = Production Activation Hardening
@@ -22,8 +22,10 @@ Security: PASS
 Bootstrap: read-only preflight
 Production CI: secret injection wired
 
-Lechuang/Xiaole: image contract verified; real image E2E depends on live evidence; video is owned by xAI, not Lechuang
-xAI video: grok-imagine-video-1.5; VIDEO_CONTRACT_VERIFIED=False until real MediaAsset + TechnicalQA
+Lechuang/Xiaole: image contract may exist; production media in V4.7.1 is prompt-first + manual import
+PromptCompiler: COPY READY IMAGE / VIDEO / IMAGE_TO_VIDEO packages
+Platform DNA: independent character, world, creative DNA, asset pool, learning per PlatformAccount
+Asset freshness: new episode requires a new primary asset; same sha256 is EXISTING_ASSET
 Memory: MemoryService + KnowledgeBrain + pgvector; process _FACTS removed
 Accounts: multiple ACTIVE per platform; current selection is single-value
 Episodes: identity/order/lifecycle in PostgreSQL; narrative in Obsidian; create_next_episode is transactional

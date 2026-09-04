@@ -10,7 +10,7 @@ obsidian/
   characters/    Character Knowledge
   worlds/        World Knowledge
   series/        Series Lore
-  episodes/      Episode Narrative
+  episodes/      Episode Narrative (not operational episode numbers; prompt packages project here as EPISODE docs)
   strategy/      Content Strategy
   platforms/     Platform Insights
   research/      Research

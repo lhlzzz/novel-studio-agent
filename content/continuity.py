@@ -178,8 +178,10 @@ class ContinuityEngine:
         try:
             from memory.service import get_memory_service
             service = get_memory_service()
+            account = self.store.get_account(filters.get("account_id") or "")
             retrieved = service.retrieve({
                 "account_id": filters.get("account_id"),
+                "platform": account.platform if account else "",
                 "query": "continuity",
                 "character_id": filters.get("character_id"),
                 "world_id": filters.get("world_id"),
@@ -291,6 +293,11 @@ def _character_context(character: VirtualCharacter | None) -> dict[str, Any]:
         "visual_identity_rules": dict(character.visual_identity_rules),
         "forbidden_changes": list(character.forbidden_changes),
         "reference_asset_ids": list(character.reference_asset_ids),
+        "derived_from_character_id": character.derived_from_character_id,
+        "occupation": character.occupation,
+        "location": character.location,
+        "platform_personality": character.platform_personality,
+        "character_dna": dict(character.character_dna),
     }
 
 
@@ -311,6 +318,13 @@ def _world_context(world: AccountWorld | None) -> dict[str, Any]:
         "audience": world.audience,
         "taboos": list(world.taboos),
         "brand_rules": list(world.brand_rules),
+        "city": world.city,
+        "season": world.season,
+        "time_of_day": world.time_of_day,
+        "lighting": world.lighting,
+        "lifestyle": world.lifestyle,
+        "social_relations": list(world.social_relations),
+        "world_dna": dict(world.world_dna),
     }
 
 

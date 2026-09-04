@@ -17,6 +17,7 @@ from content.models import (
     AccountWorld,
     AssetLineage,
     ContentPackage,
+    ContentPackageAsset,
     ContentRevision,
     ContentSeries,
     ContinuityMemory,
@@ -26,6 +27,11 @@ from content.models import (
     IsolationError,
     PerformanceFeedback,
     PlatformAccount,
+    PlatformAssetPool,
+    PlatformCreativeDNA,
+    PlatformLearningProfile,
+    PromptPackage,
+    PromptPattern,
     VirtualCharacter,
     utcnow,
 )
@@ -48,6 +54,14 @@ CONTINUITY_TABLE_NAMES = (
     "asset_lineage",
     "account_selections",
     "knowledge_documents",
+    "platform_asset_pools",
+    "platform_creative_dna",
+    "prompt_packages",
+    "prompt_patterns",
+    "platform_learning_profiles",
+    "content_package_assets",
+    "media_assets",
+    "content_packages",
 )
 
 
@@ -282,6 +296,21 @@ class ContinuityStore:
             "visual_identity_rules": dict(character.visual_identity_rules),
             "forbidden_changes": list(character.forbidden_changes),
             "reference_asset_ids": list(character.reference_asset_ids),
+            "derived_from_character_id": character.derived_from_character_id,
+            "occupation": character.occupation,
+            "location": character.location,
+            "values": list(character.values),
+            "behavior": character.behavior,
+            "speech": character.speech,
+            "style": dict(character.style),
+            "accessories": list(character.accessories),
+            "photography": character.photography,
+            "lighting": character.lighting,
+            "platform_personality": character.platform_personality,
+            "content_behavior": character.content_behavior,
+            "audience_relationship": character.audience_relationship,
+            "continuity_rules": dict(character.continuity_rules),
+            "character_dna": dict(character.character_dna),
             "status": character.status,
             "version": character.version,
             "updated_at": _now(),
@@ -325,6 +354,13 @@ class ContinuityStore:
             "audience": world.audience,
             "taboos": list(world.taboos),
             "brand_rules": list(world.brand_rules),
+            "city": world.city,
+            "season": world.season,
+            "time_of_day": world.time_of_day,
+            "lighting": world.lighting,
+            "lifestyle": world.lifestyle,
+            "social_relations": list(world.social_relations),
+            "world_dna": dict(world.world_dna),
             "status": world.status,
             "version": world.version,
             "updated_at": _now(),
@@ -427,6 +463,8 @@ class ContinuityStore:
             "content_status": episode.content_status,
             "campaign_id": episode.campaign_id,
             "content_package_id": episode.content_package_id,
+            "primary_asset_id": episode.primary_asset_id,
+            "prompt_id": episode.prompt_id,
             "updated_at": _now(),
         })
         return episode
@@ -599,6 +637,15 @@ class ContinuityStore:
             "selected_for_package": bool(lineage.selected_for_package),
             "source_asset_id": lineage.source_asset_id,
             "workflow_id": lineage.workflow_id,
+            "reference_asset_ids": list(lineage.reference_asset_ids),
+            "origin_episode_id": lineage.origin_episode_id,
+            "target_episode_id": lineage.target_episode_id,
+            "origin_platform": lineage.origin_platform,
+            "target_platform": lineage.target_platform,
+            "reuse_mode": lineage.reuse_mode,
+            "generation_mode": lineage.generation_mode,
+            "tool": lineage.tool,
+            "prompt_id": lineage.prompt_id,
         })
         return lineage
 
@@ -694,6 +741,8 @@ class ContinuityStore:
                 content_status=episode.content_status,
                 campaign_id=episode.campaign_id,
                 content_package_id=episode.content_package_id,
+                primary_asset_id=episode.primary_asset_id,
+                prompt_id=episode.prompt_id,
                 created_at=now,
                 updated_at=now,
             ))
@@ -742,6 +791,10 @@ class ContinuityStore:
             "creative_context_id": package.creative_context_id,
             "revision": package.revision,
             "current_revision": package.current_revision,
+            "reference_assets": list(package.reference_assets),
+            "primary_assets": list(package.primary_assets),
+            "published_assets": list(package.published_assets),
+            "prompt_id": package.prompt_id,
             "updated_at": _now(),
         })
         return package
@@ -784,6 +837,314 @@ class ContinuityStore:
             if row is not None:
                 session.delete(row)
                 session.commit()
+
+    def save_pool(self, pool: PlatformAssetPool) -> PlatformAssetPool:
+        from scripts.db.models import PlatformAssetPoolRecord
+
+        self._require_account(pool.account_id)
+        self._upsert(PlatformAssetPoolRecord, "pool_id", pool.pool_id, {
+            "account_id": pool.account_id,
+            "platform": pool.platform,
+            "character_id": pool.character_id,
+            "world_id": pool.world_id,
+        })
+        return pool
+
+    def get_pool(self, *, account_id: str, platform: str) -> PlatformAssetPool | None:
+        from scripts.db.models import PlatformAssetPoolRecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(PlatformAssetPoolRecord).where(
+                    PlatformAssetPoolRecord.account_id == account_id,
+                    PlatformAssetPoolRecord.platform == platform,
+                )
+            ).scalar_one_or_none()
+            return _pool_from_row(row) if row else None
+
+    def save_creative_dna(self, dna: PlatformCreativeDNA) -> PlatformCreativeDNA:
+        from scripts.db.models import PlatformCreativeDNARecord
+
+        self._require_account(dna.account_id)
+        self._upsert(PlatformCreativeDNARecord, "dna_id", dna.dna_id, {
+            "account_id": dna.account_id,
+            "platform": dna.platform,
+            "visual_style": dict(dna.visual_style),
+            "copy_style": dict(dna.copy_style),
+            "hook_style": dna.hook_style,
+            "camera_style": dna.camera_style,
+            "motion_style": dna.motion_style,
+            "emotion_style": dna.emotion_style,
+            "audience_relationship": dna.audience_relationship,
+            "cta_style": dna.cta_style,
+            "content_frequency": dna.content_frequency,
+            "asset_freshness_policy": dna.asset_freshness_policy,
+            "prompt_dna": dict(dna.prompt_dna),
+            "updated_at": _now(),
+        })
+        return dna
+
+    def get_creative_dna(self, account_id: str, platform: str) -> PlatformCreativeDNA | None:
+        from scripts.db.models import PlatformCreativeDNARecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(PlatformCreativeDNARecord).where(
+                    PlatformCreativeDNARecord.account_id == account_id,
+                    PlatformCreativeDNARecord.platform == platform,
+                )
+            ).scalar_one_or_none()
+            return _dna_from_row(row) if row else None
+
+    def save_prompt(self, package: PromptPackage) -> PromptPackage:
+        from scripts.db.models import PromptPackageRecord
+
+        self._require_account(package.account_id)
+        self._upsert(PromptPackageRecord, "prompt_id", package.prompt_id, {
+            "account_id": package.account_id,
+            "platform": package.platform,
+            "kind": package.kind,
+            "character_id": package.character_id,
+            "world_id": package.world_id,
+            "series_id": package.series_id,
+            "episode_id": package.episode_id,
+            "character_lock": package.character_lock,
+            "world_lock": package.world_lock,
+            "scene_prompt": package.scene_prompt,
+            "visual_style": package.visual_style,
+            "camera": package.camera,
+            "motion": package.motion,
+            "composition": package.composition,
+            "lighting": package.lighting,
+            "negative_prompt": package.negative_prompt,
+            "lens": package.lens,
+            "material_texture": package.material_texture,
+            "authenticity": package.authenticity,
+            "shot_list": list(package.shot_list),
+            "temporal_sequence": package.temporal_sequence,
+            "camera_movement": package.camera_movement,
+            "character_motion": package.character_motion,
+            "environment_motion": package.environment_motion,
+            "start_state": package.start_state,
+            "end_state": package.end_state,
+            "duration": package.duration,
+            "aspect_ratio": package.aspect_ratio,
+            "copy_ready": package.copy_ready,
+            "reference_assets": list(package.reference_assets),
+            "source_assets": list(package.source_assets),
+            "source_asset_id": package.source_asset_id,
+            "recommended_model": package.recommended_model,
+            "recommended_size": package.recommended_size,
+            "recommended_ratio": package.recommended_ratio,
+            "recommended_duration": package.recommended_duration,
+            "learning_basis": list(package.learning_basis),
+            "prompt_patterns": list(package.prompt_patterns),
+            "lechuang_parameters": dict(package.lechuang_parameters),
+        })
+        return package
+
+    def get_prompt(self, prompt_id: str) -> PromptPackage | None:
+        from scripts.db.models import PromptPackageRecord
+
+        with self._session() as session:
+            row = session.get(PromptPackageRecord, prompt_id)
+            return _prompt_from_row(row) if row else None
+
+    def save_prompt_pattern(self, pattern: PromptPattern) -> PromptPattern:
+        from scripts.db.models import PromptPatternRecord
+
+        if pattern.account_id:
+            self._require_account(pattern.account_id)
+        self._upsert(PromptPatternRecord, "pattern_id", pattern.pattern_id, {
+            "platform": pattern.platform,
+            "account_id": pattern.account_id,
+            "category": pattern.category,
+            "prompt_fragment": pattern.prompt_fragment,
+            "positive_count": pattern.positive_count,
+            "negative_count": pattern.negative_count,
+            "confidence": pattern.confidence,
+            "source_episode_ids": list(pattern.source_episode_ids),
+            "global_pattern": bool(pattern.global_pattern),
+            "updated_at": _now(),
+        })
+        return pattern
+
+    def list_prompt_patterns(self, *, platform: str, account_id: str | None = None) -> list[PromptPattern]:
+        from scripts.db.models import PromptPatternRecord
+
+        with self._session() as session:
+            stmt = select(PromptPatternRecord).where(
+                (PromptPatternRecord.platform == platform) | (PromptPatternRecord.global_pattern.is_(True)) | (PromptPatternRecord.platform == "GLOBAL")
+            )
+            if account_id:
+                stmt = stmt.where((PromptPatternRecord.account_id == account_id) | (PromptPatternRecord.account_id.is_(None)) | (PromptPatternRecord.global_pattern.is_(True)))
+            rows = list(session.execute(stmt).scalars())
+        patterns = [_pattern_from_row(row) for row in rows]
+        return [item for item in patterns if item.global_pattern or item.platform in {platform, "GLOBAL"}]
+
+    def save_learning_profile(self, profile: PlatformLearningProfile) -> PlatformLearningProfile:
+        from scripts.db.models import PlatformLearningProfileRecord
+
+        self._require_account(profile.account_id)
+        self._upsert(PlatformLearningProfileRecord, "profile_id", profile.profile_id, {
+            "account_id": profile.account_id,
+            "platform": profile.platform,
+            "successful_patterns": list(profile.successful_patterns),
+            "failed_patterns": list(profile.failed_patterns),
+            "high_performance_topics": list(profile.high_performance_topics),
+            "high_performance_hooks": list(profile.high_performance_hooks),
+            "high_performance_visuals": list(profile.high_performance_visuals),
+            "audience_preferences": list(profile.audience_preferences),
+            "avoid_patterns": list(profile.avoid_patterns),
+            "prompt_patterns": list(profile.prompt_patterns),
+            "updated_at": _now(),
+        })
+        return profile
+
+    def get_learning_profile(self, account_id: str, platform: str) -> PlatformLearningProfile | None:
+        from scripts.db.models import PlatformLearningProfileRecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(PlatformLearningProfileRecord).where(
+                    PlatformLearningProfileRecord.account_id == account_id,
+                    PlatformLearningProfileRecord.platform == platform,
+                )
+            ).scalar_one_or_none()
+            return _learning_from_row(row) if row else None
+
+    def save_package_asset(self, mapping: ContentPackageAsset) -> ContentPackageAsset:
+        from scripts.db.models import ContentPackageAssetRecord
+
+        self._upsert(ContentPackageAssetRecord, "mapping_id", mapping.mapping_id, {
+            "package_id": mapping.package_id,
+            "asset_id": mapping.asset_id,
+            "role": mapping.role,
+            "selected": bool(mapping.selected),
+        })
+        return mapping
+
+    def list_package_assets(self, package_id: str) -> list[ContentPackageAsset]:
+        from scripts.db.models import ContentPackageAssetRecord
+
+        with self._session() as session:
+            rows = session.execute(select(ContentPackageAssetRecord).where(ContentPackageAssetRecord.package_id == package_id)).scalars()
+            return [_package_asset_from_row(row) for row in rows]
+
+    def save_media_asset(self, asset) -> Any:
+        from scripts.db.models import MediaAssetRecord
+
+        payload = {
+            "sha256": asset.sha256,
+            "type": asset.type,
+            "path": asset.path,
+            "mime_type": asset.mime_type,
+            "size": asset.size,
+            "width": asset.width,
+            "height": asset.height,
+            "duration": asset.duration,
+            "fps": asset.fps,
+            "workflow_id": asset.workflow_id,
+            "workflow_version": asset.workflow_version,
+            "creative_run_id": asset.creative_run_id,
+            "prompt_id": asset.prompt_id,
+            "character_id": asset.character_id,
+            "metadata_json": dict(asset.metadata or {}),
+            "account_id": asset.account_id,
+            "series_id": asset.series_id,
+            "episode_id": asset.episode_id,
+            "content_package_id": asset.content_package_id,
+            "creative_context_id": asset.creative_context_id,
+            "world_id": asset.world_id,
+            "provider": asset.provider or "",
+            "provider_task_id": asset.provider_task_id or "",
+            "model": asset.model or "",
+            "platform": getattr(asset, "platform", "") or "",
+            "scope_type": getattr(asset, "scope_type", "") or "PLATFORM_ACCOUNT",
+            "asset_role": getattr(asset, "asset_role", "") or "",
+            "lifecycle": getattr(asset, "lifecycle", "") or "DRAFT",
+            "pool_id": getattr(asset, "pool_id", None),
+            "parent_asset_id": getattr(asset, "parent_asset_id", None),
+            "source_asset_id": getattr(asset, "source_asset_id", None),
+            "generation_mode": getattr(asset, "generation_mode", "") or "",
+            "tool": getattr(asset, "tool", "") or "",
+            "technical_score": asset.technical_score,
+            "visual_score": asset.visual_score,
+            "content_score": asset.content_score,
+            "platform_score": asset.platform_score,
+            "overall_score": asset.overall_score,
+        }
+        with self._session() as session:
+            by_hash = session.execute(select(MediaAssetRecord).where(MediaAssetRecord.sha256 == asset.sha256)).scalar_one_or_none()
+            existing = by_hash or session.get(MediaAssetRecord, asset.asset_id)
+            if existing is None:
+                session.add(MediaAssetRecord(asset_id=asset.asset_id, **payload))
+                session.commit()
+                return asset
+            for key, value in payload.items():
+                setattr(existing, key, value)
+            session.commit()
+            return asset
+
+    def get_asset_by_sha256(self, sha256: str):
+        from scripts.db.models import MediaAssetRecord
+        from creative.store import _asset_from_row
+
+        with self._session() as session:
+            row = session.execute(select(MediaAssetRecord).where(MediaAssetRecord.sha256 == sha256)).scalar_one_or_none()
+            return _asset_from_row(row) if row else None
+
+    def get_media_asset(self, asset_id: str):
+        from scripts.db.models import MediaAssetRecord
+        from creative.store import _asset_from_row
+
+        with self._session() as session:
+            row = session.get(MediaAssetRecord, asset_id)
+            return _asset_from_row(row) if row else None
+
+    def list_scoped_assets(
+        self,
+        *,
+        account_id: str,
+        platform: str,
+        role: str | None = None,
+        episode_id: str | None = None,
+        lifecycle: str | None = None,
+        include_global: bool = True,
+    ):
+        from scripts.db.models import MediaAssetRecord
+        from creative.store import _asset_from_row
+
+        with self._session() as session:
+            stmt = select(MediaAssetRecord)
+            if include_global:
+                stmt = stmt.where(
+                    ((MediaAssetRecord.account_id == account_id) & ((MediaAssetRecord.platform == platform) | (MediaAssetRecord.platform == "")))
+                    | (MediaAssetRecord.scope_type == "GLOBAL")
+                )
+            else:
+                stmt = stmt.where(MediaAssetRecord.account_id == account_id, MediaAssetRecord.platform == platform)
+            if role:
+                stmt = stmt.where(MediaAssetRecord.asset_role == role)
+            if episode_id:
+                stmt = stmt.where(MediaAssetRecord.episode_id == episode_id)
+            if lifecycle:
+                stmt = stmt.where(MediaAssetRecord.lifecycle == lifecycle)
+            rows = list(session.execute(stmt).scalars())
+        assets = [_asset_from_row(row) for row in rows]
+        owned = []
+        for asset in assets:
+            if (asset.scope_type or "").upper() == "GLOBAL":
+                owned.append(asset)
+                continue
+            if asset.account_id != account_id:
+                continue
+            if asset.platform and asset.platform != platform:
+                continue
+            if role == "GENERATED_PRIMARY" and asset.platform != platform:
+                continue
+            owned.append(asset)
+        return owned
 
     def _require_account(self, account_id: str) -> PlatformAccount:
         account = self.get_account(account_id)
@@ -830,6 +1191,21 @@ def _character_from_row(row) -> VirtualCharacter:
         visual_identity_rules=_json(row.visual_identity_rules, {}),
         forbidden_changes=_tuple(row.forbidden_changes),
         reference_asset_ids=_tuple(row.reference_asset_ids),
+        derived_from_character_id=getattr(row, "derived_from_character_id", None),
+        occupation=getattr(row, "occupation", "") or "",
+        location=getattr(row, "location", "") or "",
+        values=_tuple(getattr(row, "values", None)),
+        behavior=getattr(row, "behavior", "") or "",
+        speech=getattr(row, "speech", "") or "",
+        style=_json(getattr(row, "style", None), {}),
+        accessories=_tuple(getattr(row, "accessories", None)),
+        photography=getattr(row, "photography", "") or "",
+        lighting=getattr(row, "lighting", "") or "",
+        platform_personality=getattr(row, "platform_personality", "") or "",
+        content_behavior=getattr(row, "content_behavior", "") or "",
+        audience_relationship=getattr(row, "audience_relationship", "") or "",
+        continuity_rules=_json(getattr(row, "continuity_rules", None), {}),
+        character_dna=_json(getattr(row, "character_dna", None), {}),
         status=row.status,
         version=int(row.version or 1),
         created_at=_iso(row.created_at),
@@ -853,6 +1229,13 @@ def _world_from_row(row) -> AccountWorld:
         audience=row.audience or "",
         taboos=_tuple(row.taboos),
         brand_rules=_tuple(row.brand_rules),
+        city=getattr(row, "city", "") or "",
+        season=getattr(row, "season", "") or "",
+        time_of_day=getattr(row, "time_of_day", "") or "",
+        lighting=getattr(row, "lighting", "") or "",
+        lifestyle=getattr(row, "lifestyle", "") or "",
+        social_relations=_tuple(getattr(row, "social_relations", None)),
+        world_dna=_json(getattr(row, "world_dna", None), {}),
         status=row.status,
         version=int(row.version or 1),
         created_at=_iso(row.created_at),
@@ -898,6 +1281,8 @@ def _episode_from_row(row) -> Episode:
         account_id=row.account_id or "",
         campaign_id=row.campaign_id,
         content_package_id=row.content_package_id,
+        primary_asset_id=getattr(row, "primary_asset_id", None),
+        prompt_id=getattr(row, "prompt_id", None),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )
@@ -1022,5 +1407,138 @@ def _lineage_from_row(row) -> AssetLineage:
         selected_for_package=bool(getattr(row, "selected_for_package", False)),
         source_asset_id=getattr(row, "source_asset_id", None),
         workflow_id=getattr(row, "workflow_id", None),
+        reference_asset_ids=_tuple(getattr(row, "reference_asset_ids", None)),
+        origin_episode_id=getattr(row, "origin_episode_id", None),
+        target_episode_id=getattr(row, "target_episode_id", None),
+        origin_platform=getattr(row, "origin_platform", "") or "",
+        target_platform=getattr(row, "target_platform", "") or "",
+        reuse_mode=getattr(row, "reuse_mode", None) or "NONE",
+        generation_mode=getattr(row, "generation_mode", "") or "",
+        tool=getattr(row, "tool", "") or "",
+        prompt_id=getattr(row, "prompt_id", None),
+        created_at=_iso(row.created_at),
+    )
+
+
+def _pool_from_row(row) -> PlatformAssetPool:
+    return PlatformAssetPool(
+        pool_id=row.pool_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        character_id=row.character_id,
+        world_id=row.world_id,
+        created_at=_iso(row.created_at),
+    )
+
+
+def _dna_from_row(row) -> PlatformCreativeDNA:
+    return PlatformCreativeDNA(
+        dna_id=row.dna_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        visual_style=_json(row.visual_style, {}),
+        copy_style=_json(row.copy_style, {}),
+        hook_style=row.hook_style or "",
+        camera_style=row.camera_style or "",
+        motion_style=row.motion_style or "",
+        emotion_style=row.emotion_style or "",
+        audience_relationship=row.audience_relationship or "",
+        cta_style=row.cta_style or "",
+        content_frequency=row.content_frequency or "",
+        asset_freshness_policy=row.asset_freshness_policy or "NEW_PRIMARY_ASSET_REQUIRED",
+        prompt_dna=_json(row.prompt_dna, {}),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _prompt_from_row(row) -> PromptPackage:
+    return PromptPackage(
+        prompt_id=row.prompt_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        kind=row.kind or "IMAGE",
+        character_id=row.character_id,
+        world_id=row.world_id,
+        series_id=row.series_id,
+        episode_id=row.episode_id,
+        character_lock=row.character_lock or "",
+        world_lock=row.world_lock or "",
+        scene_prompt=row.scene_prompt or "",
+        visual_style=row.visual_style or "",
+        camera=row.camera or "",
+        motion=row.motion or "",
+        composition=row.composition or "",
+        lighting=row.lighting or "",
+        negative_prompt=row.negative_prompt or "",
+        lens=row.lens or "",
+        material_texture=row.material_texture or "",
+        authenticity=row.authenticity or "",
+        shot_list=_tuple(row.shot_list),
+        temporal_sequence=row.temporal_sequence or "",
+        camera_movement=row.camera_movement or "",
+        character_motion=row.character_motion or "",
+        environment_motion=row.environment_motion or "",
+        start_state=row.start_state or "",
+        end_state=row.end_state or "",
+        duration=row.duration or "",
+        aspect_ratio=row.aspect_ratio or "",
+        copy_ready=row.copy_ready or "",
+        reference_assets=_tuple(row.reference_assets),
+        source_assets=_tuple(row.source_assets),
+        source_asset_id=row.source_asset_id,
+        recommended_model=row.recommended_model or "",
+        recommended_size=row.recommended_size or "",
+        recommended_ratio=row.recommended_ratio or "",
+        recommended_duration=row.recommended_duration or "",
+        learning_basis=_tuple(row.learning_basis),
+        prompt_patterns=_tuple(row.prompt_patterns),
+        lechuang_parameters=_json(row.lechuang_parameters, {}),
+        created_at=_iso(row.created_at),
+    )
+
+
+def _pattern_from_row(row) -> PromptPattern:
+    return PromptPattern(
+        pattern_id=row.pattern_id,
+        platform=row.platform,
+        account_id=row.account_id,
+        category=row.category or "",
+        prompt_fragment=row.prompt_fragment or "",
+        positive_count=int(row.positive_count or 0),
+        negative_count=int(row.negative_count or 0),
+        confidence=float(row.confidence or 0),
+        source_episode_ids=_tuple(row.source_episode_ids),
+        global_pattern=bool(row.global_pattern),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _learning_from_row(row) -> PlatformLearningProfile:
+    return PlatformLearningProfile(
+        profile_id=row.profile_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        successful_patterns=_tuple(row.successful_patterns),
+        failed_patterns=_tuple(row.failed_patterns),
+        high_performance_topics=_tuple(row.high_performance_topics),
+        high_performance_hooks=_tuple(row.high_performance_hooks),
+        high_performance_visuals=_tuple(row.high_performance_visuals),
+        audience_preferences=_tuple(row.audience_preferences),
+        avoid_patterns=_tuple(row.avoid_patterns),
+        prompt_patterns=_tuple(row.prompt_patterns),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _package_asset_from_row(row) -> ContentPackageAsset:
+    return ContentPackageAsset(
+        mapping_id=row.mapping_id,
+        package_id=row.package_id,
+        asset_id=row.asset_id,
+        role=row.role or "PRIMARY",
+        selected=bool(row.selected),
         created_at=_iso(row.created_at),
     )

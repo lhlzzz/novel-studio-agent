@@ -201,6 +201,15 @@ FAILURE_CODES = (
     "TIMEOUT",
     "CANCELLED",
     "CREATIVE_PATTERN_FAILED",
+    "STALE_ASSET_REUSE",
+    "SAME_FILE_REUSE",
+    "CROSS_PLATFORM_ASSET_REUSE",
+    "EXISTING_ASSET",
+    "DUPLICATE_CONTENT",
+    "REFERENCE_AS_PRIMARY",
+    "ARCHIVED_AS_PRIMARY",
+    "MISSING_SOURCE_ASSET",
+    "MISSING_ACCOUNT_SCOPE",
 )
 
 CREATIVE_MEMORY_CODES = frozenset({"QUALITY_FAILED", "WORKFLOW_INVALID", "CREATIVE_PATTERN_FAILED"})
@@ -408,6 +417,15 @@ class MediaAsset:
     provider: str = ""
     provider_task_id: str = ""
     model: str = ""
+    platform: str = ""
+    scope_type: str = "PLATFORM_ACCOUNT"
+    asset_role: str = ""
+    lifecycle: str = "DRAFT"
+    pool_id: str | None = None
+    parent_asset_id: str | None = None
+    source_asset_id: str | None = None
+    generation_mode: str = ""
+    tool: str = ""
 
 
 @dataclass(frozen=True)

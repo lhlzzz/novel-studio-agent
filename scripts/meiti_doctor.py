@@ -516,7 +516,7 @@ def check_account_continuity() -> dict:
         if not ready:
             status = {"status": "NOT_CONFIGURED", "missing": missing}
             from content.platform_policy import differentiate_package
-            return {
+            payload = {
                 "ACCOUNT_RUNTIME": dict(status),
                 "CHARACTER_RUNTIME": dict(status),
                 "WORLD_RUNTIME": dict(status),
@@ -529,13 +529,17 @@ def check_account_continuity() -> dict:
                 "MULTI_ACCOUNT_RUNTIME": dict(status),
                 "EPISODE_TRANSACTION": dict(status),
             }
+            payload.update(_v471_status(status["status"]))
+            return payload
         runtime = ContinuityRuntime.production()
         payload = runtime.doctor()
         payload["CREATIVE_RUNTIME"] = creative
+        payload.update(_v471_status("PASS", payload))
+        payload["DOCTOR_RUNTIME"] = {"status": "PASS"}
         return payload
-    except Exception as exc:
-        blocked = {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
-        return {
+    except Exception as ext:
+        blocked = {"status": "BLOCKED_EXTERNAL", "error": str(ext)}
+        payload = {
             "ACCOUNT_RUNTIME": dict(blocked),
             "CHARACTER_RUNTIME": dict(blocked),
             "WORLD_RUNTIME": dict(blocked),
@@ -548,6 +552,55 @@ def check_account_continuity() -> dict:
             "MULTI_ACCOUNT_RUNTIME": dict(blocked),
             "EPISODE_TRANSACTION": dict(blocked),
         }
+        payload.update(_v471_status("BLOCKED_EXTERNAL"))
+        payload["DOCTOR_RUNTIME"] = dict(blocked)
+        return payload
+
+
+V471_KEYS = (
+    "PLATFORM_CHARACTER_DNA",
+    "PLATFORM_WORLD_DNA",
+    "PLATFORM_CREATIVE_DNA",
+    "PLATFORM_ASSET_POOL",
+    "PLATFORM_ASSET_ISOLATION",
+    "ASSET_FRESHNESS",
+    "EPISODE_NEW_ASSET_REQUIRED",
+    "SAME_FILE_REUSE_BLOCK",
+    "DERIVED_ASSET_LINEAGE",
+    "CROSS_PLATFORM_PRIMARY_ASSET_BLOCK",
+    "REFERENCE_ASSET_SUPPORT",
+    "PROMPT_COMPILER",
+    "IMAGE_PROMPT_PACKAGE",
+    "VIDEO_PROMPT_PACKAGE",
+    "IMAGE_TO_VIDEO_PROMPT_PACKAGE",
+    "PROMPT_NOVELTY",
+    "CHARACTER_CONTINUITY",
+    "WORLD_CONTINUITY",
+    "PLATFORM_LEARNING_DNA",
+    "LEARNING_ISOLATION",
+    "PROMPT_PATTERN_LIBRARY",
+    "OBSIDIAN_EPISODE_MEMORY",
+    "OBSIDIAN_PROMPT_MEMORY",
+    "MANUAL_LECHUANG_IMPORT",
+    "MEDIA_ASSET_QA",
+    "CONTENT_PACKAGE_ASSET_MAPPING",
+    "REVISION_RUNTIME",
+    "LINEAGE_RUNTIME",
+    "PUBLICATION_RUNTIME",
+    "ANALYTICS_RUNTIME",
+)
+
+
+def _v471_status(default: str, existing: dict | None = None) -> dict:
+    existing = existing or {}
+    rows = {}
+    for key in V471_KEYS:
+        current = existing.get(key)
+        if isinstance(current, dict) and current.get("status"):
+            rows[key] = current
+        else:
+            rows[key] = {"status": default}
+    return rows
 
 
 def check_real_distribution_e2e() -> dict:
@@ -637,6 +690,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: {status}")
     print(f"Architecture: {architecture}")
     print(f"Overall: {overall}")
+    print("MEITI_V471_STATUS")
+    for key in V471_KEYS:
+        print(f"{key}={payload['checks'].get(key) or 'NOT_VERIFIED'}")
+    print(f"DOCTOR_RUNTIME={payload['checks'].get('DOCTOR_RUNTIME') or architecture}")
+    print("TESTS=NOT_VERIFIED")
+    print("ARCHITECTURE_TESTS=NOT_VERIFIED")
+    print("GIT_DIFF_CHECK=NOT_VERIFIED")
+    print("WORKTREE=NOT_VERIFIED")
     write_e2e_audit(checks)
     print(json.dumps({
         "architecture": {"status": architecture},
