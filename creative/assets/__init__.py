@@ -46,6 +46,15 @@ def persist_bytes(
     prompt_id: str | None = None,
     character_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    account_id: str | None = None,
+    series_id: str | None = None,
+    episode_id: str | None = None,
+    content_package_id: str | None = None,
+    creative_context_id: str | None = None,
+    world_id: str | None = None,
+    provider: str = "",
+    provider_task_id: str = "",
+    model: str = "",
 ) -> MediaAsset:
     if asset_type not in ASSET_TYPES:
         raise ValueError(asset_type)
@@ -75,6 +84,15 @@ def persist_bytes(
         character_id=character_id,
         size=len(data),
         metadata=dict(metadata or {}),
+        account_id=account_id,
+        series_id=series_id,
+        episode_id=episode_id,
+        content_package_id=content_package_id,
+        creative_context_id=creative_context_id,
+        world_id=world_id,
+        provider=provider,
+        provider_task_id=provider_task_id,
+        model=model,
     )
 
 
@@ -169,6 +187,15 @@ def media_asset_from_dict(data: dict[str, Any]) -> MediaAsset:
         character_id=data.get("character_id"),
         size=int(data.get("size") or 0),
         metadata=dict(data.get("metadata") or {}),
+        account_id=data.get("account_id"),
+        series_id=data.get("series_id"),
+        episode_id=data.get("episode_id"),
+        content_package_id=data.get("content_package_id"),
+        creative_context_id=data.get("creative_context_id"),
+        world_id=data.get("world_id"),
+        provider=str(data.get("provider") or ""),
+        provider_task_id=str(data.get("provider_task_id") or ""),
+        model=str(data.get("model") or ""),
         technical_score=data.get("technical_score"),
         visual_score=data.get("visual_score"),
         content_score=data.get("content_score"),

@@ -184,6 +184,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
         "provider_request_id": getattr(result, "provider_request_id", None),
         "provider_object_id": getattr(result, "provider_object_id", ""),
     }
+    try:
+        from content.runtime import ContinuityRuntime
+        continuity = ContinuityRuntime.production()
+        if getattr(package, "account_id", None):
+            continuity.record_publication(package=package, publication=publication)
+            payload["continuity_recorded"] = True
+    except Exception:
+        payload["continuity_recorded"] = False
     print(json.dumps(payload))
     return 0
 
@@ -397,6 +405,370 @@ def cmd_creative_generate_video(_args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_creative_image_to_video(args: argparse.Namespace) -> int:
+    return cmd_creative_generate_video(args)
+
+
+def _continuity(*, testing: bool = False):
+    from content.runtime import ContinuityRuntime
+    if testing:
+        return ContinuityRuntime.testing()
+    return ContinuityRuntime.production()
+
+
+def _print_json(payload) -> None:
+    print(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+
+
+def _account_view(view: dict) -> dict:
+    account = view["account"]
+    character = view.get("character")
+    world = view.get("world")
+    series = view.get("series")
+    episode = view.get("episode")
+    return {
+        "platform": account.platform,
+        "account_id": account.account_id,
+        "display_name": account.display_name,
+        "status": account.status,
+        "character": None if character is None else {"name": character.name, "character_id": character.character_id, "version": character.version},
+        "world": None if world is None else {"name": world.name, "theme": world.core_theme, "world_id": world.world_id},
+        "series": None if series is None else {"name": series.name, "series_id": series.series_id, "current_episode_no": series.current_episode_no},
+        "latest": None if episode is None else {"episode_no": episode.episode_no, "title": episode.title, "status": episode.content_status},
+    }
+
+
+def cmd_account_list(_args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    rows = []
+    for account in runtime.store.list_accounts():
+        rows.append(_account_view(runtime.show_account(account.account_id)))
+    if not rows:
+        print("no platform accounts")
+        return 0
+    _print_json(rows)
+    return 0
+
+
+def cmd_account_show(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account_id = args.account_id
+    if not account_id:
+        account = runtime.store.active_account(platform=args.platform) if args.platform else runtime.store.active_account()
+        if account is None:
+            print("no active platform account")
+            return 1
+        account_id = account.account_id
+    _print_json(_account_view(runtime.show_account(account_id)))
+    return 0
+
+
+def cmd_account_create(args: argparse.Namespace) -> int:
+    from content.models import AccountWorld, VirtualCharacter
+    from uuid import uuid4
+
+    runtime = _continuity()
+    account = runtime.create_account(platform=args.platform, display_name=args.name)
+    if args.character:
+        runtime.bind_character(account.account_id, VirtualCharacter(
+            character_id=uuid4().hex,
+            account_id=account.account_id,
+            name=args.character,
+            gender=args.gender or "",
+            age_range=args.age_range or "",
+        ))
+    if args.world:
+        runtime.bind_world(account.account_id, AccountWorld(
+            world_id=uuid4().hex,
+            account_id=account.account_id,
+            name=args.world,
+            world_description=args.world_description or "",
+            core_theme=args.theme or "",
+            tone=args.tone or "",
+        ))
+    if args.series:
+        runtime.create_series(account_id=account.account_id, name=args.series)
+    runtime.store.activate_account(account.account_id)
+    _print_json(_account_view(runtime.show_account(account.account_id)))
+    return 0
+
+
+def cmd_account_activate(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.activate_account(args.account_id)
+    _print_json(_account_view(runtime.show_account(account.account_id)))
+    return 0
+
+
+def cmd_account_character(args: argparse.Namespace) -> int:
+    from content.models import VirtualCharacter
+    from uuid import uuid4
+
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    if args.name:
+        runtime.bind_character(account.account_id, VirtualCharacter(
+            character_id=uuid4().hex,
+            account_id=account.account_id,
+            name=args.name,
+            gender=args.gender or "",
+            age_range=args.age_range or "",
+        ))
+    _print_json(_account_view(runtime.show_account(account.account_id)))
+    return 0
+
+
+def cmd_account_world(args: argparse.Namespace) -> int:
+    from content.models import AccountWorld
+    from uuid import uuid4
+
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    if args.name:
+        runtime.bind_world(account.account_id, AccountWorld(
+            world_id=uuid4().hex,
+            account_id=account.account_id,
+            name=args.name,
+            world_description=args.description or "",
+            core_theme=args.theme or "",
+        ))
+    _print_json(_account_view(runtime.show_account(account.account_id)))
+    return 0
+
+
+def cmd_account_history(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    history = runtime.history(account.account_id)
+    _print_json({
+        "account": account.label(),
+        "series": [{"name": item.name, "episode_no": item.current_episode_no, "series_id": item.series_id} for item in history["series"]],
+        "episodes": [{"episode_no": item.episode_no, "title": item.title, "status": item.content_status, "series_id": item.series_id} for item in history["episodes"]],
+        "publications": [item.value for item in history["memories"] if item.key == "published"],
+        "lineage": [{"asset_id": item.asset_id, "episode_id": item.episode_id, "attempt_no": item.attempt_no, "provider_task_id": item.provider_task_id} for item in history["lineage"]],
+    })
+    return 0
+
+
+def cmd_content_calendar(_args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    rows = runtime.calendar()
+    if not rows:
+        print("no content calendar rows")
+        return 0
+    _print_json(rows)
+    return 0
+
+
+def cmd_creative_continue(args: argparse.Namespace) -> int:
+    from content.models import IsolationError
+    from creative.errors import AuthError, ProviderBlocked, SchemaNotReady, UnsupportedCapability
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
+
+    text = " ".join(getattr(args, "text", None) or ()) or getattr(args, "prompt", None) or "继续昨天"
+    try:
+        runtime = _continuity()
+        if getattr(args, "account_id", None):
+            prepared_list = [runtime.prepare(text, platform=getattr(args, "platform", None), account_id=args.account_id)]
+        elif getattr(args, "platform", None):
+            prepared_list = [runtime.prepare(text, platform=args.platform)]
+        else:
+            prepared_list = runtime.packages_for_request(text)
+    except SchemaNotReady as exc:
+        print(json.dumps({"status": "NOT_CONFIGURED", "reason": str(exc)}, default=str))
+        return 1
+    except IsolationError as exc:
+        print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
+        return 1
+    results = []
+    overall = 0
+    for prepared in prepared_list:
+        extras = dict(prepared["target"].extras or {})
+        context = prepared["context"]
+        if extras.get("video"):
+            results.append({
+                "status": "NOT_VERIFIED",
+                "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
+                "reason": VIDEO_NOT_VERIFIED,
+                "resolved_target": context.resolved_target,
+            })
+            overall = 1
+            continue
+        adapter = LechuangAdapter()
+        try:
+            task = adapter.generate_image({
+                "prompt": context.normalized_prompt,
+                "model": getattr(args, "model", None) or "gpt-image-2",
+                "image_size": getattr(args, "image_size", None) or "2K",
+                "aspect_ratio": (context.platform_context or {}).get("aspect_ratio") or getattr(args, "aspect_ratio", None) or "9:16",
+                "n": 1,
+                "account_id": context.account_id,
+                "series_id": context.series_id,
+                "episode_id": context.episode_id,
+                "character_id": context.character_id,
+                "world_id": context.world_id,
+                "creative_context_id": context.context_id,
+            })
+        except (ProviderBlocked, UnsupportedCapability, AuthError) as exc:
+            results.append({
+                "status": "BLOCKED_EXTERNAL",
+                "reason": str(exc),
+                "resolved_target": context.resolved_target,
+            })
+            overall = 1
+            continue
+        asset = (task.result or {}).get("asset")
+        qa = (task.result or {}).get("qa") or {}
+        assets = [asset] if asset is not None else []
+        status = "QA_PASSED" if qa.get("decision") == "pass" else "GENERATED"
+        package = runtime.package_from_generation(
+            context=context,
+            assets=assets,
+            title=prepared["episode"].title if prepared.get("episode") else text,
+            status=status,
+        )
+        if asset is not None:
+            runtime.record_lineage(
+                asset=asset,
+                context=context,
+                qa_decision=str(qa.get("decision") or ""),
+                provider="xiaole-lechuang",
+                provider_task_id=task.provider_task_id,
+                model=str((task.result or {}).get("model") or ""),
+                package_id=package.package_id,
+            )
+            if task.status == "succeeded":
+                from scripts.meiti_doctor import record_image_real_e2e
+                record_image_real_e2e(
+                    asset_id=str(getattr(asset, "asset_id", "") or ""),
+                    qa_decision=str(qa.get("decision") or ""),
+                    sha256=str(getattr(asset, "sha256", "") or ""),
+                    mime_type=str(getattr(asset, "mime_type", "") or ""),
+                    path=str(getattr(asset, "path", "") or ""),
+                    width=getattr(asset, "width", None),
+                    height=getattr(asset, "height", None),
+                    size=getattr(asset, "size", None),
+                    model=str((task.result or {}).get("model") or ""),
+                    request_id=str((task.result or {}).get("request_id") or task.provider_task_id or ""),
+                )
+        if task.status != "succeeded":
+            overall = 1
+        results.append({
+            "status": task.status,
+            "resolved_target": context.resolved_target,
+            "platform": context.platform,
+            "account_id": context.account_id,
+            "series_id": context.series_id,
+            "episode_id": context.episode_id,
+            "episode_no": prepared["episode"].episode_no if prepared.get("episode") else None,
+            "package_id": package.package_id,
+            "content_type": package.content_type,
+            "provider": "xiaole-lechuang",
+            "provider_task_id": task.provider_task_id,
+            "asset_id": getattr(asset, "asset_id", None),
+            "path": getattr(asset, "path", None),
+            "qa": qa,
+            "isolation": prepared["isolation"],
+            "character_qa": prepared["character_qa"],
+        })
+    _print_json(results[0] if len(results) == 1 else results)
+    return overall
+
+
+def cmd_creative_series(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    if args.name:
+        series = runtime.create_series(account_id=account.account_id, name=args.name, description=args.description or "")
+        _print_json({"series_id": series.series_id, "name": series.name, "account_id": series.account_id})
+        return 0
+    _print_json([{"name": item.name, "series_id": item.series_id, "current_episode_no": item.current_episode_no, "status": item.status} for item in runtime.store.list_series(account.account_id)])
+    return 0
+
+
+def cmd_creative_account(args: argparse.Namespace) -> int:
+    return cmd_account_show(args)
+
+
+def cmd_creative_character(args: argparse.Namespace) -> int:
+    return cmd_account_character(args)
+
+
+def cmd_creative_world(args: argparse.Namespace) -> int:
+    return cmd_account_world(args)
+
+
+def cmd_creative_episode(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.active_account(platform=args.platform) if args.platform else runtime.store.active_account()
+    if account is None:
+        print("no platform account")
+        return 1
+    history = runtime.history(account.account_id)
+    _print_json([{"episode_no": item.episode_no, "title": item.title, "status": item.content_status, "episode_id": item.episode_id} for item in history["episodes"]])
+    return 0
+
+
+def cmd_creative_history(args: argparse.Namespace) -> int:
+    return cmd_account_history(args)
+
+
+def cmd_creative_inspect(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    text = " ".join(getattr(args, "text", None) or ()) or "inspect"
+    prepared = runtime.prepare(text, platform=args.platform, account_id=args.account_id)
+    context = prepared["context"]
+    _print_json({
+        "resolved_target": context.resolved_target,
+        "character": context.character_context,
+        "world": context.world_context,
+        "continuity": context.continuity_context,
+        "platform": context.platform_context,
+        "prompt": context.normalized_prompt,
+        "isolation": prepared["isolation"],
+        "character_qa": prepared["character_qa"],
+    })
+    return 0
+
+
+def cmd_creative_lineage(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    rows = runtime.store.list_lineage(account_id=account.account_id)
+    _print_json([{
+        "asset_id": item.asset_id,
+        "account_id": item.account_id,
+        "series_id": item.series_id,
+        "episode_id": item.episode_id,
+        "content_package_id": item.content_package_id,
+        "creative_context_id": item.creative_context_id,
+        "provider": item.provider,
+        "provider_task_id": item.provider_task_id,
+        "model": item.model,
+        "attempt_no": item.attempt_no,
+        "qa_decision": item.qa_decision,
+        "published": item.published,
+        "user_request": item.user_request,
+    } for item in rows])
+    return 0
+
+
 def main() -> int:
     from dotenv import load_dotenv
 
@@ -422,6 +794,101 @@ def main() -> int:
     gen_video = creative_sub.add_parser("generate-video")
     gen_video.add_argument("--prompt", default="")
     gen_video.set_defaults(func=cmd_creative_generate_video)
+    i2v = creative_sub.add_parser("image-to-video")
+    i2v.add_argument("--prompt", default="")
+    i2v.set_defaults(func=cmd_creative_image_to_video)
+    cont = creative_sub.add_parser("continue")
+    cont.add_argument("text", nargs="*")
+    cont.add_argument("--platform")
+    cont.add_argument("--account-id")
+    cont.add_argument("--prompt")
+    cont.add_argument("--model", default="gpt-image-2")
+    cont.add_argument("--image-size", default="2K")
+    cont.add_argument("--aspect-ratio", default="9:16")
+    cont.set_defaults(func=cmd_creative_continue)
+    series = creative_sub.add_parser("series")
+    series.add_argument("--platform")
+    series.add_argument("--account-id")
+    series.add_argument("--name")
+    series.add_argument("--description")
+    series.set_defaults(func=cmd_creative_series)
+    creative_account = creative_sub.add_parser("account")
+    creative_account.add_argument("--platform")
+    creative_account.add_argument("--account-id")
+    creative_account.set_defaults(func=cmd_creative_account)
+    creative_character = creative_sub.add_parser("character")
+    creative_character.add_argument("--platform")
+    creative_character.add_argument("--account-id")
+    creative_character.add_argument("--name")
+    creative_character.add_argument("--gender")
+    creative_character.add_argument("--age-range")
+    creative_character.set_defaults(func=cmd_creative_character)
+    creative_world = creative_sub.add_parser("world")
+    creative_world.add_argument("--platform")
+    creative_world.add_argument("--account-id")
+    creative_world.add_argument("--name")
+    creative_world.add_argument("--description")
+    creative_world.add_argument("--theme")
+    creative_world.set_defaults(func=cmd_creative_world)
+    creative_episode = creative_sub.add_parser("episode")
+    creative_episode.add_argument("--platform")
+    creative_episode.set_defaults(func=cmd_creative_episode)
+    creative_history = creative_sub.add_parser("history")
+    creative_history.add_argument("--platform")
+    creative_history.add_argument("--account-id")
+    creative_history.set_defaults(func=cmd_creative_history)
+    inspect_cmd = creative_sub.add_parser("inspect")
+    inspect_cmd.add_argument("text", nargs="*")
+    inspect_cmd.add_argument("--platform")
+    inspect_cmd.add_argument("--account-id")
+    inspect_cmd.set_defaults(func=cmd_creative_inspect)
+    lineage = creative_sub.add_parser("lineage")
+    lineage.add_argument("--platform")
+    lineage.add_argument("--account-id")
+    lineage.set_defaults(func=cmd_creative_lineage)
+    account = sub.add_parser("account")
+    account_sub = account.add_subparsers(dest="command", required=True)
+    account_sub.add_parser("list").set_defaults(func=cmd_account_list)
+    show = account_sub.add_parser("show")
+    show.add_argument("--account-id")
+    show.add_argument("--platform")
+    show.set_defaults(func=cmd_account_show)
+    create = account_sub.add_parser("create")
+    create.add_argument("--platform", required=True)
+    create.add_argument("--name", required=True)
+    create.add_argument("--character")
+    create.add_argument("--gender")
+    create.add_argument("--age-range")
+    create.add_argument("--world")
+    create.add_argument("--world-description")
+    create.add_argument("--theme")
+    create.add_argument("--tone")
+    create.add_argument("--series")
+    create.set_defaults(func=cmd_account_create)
+    activate = account_sub.add_parser("activate")
+    activate.add_argument("account_id")
+    activate.set_defaults(func=cmd_account_activate)
+    account_character = account_sub.add_parser("character")
+    account_character.add_argument("--account-id")
+    account_character.add_argument("--platform")
+    account_character.add_argument("--name")
+    account_character.add_argument("--gender")
+    account_character.add_argument("--age-range")
+    account_character.set_defaults(func=cmd_account_character)
+    account_world = account_sub.add_parser("world")
+    account_world.add_argument("--account-id")
+    account_world.add_argument("--platform")
+    account_world.add_argument("--name")
+    account_world.add_argument("--description")
+    account_world.add_argument("--theme")
+    account_world.set_defaults(func=cmd_account_world)
+    account_history = account_sub.add_parser("history")
+    account_history.add_argument("--account-id")
+    account_history.add_argument("--platform")
+    account_history.set_defaults(func=cmd_account_history)
+    content = sub.add_parser("content")
+    content_sub = content.add_subparsers(dest="command", required=True)
+    content_sub.add_parser("calendar").set_defaults(func=cmd_content_calendar)
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)

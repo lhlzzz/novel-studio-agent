@@ -364,6 +364,11 @@ class CampaignRecord(Base):
     end_at = Column(DateTime)
     success_metrics = Column(JSONB, nullable=False, default=list)
     status = Column(String(40), nullable=False, default="draft")
+    account_id = Column(String(255))
+    platform = Column(String(120), nullable=False, default="")
+    parent_campaign_id = Column(String(255))
+    series_id = Column(String(255))
+    world_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -390,6 +395,15 @@ class ContentPackageRecord(Base):
     commerce_intent = Column(String(120), nullable=False, default="none")
     variants = Column(JSONB, nullable=False, default=list)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    account_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    platform = Column(String(120), nullable=False, default="")
+    status = Column(String(40), nullable=False, default="DRAFT")
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    creative_context_id = Column(String(255))
+    revision = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -864,11 +878,22 @@ class MediaAssetRecord(Base):
     content_score = Column(Numeric(18, 6))
     platform_score = Column(Numeric(18, 6))
     overall_score = Column(Numeric(18, 6))
+    account_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    content_package_id = Column(String(255))
+    creative_context_id = Column(String(255))
+    world_id = Column(String(255))
+    provider = Column(String(120), nullable=False, default="")
+    provider_task_id = Column(String(255), nullable=False, default="")
+    model = Column(String(120), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
         Index("idx_media_assets_run", "creative_run_id"),
         Index("idx_media_assets_type", "type"),
+        Index("idx_media_assets_account", "account_id"),
+        Index("idx_media_assets_episode", "episode_id"),
     )
 
 
@@ -1000,5 +1025,335 @@ class CreativeEventRecord(Base):
     __table_args__ = (
         Index("idx_creative_events_run", "run_id"),
         Index("idx_creative_events_type", "event_type"),
+    )
+
+
+class PlatformAccountRecord(Base):
+    __tablename__ = "platform_accounts"
+
+    account_id = Column(String(255), primary_key=True)
+    platform = Column(String(120), nullable=False)
+    external_account_id = Column(String(255), nullable=False, default="")
+    display_name = Column(Text, nullable=False, default="")
+    status = Column(String(40), nullable=False, default="DRAFT")
+    credential_ref = Column(String(255), nullable=False, default="")
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    default_style_profile_id = Column(String(255))
+    social_account_id = Column(String(255))
+    activated_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint("platform IN ('xiaohongshu','douyin','kuaishou','weixin_video','xianyu')", name="ck_meiti_platform_account_platform"),
+        CheckConstraint("status IN ('DRAFT','ACTIVE','PAUSED','ARCHIVED')", name="ck_meiti_platform_account_status"),
+        Index("idx_meiti_platform_accounts_platform", "platform"),
+        Index("idx_meiti_platform_accounts_status", "status"),
+    )
+
+
+class VirtualCharacterRecord(Base):
+    __tablename__ = "virtual_characters"
+
+    character_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    gender = Column(String(40), nullable=False, default="")
+    age_range = Column(String(40), nullable=False, default="")
+    appearance_profile = Column(JSONType, nullable=False, default=dict)
+    body_profile = Column(JSONType, nullable=False, default=dict)
+    face_profile = Column(JSONType, nullable=False, default=dict)
+    hair_profile = Column(JSONType, nullable=False, default=dict)
+    skin_profile = Column(JSONType, nullable=False, default=dict)
+    clothing_profile = Column(JSONType, nullable=False, default=dict)
+    personality_profile = Column(JSONType, nullable=False, default=dict)
+    background_story = Column(Text, nullable=False, default="")
+    speaking_style = Column(Text, nullable=False, default="")
+    behavioral_traits = Column(JSONType, nullable=False, default=list)
+    visual_identity_rules = Column(JSONType, nullable=False, default=dict)
+    forbidden_changes = Column(JSONType, nullable=False, default=list)
+    reference_asset_ids = Column(JSONType, nullable=False, default=list)
+    status = Column(String(40), nullable=False, default="ACTIVE")
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_virtual_characters_account", "account_id"),
+    )
+
+
+class AccountWorldRecord(Base):
+    __tablename__ = "account_worlds"
+
+    world_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    world_description = Column(Text, nullable=False, default="")
+    core_theme = Column(Text, nullable=False, default="")
+    values = Column(JSONType, nullable=False, default=list)
+    tone = Column(Text, nullable=False, default="")
+    visual_language = Column(JSONType, nullable=False, default=dict)
+    locations = Column(JSONType, nullable=False, default=list)
+    daily_life_rules = Column(JSONType, nullable=False, default=list)
+    story_rules = Column(JSONType, nullable=False, default=list)
+    audience = Column(Text, nullable=False, default="")
+    taboos = Column(JSONType, nullable=False, default=list)
+    brand_rules = Column(JSONType, nullable=False, default=list)
+    status = Column(String(40), nullable=False, default="ACTIVE")
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_account_worlds_account", "account_id"),
+    )
+
+
+class ContentSeriesRecord(Base):
+    __tablename__ = "content_series"
+
+    series_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    world_id = Column(String(255), ForeignKey("account_worlds.world_id", ondelete="SET NULL"))
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=False, default="")
+    series_type = Column(String(80), nullable=False, default="serial")
+    content_rules = Column(JSONType, nullable=False, default=dict)
+    continuity_rules = Column(JSONType, nullable=False, default=dict)
+    status = Column(String(40), nullable=False, default="ACTIVE")
+    start_date = Column(String(40))
+    end_date = Column(String(40))
+    current_episode_no = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_content_series_account", "account_id"),
+    )
+
+
+class EpisodeRecord(Base):
+    __tablename__ = "episodes"
+
+    episode_id = Column(String(255), primary_key=True)
+    series_id = Column(String(255), ForeignKey("content_series.series_id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    episode_no = Column(Integer, nullable=False)
+    title = Column(Text, nullable=False, default="")
+    brief = Column(Text, nullable=False, default="")
+    previous_episode_id = Column(String(255))
+    next_episode_id = Column(String(255))
+    continuity_context = Column(JSONType, nullable=False, default=dict)
+    character_state = Column(JSONType, nullable=False, default=dict)
+    world_state = Column(JSONType, nullable=False, default=dict)
+    location_state = Column(JSONType, nullable=False, default=dict)
+    visual_state = Column(JSONType, nullable=False, default=dict)
+    story_state = Column(JSONType, nullable=False, default=dict)
+    content_status = Column(String(40), nullable=False, default="IDEA")
+    campaign_id = Column(String(255))
+    content_package_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("series_id", "episode_no", name="uq_meiti_episode_no"),
+        CheckConstraint(
+            "content_status IN ('IDEA','BRIEFED','GENERATING','GENERATED','QA_PASSED','DRAFT','APPROVED','READY_TO_PUBLISH','PUBLISHED','FAILED','ARCHIVED')",
+            name="ck_meiti_episode_status",
+        ),
+        Index("idx_meiti_episodes_series", "series_id"),
+        Index("idx_meiti_episodes_account", "account_id"),
+    )
+
+
+class CreativeContextRecord(Base):
+    __tablename__ = "creative_contexts"
+
+    context_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    campaign_id = Column(String(255))
+    user_request = Column(Text, nullable=False, default="")
+    creative_request = Column(Text, nullable=False, default="")
+    normalized_prompt = Column(Text, nullable=False, default="")
+    system_constraints = Column(JSONType, nullable=False, default=dict)
+    character_context = Column(JSONType, nullable=False, default=dict)
+    world_context = Column(JSONType, nullable=False, default=dict)
+    continuity_context = Column(JSONType, nullable=False, default=dict)
+    platform_context = Column(JSONType, nullable=False, default=dict)
+    generation_parameters = Column(JSONType, nullable=False, default=dict)
+    provider = Column(String(120), nullable=False, default="")
+    model = Column(String(120), nullable=False, default="")
+    provider_task_id = Column(String(255), nullable=False, default="")
+    resolved_target = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_creative_contexts_account", "account_id"),
+        Index("idx_meiti_creative_contexts_episode", "episode_id"),
+    )
+
+
+class ContentRevisionRecord(Base):
+    __tablename__ = "content_revisions"
+
+    revision_id = Column(String(255), primary_key=True)
+    content_package_id = Column(String(255), nullable=False)
+    version = Column(Integer, nullable=False)
+    parent_revision_id = Column(String(255))
+    change_summary = Column(Text, nullable=False, default="")
+    snapshot = Column(JSONType, nullable=False, default=dict)
+    created_by = Column(String(120), nullable=False, default="meiti")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("content_package_id", "version", name="uq_meiti_content_revision"),
+        Index("idx_meiti_content_revisions_package", "content_package_id"),
+    )
+
+
+class AccountMemoryRecord(Base):
+    __tablename__ = "account_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    kind = Column(String(40), nullable=False, default="account")
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(String(255), nullable=False)
+    key = Column(String(120), nullable=False)
+    value = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(120), nullable=False, default="continuity")
+    namespace = Column(String(80), nullable=False, default="account_memories")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_meiti_account_memories_account", "account_id"),)
+
+
+class CharacterMemoryRecord(Base):
+    __tablename__ = "character_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    kind = Column(String(40), nullable=False, default="character")
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(String(255), nullable=False)
+    key = Column(String(120), nullable=False)
+    value = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(120), nullable=False, default="continuity")
+    namespace = Column(String(80), nullable=False, default="character_memories")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_meiti_character_memories_account", "account_id"),)
+
+
+class WorldMemoryRecord(Base):
+    __tablename__ = "world_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    kind = Column(String(40), nullable=False, default="world")
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(String(255), nullable=False)
+    key = Column(String(120), nullable=False)
+    value = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(120), nullable=False, default="continuity")
+    namespace = Column(String(80), nullable=False, default="world_memories")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_meiti_world_memories_account", "account_id"),)
+
+
+class SeriesMemoryRecord(Base):
+    __tablename__ = "series_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    kind = Column(String(40), nullable=False, default="series")
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(String(255), nullable=False)
+    key = Column(String(120), nullable=False)
+    value = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(120), nullable=False, default="continuity")
+    namespace = Column(String(80), nullable=False, default="series_memories")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_meiti_series_memories_account", "account_id"),)
+
+
+class EpisodeMemoryRecord(Base):
+    __tablename__ = "episode_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    kind = Column(String(40), nullable=False, default="episode")
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(String(255), nullable=False)
+    key = Column(String(120), nullable=False)
+    value = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(120), nullable=False, default="continuity")
+    namespace = Column(String(80), nullable=False, default="episode_memories")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_meiti_episode_memories_account", "account_id"),)
+
+
+ContinuityMemoryRecord = AccountMemoryRecord
+
+
+class PerformanceFeedbackRecord(Base):
+    __tablename__ = "performance_feedback"
+
+    feedback_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    content_package_id = Column(String(255), nullable=False, default="")
+    episode_id = Column(String(255))
+    topic = Column(Text, nullable=False, default="")
+    hook = Column(Text, nullable=False, default="")
+    visual_style = Column(Text, nullable=False, default="")
+    caption_style = Column(Text, nullable=False, default="")
+    duration = Column(Numeric(18, 6))
+    scene = Column(Text, nullable=False, default="")
+    action = Column(Text, nullable=False, default="")
+    audio = Column(Text, nullable=False, default="")
+    engagement = Column(JSONType, nullable=False, default=dict)
+    retention = Column(JSONType, nullable=False, default=dict)
+    publication_id = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_performance_feedback_account", "account_id"),
+        Index("idx_meiti_performance_feedback_platform", "platform"),
+    )
+
+
+class AssetLineageRecord(Base):
+    __tablename__ = "asset_lineage"
+
+    lineage_id = Column(String(255), primary_key=True)
+    asset_id = Column(String(255), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    content_package_id = Column(String(255))
+    creative_context_id = Column(String(255))
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    user_request = Column(Text, nullable=False, default="")
+    generation_request = Column(JSONType, nullable=False, default=dict)
+    provider = Column(String(120), nullable=False, default="")
+    provider_task_id = Column(String(255), nullable=False, default="")
+    model = Column(String(120), nullable=False, default="")
+    attempt_no = Column(Integer, nullable=False, default=1)
+    parent_asset_id = Column(String(255))
+    qa_decision = Column(String(40), nullable=False, default="")
+    published = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_asset_lineage_asset", "asset_id"),
+        Index("idx_meiti_asset_lineage_account", "account_id"),
+        Index("idx_meiti_asset_lineage_episode", "episode_id"),
     )
 

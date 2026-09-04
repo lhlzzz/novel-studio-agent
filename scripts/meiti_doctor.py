@@ -475,6 +475,45 @@ def check_real_creative_e2e() -> dict:
     return {"status": "BLOCKED_EXTERNAL", "reason": "no real image E2E evidence", "env": API_KEY_ENV, "service": "xiaole-lechuang", "next": "Run python scripts/meiti.py creative generate-image with XIAOLEAI_API_KEY and persist MediaAsset + QA."}
 
 
+def check_account_continuity() -> dict:
+    try:
+        from content.runtime import ContinuityRuntime
+        from content.store import schema_ready
+        from scripts.db.engine import engine
+
+        ready, missing = schema_ready(engine)
+        creative = check_creative_runtime()
+        if not ready:
+            status = {"status": "NOT_CONFIGURED", "missing": missing}
+            from content.platform_policy import differentiate_package
+            return {
+                "ACCOUNT_RUNTIME": dict(status),
+                "CHARACTER_RUNTIME": dict(status),
+                "WORLD_RUNTIME": dict(status),
+                "SERIES_RUNTIME": dict(status),
+                "CONTINUITY_RUNTIME": dict(status),
+                "ASSET_LINEAGE": dict(status),
+                "PLATFORM_VARIANT": {"status": "PASS" if callable(differentiate_package) else "FAIL"},
+                "CREATIVE_RUNTIME": creative,
+            }
+        runtime = ContinuityRuntime.production()
+        payload = runtime.doctor()
+        payload["CREATIVE_RUNTIME"] = creative
+        return payload
+    except Exception as exc:
+        blocked = {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
+        return {
+            "ACCOUNT_RUNTIME": dict(blocked),
+            "CHARACTER_RUNTIME": dict(blocked),
+            "WORLD_RUNTIME": dict(blocked),
+            "SERIES_RUNTIME": dict(blocked),
+            "CONTINUITY_RUNTIME": dict(blocked),
+            "ASSET_LINEAGE": dict(blocked),
+            "PLATFORM_VARIANT": dict(blocked),
+            "CREATIVE_RUNTIME": check_creative_runtime(),
+        }
+
+
 def check_real_distribution_e2e() -> dict:
     data = load_e2e()
     distribution = data.get("distribution") or {}
@@ -530,6 +569,7 @@ def run() -> dict:
         "Real Distribution E2E": check_real_distribution_e2e(),
         "Publication Persistence": check_publication_persistence(),
         "Memory": check_memory(),
+        **check_account_continuity(),
     }
 
 

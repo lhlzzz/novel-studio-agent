@@ -257,6 +257,15 @@ class DatabaseStore:
                 "commerce_intent": package.commerce_intent,
                 "variants": list(package.variants),
                 "metadata_json": package.metadata,
+                "account_id": getattr(package, "account_id", None),
+                "series_id": getattr(package, "series_id", None),
+                "episode_id": getattr(package, "episode_id", None),
+                "platform": getattr(package, "platform", "") or "",
+                "status": getattr(package, "status", None) or "DRAFT",
+                "character_id": getattr(package, "character_id", None),
+                "world_id": getattr(package, "world_id", None),
+                "creative_context_id": getattr(package, "creative_context_id", None),
+                "revision": int(getattr(package, "revision", 1) or 1),
             }
             if row is None:
                 row = ContentPackageRecord(package_id=package.package_id, **fields)
@@ -281,6 +290,11 @@ class DatabaseStore:
                 "end_at": campaign.end_at,
                 "success_metrics": list(campaign.success_metrics),
                 "status": campaign.status,
+                "account_id": getattr(campaign, "account_id", None),
+                "platform": getattr(campaign, "platform", "") or "",
+                "parent_campaign_id": getattr(campaign, "parent_campaign_id", None),
+                "series_id": getattr(campaign, "series_id", None),
+                "world_id": getattr(campaign, "world_id", None),
             }
             if row is None:
                 row = CampaignRecord(campaign_id=campaign.campaign_id, **fields)

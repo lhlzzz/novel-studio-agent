@@ -1,0 +1,895 @@
+"""PostgreSQL is the source of truth for account worlds, series, and continuity."""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from content.models import (
+    ACCOUNT_PLATFORMS,
+    AccountWorld,
+    AssetLineage,
+    ContentPackage,
+    ContentRevision,
+    ContentSeries,
+    ContinuityMemory,
+    CreativeContext,
+    Episode,
+    IsolationError,
+    PerformanceFeedback,
+    PlatformAccount,
+    VirtualCharacter,
+    utcnow,
+)
+
+
+CONTINUITY_TABLE_NAMES = (
+    "platform_accounts",
+    "virtual_characters",
+    "account_worlds",
+    "content_series",
+    "episodes",
+    "creative_contexts",
+    "content_revisions",
+    "account_memories",
+    "character_memories",
+    "world_memories",
+    "series_memories",
+    "episode_memories",
+    "performance_feedback",
+    "asset_lineage",
+)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _iso(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    return str(value)
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def _json(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
+def _tuple(value: Any) -> tuple:
+    if value is None:
+        return ()
+    if isinstance(value, tuple):
+        return value
+    return tuple(value)
+
+
+def is_test_runtime() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or os.environ.get("MEITI_CONTINUITY_STORE") == "memory"
+
+
+def sqlite_engine(url: str | None = None):
+    connect_args = {"check_same_thread": False}
+    if url and url != "sqlite://":
+        return create_engine(url, connect_args=connect_args)
+    return create_engine("sqlite://", connect_args=connect_args, poolclass=StaticPool)
+
+
+def production_engine():
+    from scripts.db.engine import engine
+    return engine
+
+
+def schema_ready(engine) -> tuple[bool, list[str]]:
+    from sqlalchemy import inspect
+
+    existing = set(inspect(engine).get_table_names())
+    missing = [name for name in CONTINUITY_TABLE_NAMES if name not in existing]
+    return (not missing, missing)
+
+
+def ensure_continuity_schema(engine, *, allow_create: bool = False) -> None:
+    from scripts.db.models import Base
+
+    ready, missing = schema_ready(engine)
+    if ready:
+        return
+    if not allow_create:
+        from creative.errors import SchemaNotReady
+        raise SchemaNotReady("continuity schema missing: " + ", ".join(missing))
+    tables = [Base.metadata.tables[name] for name in CONTINUITY_TABLE_NAMES if name in Base.metadata.tables]
+    Base.metadata.create_all(engine, tables=tables)
+
+
+class ContinuityStore:
+    """Unique persistence owner for account worlds, series, episodes, and lineage."""
+
+    def __init__(self, *, engine=None) -> None:
+        if engine is None:
+            engine = sqlite_engine() if is_test_runtime() else production_engine()
+        self.engine = engine
+        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        dialect = getattr(getattr(self.engine, "dialect", None), "name", "")
+        allow_create = is_test_runtime() or dialect == "sqlite"
+        ensure_continuity_schema(self.engine, allow_create=allow_create)
+
+    @classmethod
+    def testing(cls) -> "ContinuityStore":
+        return cls(engine=sqlite_engine())
+
+    @classmethod
+    def production(cls) -> "ContinuityStore":
+        store = cls.__new__(cls)
+        store.engine = production_engine()
+        store.Session = sessionmaker(autocommit=False, autoflush=False, bind=store.engine)
+        ensure_continuity_schema(store.engine, allow_create=False)
+        return store
+
+    def _session(self):
+        return self.Session()
+
+    def _upsert(self, model, key: str, value: str, fields: dict[str, Any]) -> None:
+        with self._session() as session:
+            row = session.get(model, value)
+            if row is None:
+                session.add(model(**{key: value}, **fields))
+            else:
+                for name, item in fields.items():
+                    setattr(row, name, item)
+            session.commit()
+
+    def save_account(self, account: PlatformAccount) -> PlatformAccount:
+        from scripts.db.models import PlatformAccountRecord
+
+        if account.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {account.platform}")
+        self._upsert(PlatformAccountRecord, "account_id", account.account_id, {
+            "platform": account.platform,
+            "external_account_id": account.external_account_id,
+            "display_name": account.display_name,
+            "status": account.status,
+            "credential_ref": account.credential_ref,
+            "character_id": account.character_id,
+            "world_id": account.world_id,
+            "default_style_profile_id": account.default_style_profile_id,
+            "social_account_id": account.social_account_id,
+            "activated_at": _parse_dt(account.activated_at),
+            "updated_at": _now(),
+        })
+        return account
+
+    def get_account(self, account_id: str) -> PlatformAccount | None:
+        from scripts.db.models import PlatformAccountRecord
+
+        with self._session() as session:
+            row = session.get(PlatformAccountRecord, account_id)
+            return _account_from_row(row) if row else None
+
+    def list_accounts(self, *, platform: str | None = None) -> list[PlatformAccount]:
+        from scripts.db.models import PlatformAccountRecord
+
+        with self._session() as session:
+            stmt = select(PlatformAccountRecord)
+            if platform:
+                stmt = stmt.where(PlatformAccountRecord.platform == platform)
+            rows = list(session.execute(stmt).scalars())
+        accounts = [_account_from_row(row) for row in rows]
+        accounts.sort(key=lambda item: (item.platform, item.display_name or item.account_id))
+        return accounts
+
+    def active_account(self, *, platform: str | None = None) -> PlatformAccount | None:
+        accounts = [item for item in self.list_accounts(platform=platform) if item.status == "ACTIVE"]
+        if not accounts:
+            return None
+        accounts.sort(key=lambda item: item.activated_at or item.updated_at or "", reverse=True)
+        return accounts[0]
+
+    def activate_account(self, account_id: str) -> PlatformAccount:
+        account = self.get_account(account_id)
+        if account is None:
+            raise KeyError(account_id)
+        now = utcnow()
+        for item in self.list_accounts(platform=account.platform):
+            if item.account_id != account_id and item.status == "ACTIVE":
+                self.save_account(PlatformAccount(**{**item.__dict__, "status": "PAUSED", "updated_at": now}))
+        updated = PlatformAccount(**{**account.__dict__, "status": "ACTIVE", "activated_at": now, "updated_at": now})
+        return self.save_account(updated)
+
+    def save_character(self, character: VirtualCharacter) -> VirtualCharacter:
+        from scripts.db.models import VirtualCharacterRecord
+
+        self._require_account(character.account_id)
+        self._upsert(VirtualCharacterRecord, "character_id", character.character_id, {
+            "account_id": character.account_id,
+            "name": character.name,
+            "gender": character.gender,
+            "age_range": character.age_range,
+            "appearance_profile": dict(character.appearance_profile),
+            "body_profile": dict(character.body_profile),
+            "face_profile": dict(character.face_profile),
+            "hair_profile": dict(character.hair_profile),
+            "skin_profile": dict(character.skin_profile),
+            "clothing_profile": dict(character.clothing_profile),
+            "personality_profile": dict(character.personality_profile),
+            "background_story": character.background_story,
+            "speaking_style": character.speaking_style,
+            "behavioral_traits": list(character.behavioral_traits),
+            "visual_identity_rules": dict(character.visual_identity_rules),
+            "forbidden_changes": list(character.forbidden_changes),
+            "reference_asset_ids": list(character.reference_asset_ids),
+            "status": character.status,
+            "version": character.version,
+            "updated_at": _now(),
+        })
+        return character
+
+    def get_character(self, character_id: str, *, account_id: str | None = None, allow_share: bool = False) -> VirtualCharacter | None:
+        from scripts.db.models import VirtualCharacterRecord
+
+        with self._session() as session:
+            row = session.get(VirtualCharacterRecord, character_id)
+            if row is None:
+                return None
+            character = _character_from_row(row)
+        if account_id and character.account_id != account_id and not allow_share:
+            raise IsolationError(f"{account_id} cannot read character {character_id} owned by {character.account_id}")
+        return character
+
+    def list_characters(self, account_id: str) -> list[VirtualCharacter]:
+        from scripts.db.models import VirtualCharacterRecord
+
+        with self._session() as session:
+            rows = session.execute(select(VirtualCharacterRecord).where(VirtualCharacterRecord.account_id == account_id)).scalars()
+            return [_character_from_row(row) for row in rows]
+
+    def save_world(self, world: AccountWorld) -> AccountWorld:
+        from scripts.db.models import AccountWorldRecord
+
+        self._require_account(world.account_id)
+        self._upsert(AccountWorldRecord, "world_id", world.world_id, {
+            "account_id": world.account_id,
+            "name": world.name,
+            "world_description": world.world_description,
+            "core_theme": world.core_theme,
+            "values": list(world.values),
+            "tone": world.tone,
+            "visual_language": dict(world.visual_language),
+            "locations": list(world.locations),
+            "daily_life_rules": list(world.daily_life_rules),
+            "story_rules": list(world.story_rules),
+            "audience": world.audience,
+            "taboos": list(world.taboos),
+            "brand_rules": list(world.brand_rules),
+            "status": world.status,
+            "version": world.version,
+            "updated_at": _now(),
+        })
+        return world
+
+    def get_world(self, world_id: str, *, account_id: str | None = None, allow_share: bool = False) -> AccountWorld | None:
+        from scripts.db.models import AccountWorldRecord
+
+        with self._session() as session:
+            row = session.get(AccountWorldRecord, world_id)
+            if row is None:
+                return None
+            world = _world_from_row(row)
+        if account_id and world.account_id != account_id and not allow_share:
+            raise IsolationError(f"{account_id} cannot read world {world_id} owned by {world.account_id}")
+        return world
+
+    def list_worlds(self, account_id: str) -> list[AccountWorld]:
+        from scripts.db.models import AccountWorldRecord
+
+        with self._session() as session:
+            rows = session.execute(select(AccountWorldRecord).where(AccountWorldRecord.account_id == account_id)).scalars()
+            return [_world_from_row(row) for row in rows]
+
+    def save_series(self, series: ContentSeries) -> ContentSeries:
+        from scripts.db.models import ContentSeriesRecord
+
+        self._require_account(series.account_id)
+        if series.world_id:
+            world = self.get_world(series.world_id, account_id=series.account_id)
+            if world is None:
+                raise IsolationError(f"world {series.world_id} is not owned by {series.account_id}")
+        self._upsert(ContentSeriesRecord, "series_id", series.series_id, {
+            "account_id": series.account_id,
+            "world_id": series.world_id,
+            "name": series.name,
+            "description": series.description,
+            "series_type": series.series_type,
+            "content_rules": dict(series.content_rules),
+            "continuity_rules": dict(series.continuity_rules),
+            "status": series.status,
+            "start_date": series.start_date,
+            "end_date": series.end_date,
+            "current_episode_no": series.current_episode_no,
+            "updated_at": _now(),
+        })
+        return series
+
+    def get_series(self, series_id: str, *, account_id: str | None = None, allow_share: bool = False) -> ContentSeries | None:
+        from scripts.db.models import ContentSeriesRecord
+
+        with self._session() as session:
+            row = session.get(ContentSeriesRecord, series_id)
+            if row is None:
+                return None
+            series = _series_from_row(row)
+        if account_id and series.account_id != account_id and not allow_share:
+            raise IsolationError(f"{account_id} cannot read series {series_id} owned by {series.account_id}")
+        return series
+
+    def list_series(self, account_id: str) -> list[ContentSeries]:
+        from scripts.db.models import ContentSeriesRecord
+
+        with self._session() as session:
+            rows = session.execute(select(ContentSeriesRecord).where(ContentSeriesRecord.account_id == account_id)).scalars()
+            return [_series_from_row(row) for row in rows]
+
+    def active_series(self, account_id: str) -> ContentSeries | None:
+        series = [item for item in self.list_series(account_id) if item.status == "ACTIVE"]
+        if not series:
+            return None
+        series.sort(key=lambda item: item.updated_at or "", reverse=True)
+        return series[0]
+
+    def save_episode(self, episode: Episode) -> Episode:
+        from scripts.db.models import EpisodeRecord
+
+        series = self.get_series(episode.series_id)
+        if series is None:
+            raise KeyError(episode.series_id)
+        if episode.account_id and episode.account_id != series.account_id:
+            raise IsolationError(f"episode {episode.episode_id} account does not match series {series.series_id}")
+        if not episode.account_id:
+            episode = Episode(**{**episode.__dict__, "account_id": series.account_id})
+        self._upsert(EpisodeRecord, "episode_id", episode.episode_id, {
+            "series_id": episode.series_id,
+            "account_id": episode.account_id,
+            "episode_no": episode.episode_no,
+            "title": episode.title,
+            "brief": episode.brief,
+            "previous_episode_id": episode.previous_episode_id,
+            "next_episode_id": episode.next_episode_id,
+            "continuity_context": dict(episode.continuity_context),
+            "character_state": dict(episode.character_state),
+            "world_state": dict(episode.world_state),
+            "location_state": dict(episode.location_state),
+            "visual_state": dict(episode.visual_state),
+            "story_state": dict(episode.story_state),
+            "content_status": episode.content_status,
+            "campaign_id": episode.campaign_id,
+            "content_package_id": episode.content_package_id,
+            "updated_at": _now(),
+        })
+        return episode
+
+    def get_episode(self, episode_id: str, *, account_id: str | None = None, allow_share: bool = False) -> Episode | None:
+        from scripts.db.models import EpisodeRecord
+
+        with self._session() as session:
+            row = session.get(EpisodeRecord, episode_id)
+            if row is None:
+                return None
+            episode = _episode_from_row(row)
+        if account_id and episode.account_id != account_id and not allow_share:
+            raise IsolationError(f"{account_id} cannot read episode {episode_id} owned by {episode.account_id}")
+        return episode
+
+    def list_episodes(self, series_id: str) -> list[Episode]:
+        from scripts.db.models import EpisodeRecord
+
+        with self._session() as session:
+            rows = session.execute(select(EpisodeRecord).where(EpisodeRecord.series_id == series_id)).scalars()
+            items = [_episode_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.episode_no)
+        return items
+
+    def latest_episode(self, series_id: str) -> Episode | None:
+        episodes = self.list_episodes(series_id)
+        return episodes[-1] if episodes else None
+
+    def save_context(self, context: CreativeContext) -> CreativeContext:
+        from scripts.db.models import CreativeContextRecord
+
+        self._require_account(context.account_id)
+        self._upsert(CreativeContextRecord, "context_id", context.context_id, {
+            "account_id": context.account_id,
+            "platform": context.platform,
+            "character_id": context.character_id,
+            "world_id": context.world_id,
+            "series_id": context.series_id,
+            "episode_id": context.episode_id,
+            "campaign_id": context.campaign_id,
+            "user_request": context.user_request,
+            "creative_request": context.creative_request,
+            "normalized_prompt": context.normalized_prompt,
+            "system_constraints": dict(context.system_constraints),
+            "character_context": dict(context.character_context),
+            "world_context": dict(context.world_context),
+            "continuity_context": dict(context.continuity_context),
+            "platform_context": dict(context.platform_context),
+            "generation_parameters": dict(context.generation_parameters),
+            "provider": context.provider,
+            "model": context.model,
+            "provider_task_id": context.provider_task_id,
+            "resolved_target": dict(context.resolved_target),
+        })
+        return context
+
+    def get_context(self, context_id: str) -> CreativeContext | None:
+        from scripts.db.models import CreativeContextRecord
+
+        with self._session() as session:
+            row = session.get(CreativeContextRecord, context_id)
+            return _context_from_row(row) if row else None
+
+    def save_revision(self, revision: ContentRevision) -> ContentRevision:
+        from scripts.db.models import ContentRevisionRecord
+
+        self._upsert(ContentRevisionRecord, "revision_id", revision.revision_id, {
+            "content_package_id": revision.content_package_id,
+            "version": revision.version,
+            "parent_revision_id": revision.parent_revision_id,
+            "change_summary": revision.change_summary,
+            "snapshot": dict(revision.snapshot),
+            "created_by": revision.created_by,
+        })
+        return revision
+
+    def list_revisions(self, content_package_id: str) -> list[ContentRevision]:
+        from scripts.db.models import ContentRevisionRecord
+
+        with self._session() as session:
+            rows = session.execute(
+                select(ContentRevisionRecord).where(ContentRevisionRecord.content_package_id == content_package_id)
+            ).scalars()
+            items = [_revision_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.version)
+        return items
+
+    def save_memory(self, memory: ContinuityMemory) -> ContinuityMemory:
+        if memory.kind == "performance":
+            raise ValueError("use save_feedback for performance memory")
+        self._require_account(memory.account_id)
+        model = _memory_model(memory.kind)
+        fields = {
+            "kind": memory.kind,
+            "account_id": memory.account_id,
+            "subject_id": memory.subject_id,
+            "key": memory.key,
+            "value": memory.value,
+            "source": memory.source,
+            "namespace": model.__tablename__,
+        }
+        self._upsert(model, "memory_id", memory.memory_id, fields)
+        return memory
+
+    def list_memories(self, *, account_id: str, kind: str | None = None, subject_id: str | None = None) -> list[ContinuityMemory]:
+        kinds = (kind,) if kind else ("account", "character", "world", "series", "episode")
+        items: list[ContinuityMemory] = []
+        with self._session() as session:
+            for item_kind in kinds:
+                model = _memory_model(item_kind)
+                stmt = select(model).where(model.account_id == account_id)
+                if subject_id:
+                    stmt = stmt.where(model.subject_id == subject_id)
+                items.extend(_memory_from_row(row) for row in session.execute(stmt).scalars())
+        return items
+
+    def save_feedback(self, feedback: PerformanceFeedback) -> PerformanceFeedback:
+        from scripts.db.models import PerformanceFeedbackRecord
+
+        self._require_account(feedback.account_id)
+        self._upsert(PerformanceFeedbackRecord, "feedback_id", feedback.feedback_id, {
+            "account_id": feedback.account_id,
+            "platform": feedback.platform,
+            "content_package_id": feedback.content_package_id,
+            "episode_id": feedback.episode_id,
+            "topic": feedback.topic,
+            "hook": feedback.hook,
+            "visual_style": feedback.visual_style,
+            "caption_style": feedback.caption_style,
+            "duration": feedback.duration,
+            "scene": feedback.scene,
+            "action": feedback.action,
+            "audio": feedback.audio,
+            "engagement": dict(feedback.engagement),
+            "retention": dict(feedback.retention),
+            "publication_id": feedback.publication_id,
+        })
+        return feedback
+
+    def list_feedback(self, account_id: str) -> list[PerformanceFeedback]:
+        from scripts.db.models import PerformanceFeedbackRecord
+
+        with self._session() as session:
+            rows = session.execute(select(PerformanceFeedbackRecord).where(PerformanceFeedbackRecord.account_id == account_id)).scalars()
+            return [_feedback_from_row(row) for row in rows]
+
+    def save_lineage(self, lineage: AssetLineage) -> AssetLineage:
+        from scripts.db.models import AssetLineageRecord
+
+        self._require_account(lineage.account_id)
+        self._upsert(AssetLineageRecord, "lineage_id", lineage.lineage_id, {
+            "asset_id": lineage.asset_id,
+            "account_id": lineage.account_id,
+            "series_id": lineage.series_id,
+            "episode_id": lineage.episode_id,
+            "content_package_id": lineage.content_package_id,
+            "creative_context_id": lineage.creative_context_id,
+            "character_id": lineage.character_id,
+            "world_id": lineage.world_id,
+            "user_request": lineage.user_request,
+            "generation_request": dict(lineage.generation_request),
+            "provider": lineage.provider,
+            "provider_task_id": lineage.provider_task_id,
+            "model": lineage.model,
+            "attempt_no": lineage.attempt_no,
+            "parent_asset_id": lineage.parent_asset_id,
+            "qa_decision": lineage.qa_decision,
+            "published": bool(lineage.published),
+        })
+        return lineage
+
+    def get_lineage(self, asset_id: str, *, account_id: str | None = None, allow_share: bool = False) -> AssetLineage | None:
+        from scripts.db.models import AssetLineageRecord
+
+        with self._session() as session:
+            rows = list(session.execute(select(AssetLineageRecord).where(AssetLineageRecord.asset_id == asset_id)).scalars())
+            if not rows:
+                return None
+            rows.sort(key=lambda item: int(item.attempt_no or 1))
+            lineage = _lineage_from_row(rows[-1])
+        if account_id and lineage.account_id != account_id and not allow_share:
+            raise IsolationError(f"{account_id} cannot read asset {asset_id} owned by {lineage.account_id}")
+        return lineage
+
+    def list_lineage(self, *, account_id: str, episode_id: str | None = None) -> list[AssetLineage]:
+        from scripts.db.models import AssetLineageRecord
+
+        with self._session() as session:
+            stmt = select(AssetLineageRecord).where(AssetLineageRecord.account_id == account_id)
+            if episode_id:
+                stmt = stmt.where(AssetLineageRecord.episode_id == episode_id)
+            return [_lineage_from_row(row) for row in session.execute(stmt).scalars()]
+
+    def next_attempt(self, *, account_id: str, episode_id: str | None, parent_asset_id: str | None) -> int:
+        items = self.list_lineage(account_id=account_id, episode_id=episode_id)
+        if parent_asset_id:
+            items = [item for item in items if item.parent_asset_id == parent_asset_id or item.asset_id == parent_asset_id]
+        return max((item.attempt_no for item in items), default=0) + 1
+
+    def save_package(self, package: ContentPackage) -> ContentPackage:
+        from scripts.db.models import ContentPackageRecord
+        from sqlalchemy import inspect as sa_inspect
+
+        if "content_packages" not in sa_inspect(self.engine).get_table_names():
+            return package
+        self._upsert(ContentPackageRecord, "package_id", package.package_id, {
+            "brand_id": package.brand_id,
+            "creator_id": package.creator_id,
+            "campaign_id": package.campaign_id,
+            "topic": package.topic,
+            "content_pillar": package.content_pillar,
+            "hook": package.hook,
+            "format": package.format,
+            "audience": package.audience,
+            "title": package.title,
+            "caption": package.caption,
+            "body": package.body,
+            "evidence_ids": list(package.evidence_ids),
+            "media_assets": list(package.media_assets),
+            "commerce_intent": package.commerce_intent,
+            "variants": list(package.variants),
+            "metadata_json": dict(package.metadata or {}),
+            "account_id": package.account_id,
+            "series_id": package.series_id,
+            "episode_id": package.episode_id,
+            "platform": package.platform or "",
+            "status": package.status,
+            "character_id": package.character_id,
+            "world_id": package.world_id,
+            "creative_context_id": package.creative_context_id,
+            "revision": package.revision,
+            "updated_at": _now(),
+        })
+        return package
+
+    def save_package_snapshot(self, package: ContentPackage, *, change_summary: str, created_by: str = "meiti") -> ContentRevision:
+        revisions = self.list_revisions(package.package_id)
+        version = (revisions[-1].version + 1) if revisions else package.revision
+        parent = revisions[-1].revision_id if revisions else None
+        snapshot = {
+            "package_id": package.package_id,
+            "title": package.title,
+            "body": package.body,
+            "caption": package.caption,
+            "hook": package.hook,
+            "media_assets": list(package.media_assets),
+            "status": package.status,
+            "platform": package.platform,
+            "account_id": package.account_id,
+            "series_id": package.series_id,
+            "episode_id": package.episode_id,
+            "metadata": dict(package.metadata or {}),
+        }
+        return self.save_revision(ContentRevision(
+            revision_id=uuid4().hex,
+            content_package_id=package.package_id,
+            version=version,
+            parent_revision_id=parent,
+            change_summary=change_summary,
+            snapshot=snapshot,
+            created_by=created_by,
+        ))
+
+    def delete_episode(self, episode_id: str) -> None:
+        from scripts.db.models import EpisodeRecord
+
+        with self._session() as session:
+            row = session.get(EpisodeRecord, episode_id)
+            if row is not None:
+                session.delete(row)
+                session.commit()
+
+    def _require_account(self, account_id: str) -> PlatformAccount:
+        account = self.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        return account
+
+
+def _account_from_row(row) -> PlatformAccount:
+    return PlatformAccount(
+        account_id=row.account_id,
+        platform=row.platform,
+        external_account_id=row.external_account_id or "",
+        display_name=row.display_name or "",
+        status=row.status,
+        credential_ref=row.credential_ref or "",
+        character_id=row.character_id,
+        world_id=row.world_id,
+        default_style_profile_id=row.default_style_profile_id,
+        social_account_id=row.social_account_id,
+        activated_at=_iso(row.activated_at),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _character_from_row(row) -> VirtualCharacter:
+    return VirtualCharacter(
+        character_id=row.character_id,
+        account_id=row.account_id,
+        name=row.name,
+        gender=row.gender or "",
+        age_range=row.age_range or "",
+        appearance_profile=_json(row.appearance_profile, {}),
+        body_profile=_json(row.body_profile, {}),
+        face_profile=_json(row.face_profile, {}),
+        hair_profile=_json(row.hair_profile, {}),
+        skin_profile=_json(row.skin_profile, {}),
+        clothing_profile=_json(row.clothing_profile, {}),
+        personality_profile=_json(row.personality_profile, {}),
+        background_story=row.background_story or "",
+        speaking_style=row.speaking_style or "",
+        behavioral_traits=_tuple(row.behavioral_traits),
+        visual_identity_rules=_json(row.visual_identity_rules, {}),
+        forbidden_changes=_tuple(row.forbidden_changes),
+        reference_asset_ids=_tuple(row.reference_asset_ids),
+        status=row.status,
+        version=int(row.version or 1),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _world_from_row(row) -> AccountWorld:
+    return AccountWorld(
+        world_id=row.world_id,
+        account_id=row.account_id,
+        name=row.name,
+        world_description=row.world_description or "",
+        core_theme=row.core_theme or "",
+        values=_tuple(row.values),
+        tone=row.tone or "",
+        visual_language=_json(row.visual_language, {}),
+        locations=_tuple(row.locations),
+        daily_life_rules=_tuple(row.daily_life_rules),
+        story_rules=_tuple(row.story_rules),
+        audience=row.audience or "",
+        taboos=_tuple(row.taboos),
+        brand_rules=_tuple(row.brand_rules),
+        status=row.status,
+        version=int(row.version or 1),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _series_from_row(row) -> ContentSeries:
+    return ContentSeries(
+        series_id=row.series_id,
+        account_id=row.account_id,
+        world_id=row.world_id,
+        name=row.name,
+        description=row.description or "",
+        series_type=row.series_type or "serial",
+        content_rules=_json(row.content_rules, {}),
+        continuity_rules=_json(row.continuity_rules, {}),
+        status=row.status,
+        start_date=row.start_date,
+        end_date=row.end_date,
+        current_episode_no=int(row.current_episode_no or 0),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _episode_from_row(row) -> Episode:
+    return Episode(
+        episode_id=row.episode_id,
+        series_id=row.series_id,
+        episode_no=int(row.episode_no),
+        title=row.title or "",
+        brief=row.brief or "",
+        previous_episode_id=row.previous_episode_id,
+        next_episode_id=row.next_episode_id,
+        continuity_context=_json(row.continuity_context, {}),
+        character_state=_json(row.character_state, {}),
+        world_state=_json(row.world_state, {}),
+        location_state=_json(row.location_state, {}),
+        visual_state=_json(row.visual_state, {}),
+        story_state=_json(row.story_state, {}),
+        content_status=row.content_status,
+        account_id=row.account_id or "",
+        campaign_id=row.campaign_id,
+        content_package_id=row.content_package_id,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _context_from_row(row) -> CreativeContext:
+    return CreativeContext(
+        context_id=row.context_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        character_id=row.character_id,
+        world_id=row.world_id,
+        series_id=row.series_id,
+        episode_id=row.episode_id,
+        campaign_id=row.campaign_id,
+        user_request=row.user_request or "",
+        creative_request=row.creative_request or "",
+        normalized_prompt=row.normalized_prompt or "",
+        system_constraints=_json(row.system_constraints, {}),
+        character_context=_json(row.character_context, {}),
+        world_context=_json(row.world_context, {}),
+        continuity_context=_json(row.continuity_context, {}),
+        platform_context=_json(row.platform_context, {}),
+        generation_parameters=_json(row.generation_parameters, {}),
+        provider=row.provider or "",
+        model=row.model or "",
+        provider_task_id=row.provider_task_id or "",
+        resolved_target=_json(row.resolved_target, {}),
+        created_at=_iso(row.created_at),
+    )
+
+
+def _revision_from_row(row) -> ContentRevision:
+    return ContentRevision(
+        revision_id=row.revision_id,
+        content_package_id=row.content_package_id,
+        version=int(row.version),
+        parent_revision_id=row.parent_revision_id,
+        change_summary=row.change_summary or "",
+        snapshot=_json(row.snapshot, {}),
+        created_at=_iso(row.created_at),
+        created_by=row.created_by or "meiti",
+    )
+
+
+def _memory_model(kind: str):
+    from scripts.db.models import (
+        AccountMemoryRecord,
+        CharacterMemoryRecord,
+        EpisodeMemoryRecord,
+        SeriesMemoryRecord,
+        WorldMemoryRecord,
+    )
+
+    mapping = {
+        "account": AccountMemoryRecord,
+        "character": CharacterMemoryRecord,
+        "world": WorldMemoryRecord,
+        "series": SeriesMemoryRecord,
+        "episode": EpisodeMemoryRecord,
+    }
+    if kind not in mapping:
+        raise ValueError(f"invalid memory kind: {kind}")
+    return mapping[kind]
+
+
+def _memory_from_row(row) -> ContinuityMemory:
+    return ContinuityMemory(
+        memory_id=row.memory_id,
+        kind=row.kind,
+        account_id=row.account_id,
+        subject_id=row.subject_id,
+        key=row.key,
+        value=row.value,
+        source=row.source or "continuity",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _feedback_from_row(row) -> PerformanceFeedback:
+    return PerformanceFeedback(
+        feedback_id=row.feedback_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        content_package_id=row.content_package_id or "",
+        episode_id=row.episode_id,
+        topic=row.topic or "",
+        hook=row.hook or "",
+        visual_style=row.visual_style or "",
+        caption_style=row.caption_style or "",
+        duration=None if row.duration is None else float(row.duration),
+        scene=row.scene or "",
+        action=row.action or "",
+        audio=row.audio or "",
+        engagement=_json(row.engagement, {}),
+        retention=_json(row.retention, {}),
+        publication_id=row.publication_id or "",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _lineage_from_row(row) -> AssetLineage:
+    return AssetLineage(
+        lineage_id=row.lineage_id,
+        asset_id=row.asset_id,
+        account_id=row.account_id,
+        series_id=row.series_id,
+        episode_id=row.episode_id,
+        content_package_id=row.content_package_id,
+        creative_context_id=row.creative_context_id,
+        character_id=row.character_id,
+        world_id=row.world_id,
+        user_request=row.user_request or "",
+        generation_request=_json(row.generation_request, {}),
+        provider=row.provider or "",
+        provider_task_id=row.provider_task_id or "",
+        model=row.model or "",
+        attempt_no=int(row.attempt_no or 1),
+        parent_asset_id=row.parent_asset_id,
+        qa_decision=row.qa_decision or "",
+        published=bool(row.published),
+        created_at=_iso(row.created_at),
+    )

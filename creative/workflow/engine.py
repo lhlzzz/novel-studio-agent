@@ -386,6 +386,7 @@ class CreativeWorkflowEngine:
 
     def to_content_package(self, run: CreativeRun, **fields: Any):
         from content.models import ContentPackage
+        from content.platform_policy import differentiate_package
         if run.status != "SUCCEEDED":
             raise QualityBlocked([run.error or run.status])
         if any(str(run.quality.get(key) or "") != "pass" for key in ("visual_quality", "identity_quality", "technical_quality") if run.quality):
@@ -393,7 +394,8 @@ class CreativeWorkflowEngine:
         assets = [self.store.get_asset(item) or self.store.assets.get(item) for item in run.asset_ids]
         paths = tuple(item.path for item in assets if item)
         now = utcnow()
-        return ContentPackage(
+        context = fields.get("creative_context") or run.inputs.get("creative_context")
+        package = ContentPackage(
             package_id=str(fields.get("package_id") or f"pkg-{run.run_id[:8]}"),
             title=str(fields.get("title") or run.inputs.get("brief") or "Untitled"),
             body=str(fields.get("body") or run.inputs.get("brief") or ""),
@@ -409,7 +411,18 @@ class CreativeWorkflowEngine:
                 "workflow_version": run.workflow_version,
                 "selected_asset_id": run.selected_asset_id,
             },
+            account_id=getattr(context, "account_id", None) or run.inputs.get("account_id"),
+            series_id=getattr(context, "series_id", None) or run.inputs.get("series_id"),
+            episode_id=getattr(context, "episode_id", None) or run.inputs.get("episode_id"),
+            platform=str(getattr(context, "platform", "") or run.inputs.get("platform") or ""),
+            status="GENERATED",
+            character_id=getattr(context, "character_id", None) or run.inputs.get("character_id"),
+            world_id=getattr(context, "world_id", None) or run.inputs.get("world_id"),
+            creative_context_id=getattr(context, "context_id", None) or run.inputs.get("creative_context_id"),
         )
+        if context is not None and hasattr(context, "platform") and context.platform:
+            package = differentiate_package(package, context)
+        return package
 
     def _fail(self, run: CreativeRun, exc: Exception) -> CreativeRun:
         run.error = user_message(exc)

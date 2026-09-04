@@ -321,6 +321,15 @@ class LechuangClient:
             creative_run_id=(payload or {}).get("run_id"),
             prompt_id=(payload or {}).get("prompt_id"),
             character_id=(payload or {}).get("character_id"),
+            account_id=(payload or {}).get("account_id"),
+            series_id=(payload or {}).get("series_id"),
+            episode_id=(payload or {}).get("episode_id"),
+            content_package_id=(payload or {}).get("content_package_id"),
+            creative_context_id=(payload or {}).get("creative_context_id"),
+            world_id=(payload or {}).get("world_id"),
+            provider="xiaole-lechuang",
+            provider_task_id=request_id,
+            model=str(body.get("model") or model),
             metadata={
                 "provider": "xiaole",
                 "service": "lechuang",
@@ -330,6 +339,10 @@ class LechuangClient:
                 "aspect_ratio": aspect_ratio,
                 "source": "xiaole-lechuang",
                 "created_at": utcnow(),
+                "account_id": (payload or {}).get("account_id"),
+                "series_id": (payload or {}).get("series_id"),
+                "episode_id": (payload or {}).get("episode_id"),
+                "creative_context_id": (payload or {}).get("creative_context_id"),
             },
         )
         qa = TechnicalQA().inspect_image(asset)

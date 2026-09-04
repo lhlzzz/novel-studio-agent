@@ -43,9 +43,30 @@ class MediaAgent:
 
     def _generate(self, task: dict[str, Any]) -> dict[str, Any]:
         requirement = dict(task.get("creative_requirement") or task.get("creative_brief") or {})
-        for key in ("brief", "aspect_ratio", "duration_seconds", "face_visible", "character_id", "variant_count", "budget", "commerce_intent", "camera", "motion", "style", "workflow_id"):
+        for key in ("brief", "aspect_ratio", "duration_seconds", "face_visible", "character_id", "variant_count", "budget", "commerce_intent", "camera", "motion", "style", "workflow_id", "account_id", "series_id", "episode_id", "platform", "world_id", "creative_context", "normalized_prompt"):
             if key in task and key not in requirement:
                 requirement[key] = task[key]
+        context = task.get("creative_context") or requirement.get("creative_context")
+        if context is not None and hasattr(context, "normalized_prompt"):
+            requirement["creative_context"] = {
+                "context_id": context.context_id,
+                "normalized_prompt": context.normalized_prompt,
+                "character_context": dict(context.character_context),
+                "world_context": dict(context.world_context),
+                "continuity_context": dict(context.continuity_context),
+                "platform_context": dict(context.platform_context),
+            }
+            requirement.setdefault("brief", context.normalized_prompt or context.creative_request)
+            requirement.setdefault("account_id", context.account_id)
+            requirement.setdefault("series_id", context.series_id)
+            requirement.setdefault("episode_id", context.episode_id)
+            requirement.setdefault("platform", context.platform)
+            requirement.setdefault("character_id", context.character_id)
+            requirement.setdefault("world_id", context.world_id)
+            requirement.setdefault("creative_context_id", context.context_id)
+            aspect = (context.platform_context or {}).get("aspect_ratio")
+            if aspect:
+                requirement.setdefault("aspect_ratio", aspect)
         if task.get("title") and not requirement.get("brief"):
             requirement["brief"] = task.get("title")
         allow_mock = bool(task.get("allow_mock"))
@@ -66,6 +87,7 @@ class MediaAgent:
                 package_id=str(task.get("package_id") or f"pkg-{run.run_id[:8]}"),
                 title=str(task.get("title") or requirement.get("brief") or "Untitled"),
                 body=str(task.get("body") or requirement.get("brief") or ""),
+                creative_context=task.get("creative_context"),
             )
         code = run.error_code or run.blocked_reason or ""
         if run.status == "SUCCEEDED" or code in CREATIVE_MEMORY_CODES:

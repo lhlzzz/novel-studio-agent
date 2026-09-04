@@ -207,6 +207,15 @@ def _character(data, run, store) -> dict[str, Any]:
 
 def _prompt(data, workflow, run, store) -> dict[str, Any]:
     payload = {**run.inputs, **data, "brief": data.get("brief") or run.inputs.get("brief")}
+    context = run.inputs.get("creative_context") or {}
+    if isinstance(context, dict):
+        payload.setdefault("normalized_prompt", context.get("normalized_prompt"))
+        payload.setdefault("character_context", context.get("character_context"))
+        payload.setdefault("world_context", context.get("world_context"))
+        payload.setdefault("continuity_context", context.get("continuity_context"))
+        payload.setdefault("platform_context", context.get("platform_context"))
+        if context.get("normalized_prompt") and not payload.get("brief"):
+            payload["brief"] = context.get("normalized_prompt")
     if run.inputs.get("variation_seed") == "change_prompt" or run.inputs.get("regen_action") == "change_prompt":
         payload["brief"] = f"{payload.get('brief') or ''} regenerated variation, shift composition slightly.".strip()
     prompt = render_scene_prompt(payload)

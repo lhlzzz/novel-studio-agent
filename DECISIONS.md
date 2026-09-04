@@ -42,3 +42,8 @@
   remap is upgrade-safe and explicitly not strictly reversible. Production CI
   injects GitHub secrets into process env and uses a runner-local
   MEITI_SECRET_DIR path. Missing external credentials remain BLOCKED_EXTERNAL.
+- **2026-09-04 V4.6:** PlatformAccount is the isolation boundary. VirtualCharacter
+  and AccountWorld are first-class, account-scoped entities. Series and Episode
+  live in PostgreSQL. ContinuityEngine builds CreativeContext. Same campaign
+  produces independent platform ContentPackages. MediaAsset lineage is required.
+  Lechuang remains the only generation provider. Video stays NOT_VERIFIED.

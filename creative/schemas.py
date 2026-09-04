@@ -170,6 +170,11 @@ ASSET_TYPES = (
     "storyboard",
     "subtitle",
     "final",
+    "thumbnail",
+    "cover",
+    "reference_image",
+    "character_reference",
+    "video_reference",
 )
 
 REGENERATION_STRATEGIES = ("change_prompt", "change_variation", "change_reference", "change_camera", "change_model")
@@ -394,6 +399,15 @@ class MediaAsset:
     content_score: float | None = None
     platform_score: float | None = None
     overall_score: float | None = None
+    account_id: str | None = None
+    series_id: str | None = None
+    episode_id: str | None = None
+    content_package_id: str | None = None
+    creative_context_id: str | None = None
+    world_id: str | None = None
+    provider: str = ""
+    provider_task_id: str = ""
+    model: str = ""
 
 
 @dataclass(frozen=True)
