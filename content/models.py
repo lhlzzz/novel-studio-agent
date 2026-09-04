@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -22,16 +23,40 @@ SERIES_STATES = ("DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED")
 CONTENT_STATES = (
     "IDEA",
     "BRIEFED",
+    "DRAFT",
+    "PROMPT_READY",
+    "AWAITING_CREATIVE",
     "GENERATING",
     "GENERATED",
+    "IMPORTED",
     "QA_PASSED",
-    "DRAFT",
-    "APPROVED",
+    "QA_FAILED",
+    "PACKAGE_READY",
+    "HANDOFF_READY",
     "READY_TO_PUBLISH",
+    "APPROVED",
     "PUBLISHED",
+    "ANALYTICS_PENDING",
+    "LEARNED",
     "FAILED",
+    "REJECTED",
     "ARCHIVED",
 )
+LIFECYCLE_OWNERS = {
+    "DRAFT": "content-agent",
+    "PROMPT_READY": "content-agent",
+    "AWAITING_CREATIVE": "operator",
+    "IMPORTED": "media-agent",
+    "QA_PASSED": "media-agent",
+    "QA_FAILED": "media-agent",
+    "PACKAGE_READY": "content-agent",
+    "HANDOFF_READY": "distribution-agent",
+    "PUBLISHED": "distribution-agent",
+    "ANALYTICS_PENDING": "analytics-agent",
+    "LEARNED": "memory-agent",
+    "ARCHIVED": "content-agent",
+    "REJECTED": "content-agent",
+}
 MEMORY_KINDS = (
     "account",
     "character",
@@ -340,6 +365,9 @@ class Episode:
     content_package_id: str | None = None
     primary_asset_id: str | None = None
     prompt_id: str | None = None
+    character_revision: int | None = None
+    world_revision: int | None = None
+    production_run_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -620,6 +648,22 @@ class AssetFreshnessError(ContinuityError):
         self.code = code
 
 
+class MemoryWritebackError(ContinuityError):
+    """Raised when MemoryService / Obsidian writeback fails on a production path."""
+
+    def __init__(self, code: str = "MEMORY_WRITEBACK_FAILED", message: str = "MEMORY_WRITEBACK_FAILED") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ConfigurationBlocked(ContinuityError):
+    """Raised when a production account is missing character, world, DNA, pool, or learning."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ExistingAssetError(AssetFreshnessError):
     """Raised when an imported file already exists as an immutable asset."""
 
@@ -722,6 +766,9 @@ class PromptPackage:
     learning_basis: tuple[str, ...] = ()
     prompt_patterns: tuple[str, ...] = ()
     lechuang_parameters: dict[str, Any] = field(default_factory=dict)
+    prompt_hash: str = ""
+    version: int = 1
+    parent_prompt_id: str | None = None
     created_at: str | None = None
 
     def __post_init__(self) -> None:
@@ -729,6 +776,8 @@ class PromptPackage:
             raise ValueError(f"invalid prompt kind: {self.kind}")
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
+        if not self.prompt_hash and self.copy_ready:
+            object.__setattr__(self, "prompt_hash", hashlib.sha256(self.copy_ready.encode("utf-8")).hexdigest())
 
     @property
     def id(self) -> str:
@@ -747,6 +796,8 @@ class PromptPattern:
     confidence: float = 0.0
     source_episode_ids: tuple[str, ...] = ()
     global_pattern: bool = False
+    promotion_status: str = "PLATFORM"
+    sample_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -816,3 +867,256 @@ def with_status(package: ContentPackage, status: str) -> ContentPackage:
     if status not in CONTENT_STATES:
         raise ValueError(f"invalid content status: {status}")
     return replace(package, status=status, updated_at=utcnow())
+
+
+PATTERN_PROMOTION_STATES = ("PLATFORM", "GLOBAL_CANDIDATE", "GLOBAL_PATTERN", "REJECTED")
+PRODUCTION_RUN_STATES = ("OPEN", "AWAITING_CREATIVE", "IMPORTED", "PACKAGED", "HANDED_OFF", "LEARNED", "CLOSED", "BLOCKED")
+EVIDENCE_SOURCES = ("code", "operator", "lechuang", "analytics", "memory", "audit")
+
+
+@dataclass(frozen=True)
+class ProductionRun:
+    run_id: str
+    account_id: str
+    platform: str
+    episode_id: str | None = None
+    prompt_id: str | None = None
+    asset_id: str | None = None
+    package_id: str | None = None
+    handoff_id: str | None = None
+    publication_id: str | None = None
+    analytics_id: str | None = None
+    learning_id: str | None = None
+    status: str = "OPEN"
+    request: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in PRODUCTION_RUN_STATES:
+            raise ValueError(f"invalid production run status: {self.status}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.run_id
+
+
+@dataclass(frozen=True)
+class ProductionEvidence:
+    evidence_id: str
+    kind: str
+    account_id: str
+    platform: str
+    status: str = "PASS"
+    episode_id: str | None = None
+    prompt_id: str | None = None
+    asset_id: str | None = None
+    package_id: str | None = None
+    handoff_id: str | None = None
+    publication_id: str | None = None
+    analytics_id: str | None = None
+    learning_id: str | None = None
+    production_run_id: str | None = None
+    source: str = "operator"
+    detail: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source not in EVIDENCE_SOURCES:
+            raise ValueError(f"invalid evidence source: {self.source}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.evidence_id
+
+
+@dataclass(frozen=True)
+class AnalyticsRecord:
+    analytics_id: str
+    account_id: str
+    platform: str
+    episode_id: str | None = None
+    package_id: str | None = None
+    handoff_id: str | None = None
+    publication_id: str | None = None
+    impressions: int | None = None
+    likes: int | None = None
+    favorites: int | None = None
+    comments: int | None = None
+    shares: int | None = None
+    followers_gained: int | None = None
+    published_at: str | None = None
+    topic: str = ""
+    cover: str = ""
+    prompt_pattern: str = ""
+    source: str = "manual"
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.analytics_id
+
+
+@dataclass(frozen=True)
+class LearningRecord:
+    learning_id: str
+    account_id: str
+    platform: str
+    episode_id: str | None = None
+    analytics_id: str | None = None
+    pattern_ids: tuple[str, ...] = ()
+    what_worked: str = ""
+    what_failed: str = ""
+    visual_learning: str = ""
+    content_learning: str = ""
+    prompt_learning: str = ""
+    audience_learning: str = ""
+    next_recommendation: str = ""
+    reason: str = ""
+    source_episode_ids: tuple[str, ...] = ()
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.learning_id
+
+
+@dataclass(frozen=True)
+class CreativeExecutionReceipt:
+    receipt_id: str
+    asset_id: str
+    prompt_id: str | None = None
+    tool: str = "lechuang"
+    model: str = "UNKNOWN"
+    generated_at: str | None = None
+    operator: str = "operator"
+    source_asset_id: str | None = None
+    generation_mode: str = "MANUAL_CREATIVE_TOOL"
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.model:
+            object.__setattr__(self, "model", "UNKNOWN")
+        if not self.generated_at:
+            object.__setattr__(self, "generated_at", utcnow())
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.receipt_id
+
+
+@dataclass(frozen=True)
+class CharacterRevision:
+    revision_id: str
+    character_id: str
+    account_id: str
+    version: int
+    snapshot: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.revision_id
+
+
+@dataclass(frozen=True)
+class WorldRevision:
+    revision_id: str
+    world_id: str
+    account_id: str
+    version: int
+    snapshot: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.revision_id
+
+
+@dataclass(frozen=True)
+class AssetReferenceSnapshot:
+    snapshot_id: str
+    prompt_id: str
+    asset_id: str
+    role: str = "SCENE_REFERENCE"
+    reason: str = ""
+    prompt_influence: str = ""
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.snapshot_id
+
+
+@dataclass(frozen=True)
+class PatternPromotion:
+    promotion_id: str
+    pattern_id: str
+    platform: str
+    status: str = "PLATFORM"
+    sample_count: int = 0
+    cross_platform_evidence: tuple[str, ...] = ()
+    confidence: float = 0.0
+    reason: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in PATTERN_PROMOTION_STATES:
+            raise ValueError(f"invalid pattern promotion status: {self.status}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.promotion_id
+
+
+@dataclass(frozen=True)
+class LifecycleTransition:
+    transition_id: str
+    episode_id: str
+    account_id: str
+    from_status: str
+    to_status: str
+    owner: str
+    evidence_id: str | None = None
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.transition_id

@@ -174,6 +174,11 @@ def differentiate_package(package: ContentPackage, context: CreativeContext) -> 
         world_id=context.world_id,
         creative_context_id=context.context_id,
         revision=package.revision,
+        current_revision=package.current_revision,
+        reference_assets=package.reference_assets,
+        primary_assets=package.primary_assets,
+        published_assets=package.published_assets,
+        prompt_id=package.prompt_id,
     )
 
 

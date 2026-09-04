@@ -1,4 +1,4 @@
-# Meiti V4.7.1
+# Meiti V4.8
 
 Meiti is prompt-first.
 
@@ -52,7 +52,7 @@ Analytics take store/secrets from that runtime. Testing uses
 python scripts/meiti.py bootstrap-production
 ```
 
-V4.7.1 hardens platform asset DNA. MemoryService owns retrieval and writeback,
+V4.8 hardens the real creator production loop on the V4.7.1 asset DNA. MemoryService owns retrieval and writeback,
 Obsidian is the knowledge brain, PostgreSQL stays operational state,
 AccountContext is explicit, and PromptCompiler is the human-execution creative
 bridge. Unverified video APIs stay NOT_VERIFIED. Bootstrap remains read-only

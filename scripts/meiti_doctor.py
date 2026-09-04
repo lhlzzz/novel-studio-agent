@@ -529,13 +529,13 @@ def check_account_continuity() -> dict:
                 "MULTI_ACCOUNT_RUNTIME": dict(status),
                 "EPISODE_TRANSACTION": dict(status),
             }
-            payload.update(_v471_status(status["status"]))
+            payload.update(_v48_status(status["status"]))
             return payload
         runtime = ContinuityRuntime.production()
         payload = runtime.doctor()
         payload["CREATIVE_RUNTIME"] = creative
-        payload.update(_v471_status("PASS", payload))
-        payload["DOCTOR_RUNTIME"] = {"status": "PASS"}
+        payload.update(_v48_status("PASS", payload))
+        payload["DOCTOR_RUNTIME"] = {"status": "PASS", "lane": "ARCHITECTURE"}
         return payload
     except Exception as ext:
         blocked = {"status": "BLOCKED_EXTERNAL", "error": str(ext)}
@@ -552,18 +552,48 @@ def check_account_continuity() -> dict:
             "MULTI_ACCOUNT_RUNTIME": dict(blocked),
             "EPISODE_TRANSACTION": dict(blocked),
         }
-        payload.update(_v471_status("BLOCKED_EXTERNAL"))
+        payload.update(_v48_status("BLOCKED_EXTERNAL"))
         payload["DOCTOR_RUNTIME"] = dict(blocked)
         return payload
 
 
-V471_KEYS = (
+V48_KEYS = (
+    "CODE_AUDIT",
+    "DATABASE_INTEGRITY",
+    "PRODUCTION_RUN",
+    "PROMPT_RUNTIME",
+    "MANUAL_LECHUANG",
+    "ASSET_IMPORT",
+    "TECHNICAL_QA",
+    "ASSET_LINEAGE",
+    "ASSET_FRESHNESS",
+    "PLATFORM_ISOLATION",
+    "ACCOUNT_ISOLATION",
+    "PROMPT_NOVELTY",
+    "CHARACTER_CONTINUITY",
+    "WORLD_CONTINUITY",
+    "ANALYTICS_RUNTIME",
+    "LEARNING_RUNTIME",
+    "OBSIDIAN_WRITEBACK",
+    "VECTOR_INDEXING",
+    "NEXT_PROMPT_LEARNING",
+    "REAL_DAY_1",
+    "REAL_DAY_2",
+    "REAL_DAY_3",
+    "REAL_CROSS_PLATFORM",
+    "PRODUCTION_EVIDENCE",
+    "ARCHITECTURE_TESTS",
+    "UNIT_TESTS",
+    "MIGRATION",
+    "DOCTOR",
+    "AUDIT",
+    "GIT_DIFF_CHECK",
+    "WORKTREE",
     "PLATFORM_CHARACTER_DNA",
     "PLATFORM_WORLD_DNA",
     "PLATFORM_CREATIVE_DNA",
     "PLATFORM_ASSET_POOL",
     "PLATFORM_ASSET_ISOLATION",
-    "ASSET_FRESHNESS",
     "EPISODE_NEW_ASSET_REQUIRED",
     "SAME_FILE_REUSE_BLOCK",
     "DERIVED_ASSET_LINEAGE",
@@ -573,9 +603,6 @@ V471_KEYS = (
     "IMAGE_PROMPT_PACKAGE",
     "VIDEO_PROMPT_PACKAGE",
     "IMAGE_TO_VIDEO_PROMPT_PACKAGE",
-    "PROMPT_NOVELTY",
-    "CHARACTER_CONTINUITY",
-    "WORLD_CONTINUITY",
     "PLATFORM_LEARNING_DNA",
     "LEARNING_ISOLATION",
     "PROMPT_PATTERN_LIBRARY",
@@ -587,19 +614,74 @@ V471_KEYS = (
     "REVISION_RUNTIME",
     "LINEAGE_RUNTIME",
     "PUBLICATION_RUNTIME",
-    "ANALYTICS_RUNTIME",
 )
 
+LANE_BY_KEY = {
+    "CODE_AUDIT": "ARCHITECTURE",
+    "DATABASE_INTEGRITY": "CONFIGURATION",
+    "PRODUCTION_RUN": "ARCHITECTURE",
+    "PROMPT_RUNTIME": "ARCHITECTURE",
+    "MANUAL_LECHUANG": "ARCHITECTURE",
+    "ASSET_IMPORT": "ARCHITECTURE",
+    "TECHNICAL_QA": "ARCHITECTURE",
+    "ASSET_LINEAGE": "ARCHITECTURE",
+    "ASSET_FRESHNESS": "ARCHITECTURE",
+    "PLATFORM_ISOLATION": "ARCHITECTURE",
+    "ACCOUNT_ISOLATION": "ARCHITECTURE",
+    "PROMPT_NOVELTY": "ARCHITECTURE",
+    "CHARACTER_CONTINUITY": "ARCHITECTURE",
+    "WORLD_CONTINUITY": "ARCHITECTURE",
+    "ANALYTICS_RUNTIME": "PRODUCTION_EVIDENCE",
+    "LEARNING_RUNTIME": "PRODUCTION_EVIDENCE",
+    "OBSIDIAN_WRITEBACK": "ARCHITECTURE",
+    "VECTOR_INDEXING": "CONFIGURATION",
+    "NEXT_PROMPT_LEARNING": "ARCHITECTURE",
+    "REAL_DAY_1": "PRODUCTION_EVIDENCE",
+    "REAL_DAY_2": "PRODUCTION_EVIDENCE",
+    "REAL_DAY_3": "PRODUCTION_EVIDENCE",
+    "REAL_CROSS_PLATFORM": "PRODUCTION_EVIDENCE",
+    "PRODUCTION_EVIDENCE": "ARCHITECTURE",
+    "ARCHITECTURE_TESTS": "ARCHITECTURE",
+    "UNIT_TESTS": "ARCHITECTURE",
+    "MIGRATION": "CONFIGURATION",
+    "DOCTOR": "ARCHITECTURE",
+    "AUDIT": "ARCHITECTURE",
+    "GIT_DIFF_CHECK": "ARCHITECTURE",
+    "WORKTREE": "ARCHITECTURE",
+    "PUBLICATION_RUNTIME": "PRODUCTION_EVIDENCE",
+}
 
-def _v471_status(default: str, existing: dict | None = None) -> dict:
+
+def _v48_status(default: str, existing: dict | None = None) -> dict:
     existing = existing or {}
     rows = {}
-    for key in V471_KEYS:
+    aliases = {
+        "CODE_AUDIT": "ARCHITECTURE",
+        "DATABASE_INTEGRITY": "Persistence",
+        "PROMPT_RUNTIME": "PROMPT_COMPILER",
+        "MANUAL_LECHUANG": "MANUAL_LECHUANG_IMPORT",
+        "ASSET_IMPORT": "MANUAL_LECHUANG_IMPORT",
+        "TECHNICAL_QA": "MEDIA_ASSET_QA",
+        "PLATFORM_ISOLATION": "PLATFORM_ASSET_ISOLATION",
+        "ACCOUNT_ISOLATION": "ACCOUNT_RUNTIME",
+        "OBSIDIAN_WRITEBACK": "OBSIDIAN_EPISODE_MEMORY",
+        "NEXT_PROMPT_LEARNING": "PLATFORM_LEARNING_DNA",
+        "DOCTOR": "DOCTOR_RUNTIME",
+    }
+    for key in V48_KEYS:
         current = existing.get(key)
         if isinstance(current, dict) and current.get("status"):
             rows[key] = current
-        else:
-            rows[key] = {"status": default}
+            continue
+        source = existing.get(aliases.get(key, key))
+        if isinstance(source, dict) and source.get("status"):
+            rows[key] = source
+            continue
+        lane = LANE_BY_KEY.get(key, "ARCHITECTURE")
+        status = "NOT_VERIFIED" if lane == "PRODUCTION_EVIDENCE" else default
+        if key in {"ARCHITECTURE_TESTS", "UNIT_TESTS", "GIT_DIFF_CHECK", "WORKTREE", "AUDIT", "MIGRATION", "VECTOR_INDEXING"}:
+            status = "NOT_VERIFIED"
+        rows[key] = {"status": status, "lane": lane}
     return rows
 
 
@@ -663,14 +745,32 @@ def run() -> dict:
     }
 
 
+def _lane_of(name: str, detail: dict | None = None) -> str:
+    if name in LANE_BY_KEY:
+        return LANE_BY_KEY[name]
+    if isinstance(detail, dict) and detail.get("lane"):
+        return str(detail["lane"])
+    if name in {"Research", "Real Creative E2E", "Real Social E2E", "Real Distribution E2E", "Lechuang", "Creative Credential", "Lechuang Auth", "Vision Provider", "XAI Video", "Video Generation", "Image-to-Video", "Image Generation", "Douyin", "Kuaishou", "Xianyu"}:
+        return "EXTERNAL"
+    if name in {"Persistence", "Creative Persistence", "Publication Persistence", "Credential"}:
+        return "CONFIGURATION"
+    return "ARCHITECTURE"
+
+
 def as_payload(checks: dict) -> dict:
     statuses = {key: value.get("status") if isinstance(value, dict) else value for key, value in checks.items()}
-    code_blocked = [name for name, status in statuses.items() if status not in {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED", "NOT_VERIFIED"}]
-    external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL"]
+    lanes = {key: _lane_of(key, value if isinstance(value, dict) else None) for key, value in checks.items()}
+    allowed = {"PASS", "HANDOFF_ONLY", "HANDOFF_READY", "NOT_APPLICABLE", "BLOCKED_EXTERNAL", "NOT_CONFIGURED", "SKIPPED", "NOT_VERIFIED"}
+    architecture_fail = [
+        name for name, status in statuses.items()
+        if lanes.get(name) == "ARCHITECTURE" and status not in allowed
+    ]
+    external = [name for name, status in statuses.items() if status == "BLOCKED_EXTERNAL" or lanes.get(name) == "EXTERNAL" and status == "BLOCKED_EXTERNAL"]
     return {
-        "ready": not code_blocked and not external,
-        "architecture_ready": not code_blocked,
+        "ready": not architecture_fail and not external,
+        "architecture_ready": not architecture_fail,
         "checks": statuses,
+        "lanes": lanes,
         "details": checks,
     }
 
@@ -686,18 +786,17 @@ def main(argv: list[str] | None = None) -> int:
     overall = "PASS" if payload["ready"] else ("BLOCKED_EXTERNAL" if payload["architecture_ready"] else "FAIL")
     print("MEITI DOCTOR")
     print("============")
+    print("LANES: ARCHITECTURE / CONFIGURATION / EXTERNAL / PRODUCTION_EVIDENCE")
     for name, status in payload["checks"].items():
-        print(f"{name}: {status}")
+        print(f"{name}: {status} [{payload['lanes'].get(name) or 'ARCHITECTURE'}]")
     print(f"Architecture: {architecture}")
     print(f"Overall: {overall}")
-    print("MEITI_V471_STATUS")
-    for key in V471_KEYS:
-        print(f"{key}={payload['checks'].get(key) or 'NOT_VERIFIED'}")
+    print("MEITI_V48_STATUS")
+    v48 = _v48_status(architecture, checks)
+    for key in V48_KEYS:
+        item = v48.get(key) or {}
+        print(f"{key}={item.get('status') or 'NOT_VERIFIED'}")
     print(f"DOCTOR_RUNTIME={payload['checks'].get('DOCTOR_RUNTIME') or architecture}")
-    print("TESTS=NOT_VERIFIED")
-    print("ARCHITECTURE_TESTS=NOT_VERIFIED")
-    print("GIT_DIFF_CHECK=NOT_VERIFIED")
-    print("WORKTREE=NOT_VERIFIED")
     write_e2e_audit(checks)
     print(json.dumps({
         "architecture": {"status": architecture},

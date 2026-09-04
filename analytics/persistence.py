@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -43,9 +42,6 @@ def persist_metrics(metrics: NormalizedMetrics) -> None:
         session.commit()
 
 
-SNAPSHOTS: list[dict[str, Any]] = []
-
-
 def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native") -> list[dict[str, Any]]:
     observed_at = datetime.now(timezone.utc).isoformat()
     created: list[dict[str, Any]] = []
@@ -67,10 +63,9 @@ def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native
             "value": value,
             "source": source,
             "publication_id": metrics.publication_id,
+            "durable": bool(durable_publication),
         }
-        SNAPSHOTS.append(snapshot)
         created.append(snapshot)
-        key = f"analytics-snapshot:{metrics.publication_id}:{name}:{observed_at}:{source}"
         if not durable_publication:
             continue
         try:
@@ -86,8 +81,6 @@ def persist_metric_snapshot(metrics: NormalizedMetrics, *, source: str = "native
                 ))
                 session.commit()
         except Exception as exc:
-            # Keep the append-only in-process result useful, but surface DB
-            # failure instead of silently claiming durable analytics.
             if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
                 continue
             raise

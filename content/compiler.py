@@ -11,6 +11,7 @@ from content.models import (
     AssetFreshnessError,
     ContentSeries,
     Episode,
+    MemoryWritebackError,
     PlatformCreativeDNA,
     PromptPackage,
     PromptPattern,
@@ -68,8 +69,6 @@ class PromptCompiler:
         scene = _scene_prompt(request=request, episode=episode, previous=previous, continuity=continuity, kind=kind, dna=dna)
         if previous_prompt is None and previous is not None and previous.prompt_id:
             previous_prompt = self.store.get_prompt(previous.prompt_id)
-        if previous_prompt and scene.strip() == (previous_prompt.scene_prompt or "").strip() and intent not in {"REUSE", "REPUBLISH"}:
-            scene = _novel_scene(scene, episode=episode, request=request, platform=platform)
         if previous_prompt and scene.strip() == (previous_prompt.scene_prompt or "").strip() and intent not in {"REUSE", "REPUBLISH"}:
             raise AssetFreshnessError("DUPLICATE_CONTENT", "scene prompt cannot copy the previous episode")
         patterns = self.store.list_prompt_patterns(platform=platform, account_id=account_id)
@@ -150,6 +149,8 @@ class PromptCompiler:
             recommended_duration=duration,
             learning_basis=learning_basis,
             prompt_patterns=pattern_ids,
+            parent_prompt_id=previous_prompt.prompt_id if previous_prompt else None,
+            version=(previous_prompt.version + 1) if previous_prompt else 1,
             lechuang_parameters={
                 "tool": "lechuang",
                 "mode": "manual",
@@ -159,9 +160,18 @@ class PromptCompiler:
                 "duration": duration,
             },
         )
+        if previous_prompt and intent not in {"REUSE", "REPUBLISH"}:
+            if package.copy_ready.strip() == (previous_prompt.copy_ready or "").strip():
+                raise AssetFreshnessError("DUPLICATE_CONTENT", "copy_ready prompt cannot copy the previous episode")
         saved = self.store.save_prompt(package)
         if episode is not None:
-            self.store.save_episode(Episode(**{**episode.__dict__, "prompt_id": saved.prompt_id, "updated_at": utcnow()}))
+            self.store.save_episode(Episode(**{
+                **episode.__dict__,
+                "prompt_id": saved.prompt_id,
+                "character_revision": character.version if character else episode.character_revision,
+                "world_revision": world.version if world else episode.world_revision,
+                "updated_at": utcnow(),
+            }))
         self._project(saved)
         return saved
 
@@ -182,8 +192,8 @@ class PromptCompiler:
                 tags=("PROMPT", package.kind, package.platform),
                 document_id=f"prompt-{package.prompt_id}",
             )
-        except Exception:
-            return
+        except Exception as exc:
+            raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
 
 
 def _kind_from_policy(policy: dict[str, Any], request: str, source_asset_id: str | None) -> str:
@@ -216,7 +226,8 @@ def _scene_prompt(*, request: str, episode: Episode | None, previous: Episode | 
         parts.append("This is a new moving scene, not yesterday's still.")
     else:
         parts.append("This is a new still for this episode, not a republish of an old image.")
-    return " ".join(part for part in parts if part).strip()
+    scene = " ".join(part for part in parts if part).strip()
+    return _novel_scene(scene, episode=episode, request=request, platform=dna.platform)
 
 
 def _novel_scene(scene: str, *, episode: Episode | None, request: str, platform: str) -> str:
@@ -233,7 +244,15 @@ def _learning_basis(learning: dict[str, Any], *, platform: str) -> tuple[str, ..
             if item_platform and item_platform not in {platform, "GLOBAL", ""}:
                 continue
             rows.append(str(text))
-    return tuple(rows[:12])
+    for item in learning.get("learning_records") or ():
+        if not isinstance(item, dict):
+            continue
+        if item.get("platform") and item.get("platform") not in {platform, "GLOBAL", ""}:
+            continue
+        reason = item.get("reason") or item.get("next_recommendation") or item.get("what_worked") or ""
+        if reason:
+            rows.append(str(reason))
+    return tuple(list(dict.fromkeys(rows))[:12])
 
 
 def _asset_id(item: Any) -> str:

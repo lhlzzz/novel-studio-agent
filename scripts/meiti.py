@@ -138,15 +138,15 @@ def cmd_oauth_callback(args: argparse.Namespace) -> int:
 
 def cmd_publish(args: argparse.Namespace) -> int:
     runtime = _runtime()
-    from content.models import ContentPackage
-    package = ContentPackage(
-        args.package_id or "cli-package",
-        args.title or "Meiti post",
-        args.body or "",
-        media_assets=tuple(args.media or ()),
-        commerce_intent=args.commerce_intent or "none",
-        metadata={"approval": "approved", "price": args.price, "category_id": args.category_id},
-    )
+    from content.runtime import ContinuityRuntime
+    if not args.package_id:
+        print(json.dumps({"status": "FAIL", "reason": "package_id is required; do not synthesize a ContentPackage"}))
+        return 1
+    continuity = ContinuityRuntime.production()
+    package = continuity.store.get_package(args.package_id)
+    if package is None:
+        print(json.dumps({"status": "FAIL", "reason": f"unknown content package: {args.package_id}"}))
+        return 1
     agent = runtime.agent()
     job = agent.create_job(package, platform=args.platform, job_id=args.job_id or "cli-job", account_id=args.account_id)
     result = agent.execute(job)
@@ -158,8 +158,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
             "handoff_id": getattr(handoff, "handoff_id", ""),
             "status": getattr(handoff, "status", ""),
             "platform": getattr(handoff, "platform", "xiaohongshu"),
+            "publication": False,
         }
+        if getattr(package, "account_id", None):
+            from content.runtime import ContinuityRuntime
+            ContinuityRuntime.production().record_handoff(package=package, handoff=handoff)
+            payload["continuity_recorded"] = True
         print("READY_FOR_XHS")
+        print("HANDOFF")
         print(json.dumps(payload))
         return 0
     if kind == "listing" or hasattr(result, "listing"):
@@ -184,14 +190,18 @@ def cmd_publish(args: argparse.Namespace) -> int:
         "provider_request_id": getattr(result, "provider_request_id", None),
         "provider_object_id": getattr(result, "provider_object_id", ""),
     }
-    try:
-        from content.runtime import ContinuityRuntime
-        continuity = ContinuityRuntime.production()
-        if getattr(package, "account_id", None):
+    from content.models import MemoryWritebackError
+    from content.runtime import ContinuityRuntime
+    continuity = ContinuityRuntime.production()
+    if getattr(package, "account_id", None):
+        try:
             continuity.record_publication(package=package, publication=publication)
             payload["continuity_recorded"] = True
-    except Exception:
-        payload["continuity_recorded"] = False
+        except MemoryWritebackError as exc:
+            payload["continuity_recorded"] = False
+            payload["code"] = exc.code
+            print(json.dumps(payload, default=str))
+            return 1
     print(json.dumps(payload))
     return 0
 
@@ -808,6 +818,148 @@ def cmd_creative_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_package_from_episode(args: argparse.Namespace) -> int:
+    from content.models import CreativeContext
+    from uuid import uuid4
+
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id)
+    if account is None:
+        print(json.dumps({"status": "FAIL", "reason": "unknown platform account"}))
+        return 1
+    episode = runtime.store.get_episode(args.episode_id, account_id=args.account_id)
+    if episode is None:
+        print(json.dumps({"status": "FAIL", "reason": "episode not found"}))
+        return 1
+    asset = runtime.store.get_media_asset(episode.primary_asset_id) if episode.primary_asset_id else None
+    if asset is None:
+        print(json.dumps({"status": "FAIL", "reason": "episode has no primary asset"}))
+        return 1
+    context = CreativeContext(
+        context_id=uuid4().hex,
+        account_id=account.account_id,
+        platform=account.platform,
+        character_id=account.character_id,
+        world_id=account.world_id,
+        series_id=episode.series_id,
+        episode_id=episode.episode_id,
+        user_request=episode.brief,
+        creative_request=episode.title,
+        normalized_prompt=episode.brief,
+    )
+    package = runtime.package_from_generation(
+        context=context,
+        assets=[asset],
+        title=args.title or episode.title,
+        body=args.body or episode.brief,
+        prompt_id=episode.prompt_id,
+        status="PACKAGE_READY",
+    )
+    _print_json({
+        "status": "PACKAGE_READY",
+        "package_id": package.package_id,
+        "episode_id": package.episode_id,
+        "primary_assets": list(package.primary_assets),
+        "prompt_id": package.prompt_id,
+    })
+    return 0
+
+
+def cmd_handoff(args: argparse.Namespace) -> int:
+    return cmd_publish(args)
+
+
+def cmd_analytics_record(args: argparse.Namespace) -> int:
+    from content.models import AnalyticsRecord
+    from uuid import uuid4
+
+    runtime = _continuity()
+    record = runtime.record_analytics(AnalyticsRecord(
+        analytics_id=uuid4().hex,
+        account_id=args.account_id,
+        platform=args.platform,
+        episode_id=args.episode_id,
+        package_id=args.package_id,
+        handoff_id=args.handoff_id,
+        publication_id=args.publication_id,
+        impressions=args.impressions,
+        likes=args.likes,
+        favorites=args.favorites,
+        comments=args.comments,
+        shares=args.shares,
+        followers_gained=args.followers,
+        published_at=args.published_at,
+        topic=args.topic or "",
+        cover=args.cover or "",
+        prompt_pattern=args.prompt_pattern or "",
+        source="manual",
+    ))
+    _print_json({"status": "ANALYTICS_IMPORTED", "analytics_id": record.analytics_id, "episode_id": record.episode_id})
+    return 0
+
+
+def cmd_learning_record(args: argparse.Namespace) -> int:
+    from content.models import LearningRecord, MemoryWritebackError
+    from uuid import uuid4
+
+    runtime = _continuity()
+    try:
+        record = runtime.record_learning(LearningRecord(
+            learning_id=uuid4().hex,
+            account_id=args.account_id,
+            platform=args.platform,
+            episode_id=args.episode_id,
+            analytics_id=args.analytics_id,
+            what_worked=args.what_worked or "",
+            what_failed=args.what_failed or "",
+            visual_learning=args.visual_learning or "",
+            content_learning=args.content_learning or "",
+            prompt_learning=args.prompt_learning or "",
+            audience_learning=args.audience_learning or "",
+            next_recommendation=args.next_recommendation or "",
+            reason=args.reason or "",
+            source_episode_ids=tuple(item for item in (args.episode_id,) if item),
+        ))
+    except MemoryWritebackError as exc:
+        print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}))
+        return 1
+    _print_json({"status": "LEARNING_WRITTEN", "learning_id": record.learning_id, "reason": record.reason})
+    return 0
+
+
+def cmd_production_show(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    evidence = runtime.store.list_evidence(account_id=account.account_id, episode_id=args.episode_id)
+    learning = runtime.store.list_learning(account_id=account.account_id, platform=account.platform)
+    _print_json({
+        "account_id": account.account_id,
+        "platform": account.platform,
+        "evidence": [{"kind": item.kind, "status": item.status, "episode_id": item.episode_id, "asset_id": item.asset_id} for item in evidence],
+        "learning": [{"learning_id": item.learning_id, "reason": item.reason, "next_recommendation": item.next_recommendation} for item in learning],
+        "real_day_1": any(item.kind == "DAY_001_REAL_ASSET_IMPORTED" for item in evidence),
+        "real_day_2": any(item.kind == "DAY_002_REAL_ASSET_IMPORTED" for item in evidence),
+        "real_day_3": any(item.kind == "DAY_003_REAL_ASSET_IMPORTED" for item in evidence),
+    })
+    return 0
+
+
+def cmd_sandbox_seed(_args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    seeded = runtime.seed_sandbox()
+    _print_json({
+        "xiaohongshu": _account_view(seeded["xiaohongshu"]),
+        "douyin": _account_view(seeded["douyin"]),
+        "shared_character": False,
+        "shared_world": False,
+        "shared_pool": False,
+    })
+    return 0
+
+
 def cmd_creative_lineage(args: argparse.Namespace) -> int:
     runtime = _continuity()
     account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
@@ -977,6 +1129,13 @@ def main() -> int:
     content = sub.add_parser("content")
     content_sub = content.add_subparsers(dest="command", required=True)
     content_sub.add_parser("calendar").set_defaults(func=cmd_content_calendar)
+    package_cmd = content_sub.add_parser("package")
+    package_cmd.add_argument("--account-id", required=True)
+    package_cmd.add_argument("--episode-id", required=True)
+    package_cmd.add_argument("--platform")
+    package_cmd.add_argument("--title")
+    package_cmd.add_argument("--body")
+    package_cmd.set_defaults(func=cmd_package_from_episode)
     social = sub.add_parser("social")
     social_sub = social.add_subparsers(dest="command", required=True)
     social_sub.add_parser("accounts").set_defaults(func=cmd_accounts)
@@ -1012,7 +1171,7 @@ def main() -> int:
     publish.add_argument("--platform", required=True)
     publish.add_argument("--body", default="")
     publish.add_argument("--title", default="")
-    publish.add_argument("--package-id")
+    publish.add_argument("--package-id", required=True)
     publish.add_argument("--job-id")
     publish.add_argument("--account-id")
     publish.add_argument("--media", nargs="*")
@@ -1020,7 +1179,59 @@ def main() -> int:
     publish.add_argument("--price")
     publish.add_argument("--category-id")
     publish.set_defaults(func=cmd_publish)
+    handoff = social_sub.add_parser("handoff")
+    handoff.add_argument("--platform", default="xiaohongshu")
+    handoff.add_argument("--package-id", required=True)
+    handoff.add_argument("--account-id")
+    handoff.add_argument("--job-id")
+    handoff.add_argument("--title", default="")
+    handoff.add_argument("--body", default="")
+    handoff.set_defaults(func=cmd_handoff)
     social_sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    analytics = sub.add_parser("analytics")
+    analytics_sub = analytics.add_subparsers(dest="command", required=True)
+    analytics_record = analytics_sub.add_parser("record")
+    analytics_record.add_argument("--account-id", required=True)
+    analytics_record.add_argument("--platform", required=True)
+    analytics_record.add_argument("--episode-id")
+    analytics_record.add_argument("--package-id")
+    analytics_record.add_argument("--handoff-id")
+    analytics_record.add_argument("--publication-id")
+    analytics_record.add_argument("--impressions", type=int)
+    analytics_record.add_argument("--likes", type=int)
+    analytics_record.add_argument("--favorites", type=int)
+    analytics_record.add_argument("--comments", type=int)
+    analytics_record.add_argument("--shares", type=int)
+    analytics_record.add_argument("--followers", type=int)
+    analytics_record.add_argument("--published-at")
+    analytics_record.add_argument("--topic")
+    analytics_record.add_argument("--cover")
+    analytics_record.add_argument("--prompt-pattern")
+    analytics_record.set_defaults(func=cmd_analytics_record)
+    learning = sub.add_parser("learning")
+    learning_sub = learning.add_subparsers(dest="command", required=True)
+    learning_record = learning_sub.add_parser("record")
+    learning_record.add_argument("--account-id", required=True)
+    learning_record.add_argument("--platform", required=True)
+    learning_record.add_argument("--episode-id")
+    learning_record.add_argument("--analytics-id")
+    learning_record.add_argument("--what-worked")
+    learning_record.add_argument("--what-failed")
+    learning_record.add_argument("--visual-learning")
+    learning_record.add_argument("--content-learning")
+    learning_record.add_argument("--prompt-learning")
+    learning_record.add_argument("--audience-learning")
+    learning_record.add_argument("--next-recommendation")
+    learning_record.add_argument("--reason")
+    learning_record.set_defaults(func=cmd_learning_record)
+    production = sub.add_parser("production")
+    production_sub = production.add_subparsers(dest="command", required=True)
+    production_sub.add_parser("seed").set_defaults(func=cmd_sandbox_seed)
+    production_show = production_sub.add_parser("show")
+    production_show.add_argument("--account-id")
+    production_show.add_argument("--platform")
+    production_show.add_argument("--episode-id")
+    production_show.set_defaults(func=cmd_production_show)
     args = parser.parse_args()
     return args.func(args)
 

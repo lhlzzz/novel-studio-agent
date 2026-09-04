@@ -1212,13 +1212,16 @@ class EpisodeRecord(Base):
     content_package_id = Column(String(255))
     primary_asset_id = Column(String(255))
     prompt_id = Column(String(255))
+    character_revision = Column(Integer)
+    world_revision = Column(Integer)
+    production_run_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         UniqueConstraint("series_id", "episode_no", name="uq_meiti_episode_no"),
         CheckConstraint(
-            "content_status IN ('IDEA','BRIEFED','GENERATING','GENERATED','QA_PASSED','DRAFT','APPROVED','READY_TO_PUBLISH','PUBLISHED','FAILED','ARCHIVED')",
+            "content_status IN ('IDEA','BRIEFED','DRAFT','PROMPT_READY','AWAITING_CREATIVE','GENERATING','GENERATED','IMPORTED','QA_PASSED','QA_FAILED','PACKAGE_READY','HANDOFF_READY','READY_TO_PUBLISH','APPROVED','PUBLISHED','ANALYTICS_PENDING','LEARNED','FAILED','REJECTED','ARCHIVED')",
             name="ck_meiti_episode_status",
         ),
         Index("idx_meiti_episodes_series", "series_id"),
@@ -1566,6 +1569,9 @@ class PromptPackageRecord(Base):
     learning_basis = Column(JSONType, nullable=False, default=list)
     prompt_patterns = Column(JSONType, nullable=False, default=list)
     lechuang_parameters = Column(JSONType, nullable=False, default=dict)
+    prompt_hash = Column(String(64), nullable=False, default="")
+    version = Column(Integer, nullable=False, default=1)
+    parent_prompt_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -1588,6 +1594,8 @@ class PromptPatternRecord(Base):
     confidence = Column(Numeric(18, 6), nullable=False, default=0)
     source_episode_ids = Column(JSONType, nullable=False, default=list)
     global_pattern = Column(Boolean, nullable=False, default=False)
+    promotion_status = Column(String(40), nullable=False, default="PLATFORM")
+    sample_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1635,5 +1643,219 @@ class ContentPackageAssetRecord(Base):
         UniqueConstraint("package_id", "asset_id", "role", name="uq_meiti_package_asset_role"),
         Index("idx_meiti_content_package_assets_package", "package_id"),
         Index("idx_meiti_content_package_assets_asset", "asset_id"),
+    )
+
+
+class ProductionRunRecord(Base):
+    __tablename__ = "production_runs"
+
+    run_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    episode_id = Column(String(255))
+    prompt_id = Column(String(255))
+    asset_id = Column(String(255))
+    package_id = Column(String(255))
+    handoff_id = Column(String(255))
+    publication_id = Column(String(255))
+    analytics_id = Column(String(255))
+    learning_id = Column(String(255))
+    status = Column(String(40), nullable=False, default="OPEN")
+    request = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_production_runs_account", "account_id"),
+        Index("idx_meiti_production_runs_episode", "episode_id"),
+    )
+
+
+class ProductionEvidenceRecord(Base):
+    __tablename__ = "production_evidence"
+
+    evidence_id = Column(String(255), primary_key=True)
+    kind = Column(String(80), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    status = Column(String(40), nullable=False, default="PASS")
+    episode_id = Column(String(255))
+    prompt_id = Column(String(255))
+    asset_id = Column(String(255))
+    package_id = Column(String(255))
+    handoff_id = Column(String(255))
+    publication_id = Column(String(255))
+    analytics_id = Column(String(255))
+    learning_id = Column(String(255))
+    production_run_id = Column(String(255))
+    source = Column(String(40), nullable=False, default="operator")
+    detail = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_production_evidence_account", "account_id"),
+        Index("idx_meiti_production_evidence_episode", "episode_id"),
+        Index("idx_meiti_production_evidence_kind", "kind"),
+    )
+
+
+class AnalyticsRecordRow(Base):
+    __tablename__ = "analytics_records"
+
+    analytics_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    episode_id = Column(String(255))
+    package_id = Column(String(255))
+    handoff_id = Column(String(255))
+    publication_id = Column(String(255))
+    impressions = Column(Integer)
+    likes = Column(Integer)
+    favorites = Column(Integer)
+    comments = Column(Integer)
+    shares = Column(Integer)
+    followers_gained = Column(Integer)
+    published_at = Column(String(80))
+    topic = Column(Text, nullable=False, default="")
+    cover = Column(Text, nullable=False, default="")
+    prompt_pattern = Column(Text, nullable=False, default="")
+    source = Column(String(40), nullable=False, default="manual")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_analytics_records_account", "account_id"),
+        Index("idx_meiti_analytics_records_episode", "episode_id"),
+    )
+
+
+class LearningRecordRow(Base):
+    __tablename__ = "learning_records"
+
+    learning_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    episode_id = Column(String(255))
+    analytics_id = Column(String(255))
+    pattern_ids = Column(JSONType, nullable=False, default=list)
+    what_worked = Column(Text, nullable=False, default="")
+    what_failed = Column(Text, nullable=False, default="")
+    visual_learning = Column(Text, nullable=False, default="")
+    content_learning = Column(Text, nullable=False, default="")
+    prompt_learning = Column(Text, nullable=False, default="")
+    audience_learning = Column(Text, nullable=False, default="")
+    next_recommendation = Column(Text, nullable=False, default="")
+    reason = Column(Text, nullable=False, default="")
+    source_episode_ids = Column(JSONType, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_learning_records_account", "account_id"),
+        Index("idx_meiti_learning_records_platform", "platform"),
+    )
+
+
+class CreativeExecutionReceiptRecord(Base):
+    __tablename__ = "creative_execution_receipts"
+
+    receipt_id = Column(String(255), primary_key=True)
+    asset_id = Column(String(255), nullable=False)
+    prompt_id = Column(String(255))
+    tool = Column(String(80), nullable=False, default="lechuang")
+    model = Column(String(120), nullable=False, default="UNKNOWN")
+    generated_at = Column(DateTime)
+    operator = Column(String(120), nullable=False, default="operator")
+    source_asset_id = Column(String(255))
+    generation_mode = Column(String(80), nullable=False, default="MANUAL_CREATIVE_TOOL")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_creative_receipts_asset", "asset_id"),
+        Index("idx_meiti_creative_receipts_prompt", "prompt_id"),
+    )
+
+
+class CharacterRevisionRecord(Base):
+    __tablename__ = "character_revisions"
+
+    revision_id = Column(String(255), primary_key=True)
+    character_id = Column(String(255), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    snapshot = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("character_id", "version", name="uq_meiti_character_revision"),
+        Index("idx_meiti_character_revisions_character", "character_id"),
+    )
+
+
+class WorldRevisionRecord(Base):
+    __tablename__ = "world_revisions"
+
+    revision_id = Column(String(255), primary_key=True)
+    world_id = Column(String(255), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    snapshot = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("world_id", "version", name="uq_meiti_world_revision"),
+        Index("idx_meiti_world_revisions_world", "world_id"),
+    )
+
+
+class AssetReferenceSnapshotRecord(Base):
+    __tablename__ = "asset_reference_snapshots"
+
+    snapshot_id = Column(String(255), primary_key=True)
+    prompt_id = Column(String(255), nullable=False)
+    asset_id = Column(String(255), nullable=False)
+    role = Column(String(40), nullable=False, default="SCENE_REFERENCE")
+    reason = Column(Text, nullable=False, default="")
+    prompt_influence = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_asset_reference_snapshots_prompt", "prompt_id"),
+    )
+
+
+class PatternPromotionRecord(Base):
+    __tablename__ = "pattern_promotions"
+
+    promotion_id = Column(String(255), primary_key=True)
+    pattern_id = Column(String(255), nullable=False)
+    platform = Column(String(120), nullable=False)
+    status = Column(String(40), nullable=False, default="PLATFORM")
+    sample_count = Column(Integer, nullable=False, default=0)
+    cross_platform_evidence = Column(JSONType, nullable=False, default=list)
+    confidence = Column(Numeric(18, 6), nullable=False, default=0)
+    reason = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_pattern_promotions_pattern", "pattern_id"),
+        Index("idx_meiti_pattern_promotions_platform", "platform"),
+    )
+
+
+class LifecycleTransitionRecord(Base):
+    __tablename__ = "lifecycle_transitions"
+
+    transition_id = Column(String(255), primary_key=True)
+    episode_id = Column(String(255), nullable=False)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    from_status = Column(String(40), nullable=False)
+    to_status = Column(String(40), nullable=False)
+    owner = Column(String(80), nullable=False)
+    evidence_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_lifecycle_transitions_episode", "episode_id"),
+        Index("idx_meiti_lifecycle_transitions_account", "account_id"),
     )
 

@@ -14,6 +14,7 @@ from content.models import (
     AssetLineage,
     ContentPackage,
     ContentPackageAsset,
+    CreativeExecutionReceipt,
     CrossPlatformAssetReuse,
     Episode,
     ExistingAssetError,
@@ -22,6 +23,7 @@ from content.models import (
     PACKAGE_ASSET_ROLES,
     PRIMARY_ASSET_ROLES,
     PlatformAssetPool,
+    ProductionEvidence,
     REUSE_INTENTS,
     utcnow,
 )
@@ -159,7 +161,7 @@ class ReferenceAssetResolver:
                 account_id=account_id,
                 platform=platform,
                 allow_global=True,
-                allow_cross_platform_reference=True,
+                allow_cross_platform_reference=False,
             )
             if previous is not None:
                 refs.append(previous)
@@ -184,10 +186,11 @@ class ReferenceAssetResolver:
             return asset
         if allow_global and (asset.scope_type or "").upper() == "GLOBAL":
             return asset
-        if allow_cross_platform_reference and asset.account_id and asset.account_id != account_id:
-            return replace(asset, asset_role="CHARACTER_REFERENCE") if (asset.asset_role or "").upper() in PRIMARY_ASSET_ROLES or not asset.asset_role else asset
         if allow_cross_platform_reference and asset.platform and asset.platform != platform:
-            return replace(asset, asset_role="CHARACTER_REFERENCE") if (asset.asset_role or "").upper() in PRIMARY_ASSET_ROLES else asset
+            role = (asset.asset_role or "").upper()
+            if role in PRIMARY_ASSET_ROLES or not role:
+                return replace(asset, asset_role="CHARACTER_REFERENCE")
+            return asset
         return None
 
 
@@ -324,8 +327,38 @@ class PlatformAssetService:
         saved = self._persist_asset(asset)
         qa = self.qa.inspect_video(saved) if saved.type == "video" else self.qa.inspect_image(saved)
         lifecycle = "QA_PASSED" if qa.get("decision") == "pass" else "QA_FAILED"
-        saved = replace(saved, lifecycle=lifecycle)
+        measured = {
+            "lifecycle": lifecycle,
+            "width": qa.get("width") if qa.get("width") else saved.width,
+            "height": qa.get("height") if qa.get("height") else saved.height,
+            "mime_type": qa.get("mime") or saved.mime_type,
+            "size": int(qa.get("filesize") or saved.size or 0),
+            "duration": qa.get("duration") if qa.get("duration") is not None else saved.duration,
+            "fps": qa.get("fps") if qa.get("fps") is not None else saved.fps,
+        }
+        saved = replace(saved, **measured)
         saved = self._persist_asset(saved)
+        self.store.save_receipt(CreativeExecutionReceipt(
+            receipt_id=uuid4().hex,
+            asset_id=saved.asset_id,
+            prompt_id=prompt_id,
+            tool=tool or "lechuang",
+            model=model or "UNKNOWN",
+            operator="operator",
+            source_asset_id=source_asset_id or parent,
+            generation_mode=generation_mode,
+        ))
+        self.store.save_evidence(ProductionEvidence(
+            evidence_id=uuid4().hex,
+            kind=f"DAY_{episode.episode_no:03d}_REAL_ASSET_IMPORTED",
+            account_id=account_id,
+            platform=platform,
+            episode_id=episode.episode_id,
+            prompt_id=prompt_id,
+            asset_id=saved.asset_id,
+            source="lechuang",
+            detail={"sha256": saved.sha256, "qa": qa.get("decision"), "width": saved.width, "height": saved.height},
+        ))
         origin_platform = ""
         origin_episode_id = None
         if parent:
@@ -380,16 +413,19 @@ class PlatformAssetService:
         if role not in PACKAGE_ASSET_ROLES:
             raise ValueError(f"invalid package asset role: {role}")
         if role == "PRIMARY":
-            if (asset.asset_role or "").upper() in REFERENCE_ROLES:
+            asset_role = str(getattr(asset, "asset_role", "") or "").upper()
+            asset_platform = getattr(asset, "platform", "") or ""
+            asset_account = getattr(asset, "account_id", None)
+            if asset_role in REFERENCE_ROLES:
                 raise AssetFreshnessError("REFERENCE_AS_PRIMARY", "reference asset cannot enter primary_assets")
-            if asset.platform and package.platform and asset.platform != package.platform:
+            if asset_platform and package.platform and asset_platform != package.platform:
                 raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
-            if asset.account_id and package.account_id and asset.account_id != package.account_id:
+            if asset_account and package.account_id and asset_account != package.account_id:
                 raise IsolationError("package primary asset must match account")
         mapping = ContentPackageAsset(
             mapping_id=uuid4().hex,
             package_id=package.package_id,
-            asset_id=asset.asset_id,
+            asset_id=str(getattr(asset, "asset_id", "") or ""),
             role=role,
             selected=selected,
         )
@@ -424,8 +460,5 @@ def _load_asset(asset_id: str | None, store: ContinuityStore | None = None) -> M
         asset = store.get_media_asset(asset_id)
         if asset is not None:
             return asset
-    try:
-        from creative.store import CreativeStore
-        return CreativeStore().get_asset(asset_id)
-    except Exception:
-        return None
+    from creative.store import CreativeStore
+    return CreativeStore().get_asset(asset_id)

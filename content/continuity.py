@@ -189,8 +189,11 @@ class ContinuityEngine:
                 "episode_id": filters.get("episode_id"),
             })
             return list(retrieved.get("continuity") or retrieved.get("documents") or [])
-        except Exception:
+        except IsolationError:
             return []
+        except Exception as exc:
+            from content.models import MemoryWritebackError
+            raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
 
     def build_creative_context(
         self,

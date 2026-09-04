@@ -76,6 +76,17 @@ def persist_bytes(
     if not dest.exists():
         dest.write_bytes(data)
     mime = mime_type or (mimetypes.guess_type(dest.name)[0] or "application/octet-stream")
+    if asset_type == "image" and (width is None or height is None):
+        try:
+            from PIL import Image
+            from io import BytesIO
+            with Image.open(BytesIO(data)) as image:
+                width, height = image.size
+                fmt = (image.format or "").lower()
+                if not mime_type and fmt:
+                    mime = f"image/{fmt}" if fmt != "jpeg" else "image/jpeg"
+        except Exception:
+            pass
     return MediaAsset(
         asset_id=digest,
         type=asset_type,

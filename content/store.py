@@ -15,24 +15,35 @@ from sqlalchemy.pool import StaticPool
 from content.models import (
     ACCOUNT_PLATFORMS,
     AccountWorld,
+    AnalyticsRecord,
     AssetLineage,
+    AssetReferenceSnapshot,
+    CharacterRevision,
     ContentPackage,
     ContentPackageAsset,
     ContentRevision,
     ContentSeries,
     ContinuityMemory,
     CreativeContext,
+    CreativeExecutionReceipt,
     Episode,
     EpisodeConflict,
+    ExistingAssetError,
     IsolationError,
+    LearningRecord,
+    LifecycleTransition,
+    PatternPromotion,
     PerformanceFeedback,
     PlatformAccount,
     PlatformAssetPool,
     PlatformCreativeDNA,
     PlatformLearningProfile,
+    ProductionEvidence,
+    ProductionRun,
     PromptPackage,
     PromptPattern,
     VirtualCharacter,
+    WorldRevision,
     utcnow,
 )
 
@@ -62,6 +73,16 @@ CONTINUITY_TABLE_NAMES = (
     "content_package_assets",
     "media_assets",
     "content_packages",
+    "production_runs",
+    "production_evidence",
+    "analytics_records",
+    "learning_records",
+    "creative_execution_receipts",
+    "character_revisions",
+    "world_revisions",
+    "asset_reference_snapshots",
+    "pattern_promotions",
+    "lifecycle_transitions",
 )
 
 
@@ -465,6 +486,9 @@ class ContinuityStore:
             "content_package_id": episode.content_package_id,
             "primary_asset_id": episode.primary_asset_id,
             "prompt_id": episode.prompt_id,
+            "character_revision": episode.character_revision,
+            "world_revision": episode.world_revision,
+            "production_run_id": episode.production_run_id,
             "updated_at": _now(),
         })
         return episode
@@ -743,6 +767,9 @@ class ContinuityStore:
                 content_package_id=episode.content_package_id,
                 primary_asset_id=episode.primary_asset_id,
                 prompt_id=episode.prompt_id,
+                character_revision=episode.character_revision,
+                world_revision=episode.world_revision,
+                production_run_id=episode.production_run_id,
                 created_at=now,
                 updated_at=now,
             ))
@@ -940,6 +967,9 @@ class ContinuityStore:
             "learning_basis": list(package.learning_basis),
             "prompt_patterns": list(package.prompt_patterns),
             "lechuang_parameters": dict(package.lechuang_parameters),
+            "prompt_hash": package.prompt_hash,
+            "version": int(package.version or 1),
+            "parent_prompt_id": package.parent_prompt_id,
         })
         return package
 
@@ -965,6 +995,8 @@ class ContinuityStore:
             "confidence": pattern.confidence,
             "source_episode_ids": list(pattern.source_episode_ids),
             "global_pattern": bool(pattern.global_pattern),
+            "promotion_status": pattern.promotion_status or "PLATFORM",
+            "sample_count": int(pattern.sample_count or 0),
             "updated_at": _now(),
         })
         return pattern
@@ -1081,10 +1113,20 @@ class ContinuityStore:
                 session.add(MediaAssetRecord(asset_id=asset.asset_id, **payload))
                 session.commit()
                 return asset
-            for key, value in payload.items():
-                setattr(existing, key, value)
+            from creative.store import _asset_from_row
+            if existing.sha256 != asset.sha256:
+                raise ExistingAssetError("EXISTING_ASSET", f"EXISTING_ASSET sha256={existing.sha256} asset_id={existing.asset_id}")
+            if existing.asset_id != asset.asset_id:
+                raise ExistingAssetError("EXISTING_ASSET", f"EXISTING_ASSET sha256={existing.sha256} asset_id={existing.asset_id}")
+            for key in (
+                "lifecycle", "asset_role", "prompt_id", "content_package_id",
+                "technical_score", "visual_score", "content_score", "platform_score", "overall_score",
+                "width", "height", "duration", "fps", "mime_type", "size",
+            ):
+                if payload.get(key) not in {None, ""}:
+                    setattr(existing, key, payload[key])
             session.commit()
-            return asset
+            return _asset_from_row(existing)
 
     def get_asset_by_sha256(self, sha256: str):
         from scripts.db.models import MediaAssetRecord
@@ -1145,6 +1187,221 @@ class ContinuityStore:
                 continue
             owned.append(asset)
         return owned
+
+    def get_package(self, package_id: str) -> ContentPackage | None:
+        from scripts.db.models import ContentPackageRecord
+        from sqlalchemy import inspect as sa_inspect
+
+        if "content_packages" not in sa_inspect(self.engine).get_table_names():
+            return None
+        with self._session() as session:
+            row = session.get(ContentPackageRecord, package_id)
+            return _content_package_from_row(row) if row else None
+
+    def save_production_run(self, run: ProductionRun) -> ProductionRun:
+        from scripts.db.models import ProductionRunRecord
+
+        self._require_account(run.account_id)
+        self._upsert(ProductionRunRecord, "run_id", run.run_id, {
+            "account_id": run.account_id,
+            "platform": run.platform,
+            "episode_id": run.episode_id,
+            "prompt_id": run.prompt_id,
+            "asset_id": run.asset_id,
+            "package_id": run.package_id,
+            "handoff_id": run.handoff_id,
+            "publication_id": run.publication_id,
+            "analytics_id": run.analytics_id,
+            "learning_id": run.learning_id,
+            "status": run.status,
+            "request": run.request,
+            "updated_at": _now(),
+        })
+        return run
+
+    def get_production_run(self, run_id: str) -> ProductionRun | None:
+        from scripts.db.models import ProductionRunRecord
+
+        with self._session() as session:
+            row = session.get(ProductionRunRecord, run_id)
+            return _production_run_from_row(row) if row else None
+
+    def save_evidence(self, evidence: ProductionEvidence) -> ProductionEvidence:
+        from scripts.db.models import ProductionEvidenceRecord
+
+        self._require_account(evidence.account_id)
+        self._upsert(ProductionEvidenceRecord, "evidence_id", evidence.evidence_id, {
+            "kind": evidence.kind,
+            "account_id": evidence.account_id,
+            "platform": evidence.platform,
+            "status": evidence.status,
+            "episode_id": evidence.episode_id,
+            "prompt_id": evidence.prompt_id,
+            "asset_id": evidence.asset_id,
+            "package_id": evidence.package_id,
+            "handoff_id": evidence.handoff_id,
+            "publication_id": evidence.publication_id,
+            "analytics_id": evidence.analytics_id,
+            "learning_id": evidence.learning_id,
+            "production_run_id": evidence.production_run_id,
+            "source": evidence.source,
+            "detail": dict(evidence.detail),
+        })
+        return evidence
+
+    def list_evidence(self, *, account_id: str, episode_id: str | None = None, kind: str | None = None) -> list[ProductionEvidence]:
+        from scripts.db.models import ProductionEvidenceRecord
+
+        with self._session() as session:
+            stmt = select(ProductionEvidenceRecord).where(ProductionEvidenceRecord.account_id == account_id)
+            if episode_id:
+                stmt = stmt.where(ProductionEvidenceRecord.episode_id == episode_id)
+            if kind:
+                stmt = stmt.where(ProductionEvidenceRecord.kind == kind)
+            return [_evidence_from_row(row) for row in session.execute(stmt).scalars()]
+
+    def save_analytics(self, record: AnalyticsRecord) -> AnalyticsRecord:
+        from scripts.db.models import AnalyticsRecordRow
+
+        self._require_account(record.account_id)
+        self._upsert(AnalyticsRecordRow, "analytics_id", record.analytics_id, {
+            "account_id": record.account_id,
+            "platform": record.platform,
+            "episode_id": record.episode_id,
+            "package_id": record.package_id,
+            "handoff_id": record.handoff_id,
+            "publication_id": record.publication_id,
+            "impressions": record.impressions,
+            "likes": record.likes,
+            "favorites": record.favorites,
+            "comments": record.comments,
+            "shares": record.shares,
+            "followers_gained": record.followers_gained,
+            "published_at": record.published_at,
+            "topic": record.topic,
+            "cover": record.cover,
+            "prompt_pattern": record.prompt_pattern,
+            "source": record.source,
+        })
+        return record
+
+    def get_analytics(self, analytics_id: str) -> AnalyticsRecord | None:
+        from scripts.db.models import AnalyticsRecordRow
+
+        with self._session() as session:
+            row = session.get(AnalyticsRecordRow, analytics_id)
+            return _analytics_from_row(row) if row else None
+
+    def save_learning(self, record: LearningRecord) -> LearningRecord:
+        from scripts.db.models import LearningRecordRow
+
+        self._require_account(record.account_id)
+        self._upsert(LearningRecordRow, "learning_id", record.learning_id, {
+            "account_id": record.account_id,
+            "platform": record.platform,
+            "episode_id": record.episode_id,
+            "analytics_id": record.analytics_id,
+            "pattern_ids": list(record.pattern_ids),
+            "what_worked": record.what_worked,
+            "what_failed": record.what_failed,
+            "visual_learning": record.visual_learning,
+            "content_learning": record.content_learning,
+            "prompt_learning": record.prompt_learning,
+            "audience_learning": record.audience_learning,
+            "next_recommendation": record.next_recommendation,
+            "reason": record.reason,
+            "source_episode_ids": list(record.source_episode_ids),
+        })
+        return record
+
+    def list_learning(self, *, account_id: str, platform: str | None = None) -> list[LearningRecord]:
+        from scripts.db.models import LearningRecordRow
+
+        with self._session() as session:
+            stmt = select(LearningRecordRow).where(LearningRecordRow.account_id == account_id)
+            if platform:
+                stmt = stmt.where((LearningRecordRow.platform == platform) | (LearningRecordRow.platform == "GLOBAL"))
+            return [_learning_record_from_row(row) for row in session.execute(stmt).scalars()]
+
+    def save_receipt(self, receipt: CreativeExecutionReceipt) -> CreativeExecutionReceipt:
+        from scripts.db.models import CreativeExecutionReceiptRecord
+
+        self._upsert(CreativeExecutionReceiptRecord, "receipt_id", receipt.receipt_id, {
+            "asset_id": receipt.asset_id,
+            "prompt_id": receipt.prompt_id,
+            "tool": receipt.tool,
+            "model": receipt.model or "UNKNOWN",
+            "generated_at": _parse_dt(receipt.generated_at),
+            "operator": receipt.operator,
+            "source_asset_id": receipt.source_asset_id,
+            "generation_mode": receipt.generation_mode,
+        })
+        return receipt
+
+    def save_character_revision(self, revision: CharacterRevision) -> CharacterRevision:
+        from scripts.db.models import CharacterRevisionRecord
+
+        self._require_account(revision.account_id)
+        self._upsert(CharacterRevisionRecord, "revision_id", revision.revision_id, {
+            "character_id": revision.character_id,
+            "account_id": revision.account_id,
+            "version": revision.version,
+            "snapshot": dict(revision.snapshot),
+        })
+        return revision
+
+    def save_world_revision(self, revision: WorldRevision) -> WorldRevision:
+        from scripts.db.models import WorldRevisionRecord
+
+        self._require_account(revision.account_id)
+        self._upsert(WorldRevisionRecord, "revision_id", revision.revision_id, {
+            "world_id": revision.world_id,
+            "account_id": revision.account_id,
+            "version": revision.version,
+            "snapshot": dict(revision.snapshot),
+        })
+        return revision
+
+    def save_reference_snapshot(self, snapshot: AssetReferenceSnapshot) -> AssetReferenceSnapshot:
+        from scripts.db.models import AssetReferenceSnapshotRecord
+
+        self._upsert(AssetReferenceSnapshotRecord, "snapshot_id", snapshot.snapshot_id, {
+            "prompt_id": snapshot.prompt_id,
+            "asset_id": snapshot.asset_id,
+            "role": snapshot.role,
+            "reason": snapshot.reason,
+            "prompt_influence": snapshot.prompt_influence,
+        })
+        return snapshot
+
+    def save_pattern_promotion(self, promotion: PatternPromotion) -> PatternPromotion:
+        from scripts.db.models import PatternPromotionRecord
+
+        self._upsert(PatternPromotionRecord, "promotion_id", promotion.promotion_id, {
+            "pattern_id": promotion.pattern_id,
+            "platform": promotion.platform,
+            "status": promotion.status,
+            "sample_count": promotion.sample_count,
+            "cross_platform_evidence": list(promotion.cross_platform_evidence),
+            "confidence": promotion.confidence,
+            "reason": promotion.reason,
+            "updated_at": _now(),
+        })
+        return promotion
+
+    def save_lifecycle(self, transition: LifecycleTransition) -> LifecycleTransition:
+        from scripts.db.models import LifecycleTransitionRecord
+
+        self._require_account(transition.account_id)
+        self._upsert(LifecycleTransitionRecord, "transition_id", transition.transition_id, {
+            "episode_id": transition.episode_id,
+            "account_id": transition.account_id,
+            "from_status": transition.from_status,
+            "to_status": transition.to_status,
+            "owner": transition.owner,
+            "evidence_id": transition.evidence_id,
+        })
+        return transition
 
     def _require_account(self, account_id: str) -> PlatformAccount:
         account = self.get_account(account_id)
@@ -1283,6 +1540,9 @@ def _episode_from_row(row) -> Episode:
         content_package_id=row.content_package_id,
         primary_asset_id=getattr(row, "primary_asset_id", None),
         prompt_id=getattr(row, "prompt_id", None),
+        character_revision=getattr(row, "character_revision", None),
+        world_revision=getattr(row, "world_revision", None),
+        production_run_id=getattr(row, "production_run_id", None),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )
@@ -1494,6 +1754,9 @@ def _prompt_from_row(row) -> PromptPackage:
         learning_basis=_tuple(row.learning_basis),
         prompt_patterns=_tuple(row.prompt_patterns),
         lechuang_parameters=_json(row.lechuang_parameters, {}),
+        prompt_hash=getattr(row, "prompt_hash", "") or "",
+        version=int(getattr(row, "version", 1) or 1),
+        parent_prompt_id=getattr(row, "parent_prompt_id", None),
         created_at=_iso(row.created_at),
     )
 
@@ -1510,6 +1773,8 @@ def _pattern_from_row(row) -> PromptPattern:
         confidence=float(row.confidence or 0),
         source_episode_ids=_tuple(row.source_episode_ids),
         global_pattern=bool(row.global_pattern),
+        promotion_status=getattr(row, "promotion_status", None) or "PLATFORM",
+        sample_count=int(getattr(row, "sample_count", 0) or 0),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )
@@ -1540,5 +1805,130 @@ def _package_asset_from_row(row) -> ContentPackageAsset:
         asset_id=row.asset_id,
         role=row.role or "PRIMARY",
         selected=bool(row.selected),
+        created_at=_iso(row.created_at),
+    )
+
+
+def _content_package_from_row(row) -> ContentPackage:
+    return ContentPackage(
+        package_id=row.package_id,
+        title=row.title or "",
+        body=row.body or "",
+        evidence_ids=_tuple(row.evidence_ids),
+        brand_id=row.brand_id,
+        creator_id=row.creator_id,
+        campaign_id=row.campaign_id,
+        topic=row.topic or "",
+        content_pillar=row.content_pillar or "",
+        hook=row.hook or "",
+        format=row.format or "post",
+        audience=row.audience or "",
+        caption=row.caption or "",
+        media_assets=_tuple(row.media_assets),
+        commerce_intent=row.commerce_intent or "none",
+        variants=_tuple(row.variants),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+        metadata=_json(getattr(row, "metadata_json", None) or getattr(row, "metadata", None), {}),
+        account_id=row.account_id,
+        series_id=row.series_id,
+        episode_id=row.episode_id,
+        platform=row.platform or "",
+        status=row.status or "DRAFT",
+        character_id=row.character_id,
+        world_id=row.world_id,
+        creative_context_id=row.creative_context_id,
+        revision=int(row.revision or 1),
+        current_revision=row.current_revision,
+        reference_assets=_tuple(getattr(row, "reference_assets", None)),
+        primary_assets=_tuple(getattr(row, "primary_assets", None)),
+        published_assets=_tuple(getattr(row, "published_assets", None)),
+        prompt_id=getattr(row, "prompt_id", None),
+    )
+
+
+def _production_run_from_row(row) -> ProductionRun:
+    return ProductionRun(
+        run_id=row.run_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        episode_id=row.episode_id,
+        prompt_id=row.prompt_id,
+        asset_id=row.asset_id,
+        package_id=row.package_id,
+        handoff_id=row.handoff_id,
+        publication_id=row.publication_id,
+        analytics_id=row.analytics_id,
+        learning_id=row.learning_id,
+        status=row.status or "OPEN",
+        request=row.request or "",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _evidence_from_row(row) -> ProductionEvidence:
+    return ProductionEvidence(
+        evidence_id=row.evidence_id,
+        kind=row.kind,
+        account_id=row.account_id,
+        platform=row.platform,
+        status=row.status or "PASS",
+        episode_id=row.episode_id,
+        prompt_id=row.prompt_id,
+        asset_id=row.asset_id,
+        package_id=row.package_id,
+        handoff_id=row.handoff_id,
+        publication_id=row.publication_id,
+        analytics_id=row.analytics_id,
+        learning_id=row.learning_id,
+        production_run_id=row.production_run_id,
+        source=row.source or "operator",
+        detail=_json(row.detail, {}),
+        created_at=_iso(row.created_at),
+    )
+
+
+def _analytics_from_row(row) -> AnalyticsRecord:
+    return AnalyticsRecord(
+        analytics_id=row.analytics_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        episode_id=row.episode_id,
+        package_id=row.package_id,
+        handoff_id=row.handoff_id,
+        publication_id=row.publication_id,
+        impressions=row.impressions,
+        likes=row.likes,
+        favorites=row.favorites,
+        comments=row.comments,
+        shares=row.shares,
+        followers_gained=row.followers_gained,
+        published_at=row.published_at,
+        topic=row.topic or "",
+        cover=row.cover or "",
+        prompt_pattern=row.prompt_pattern or "",
+        source=row.source or "manual",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _learning_record_from_row(row) -> LearningRecord:
+    return LearningRecord(
+        learning_id=row.learning_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        episode_id=row.episode_id,
+        analytics_id=row.analytics_id,
+        pattern_ids=_tuple(row.pattern_ids),
+        what_worked=row.what_worked or "",
+        what_failed=row.what_failed or "",
+        visual_learning=row.visual_learning or "",
+        content_learning=row.content_learning or "",
+        prompt_learning=row.prompt_learning or "",
+        audience_learning=row.audience_learning or "",
+        next_recommendation=row.next_recommendation or "",
+        reason=row.reason or "",
+        source_episode_ids=_tuple(row.source_episode_ids),
         created_at=_iso(row.created_at),
     )
