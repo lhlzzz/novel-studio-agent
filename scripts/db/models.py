@@ -1073,6 +1073,7 @@ class PlatformAccountRecord(Base):
     credential_ref = Column(String(255), nullable=False, default="")
     character_id = Column(String(255))
     world_id = Column(String(255))
+    series_id = Column(String(255))
     default_style_profile_id = Column(String(255))
     social_account_id = Column(String(255))
     activated_at = Column(DateTime)
@@ -1660,6 +1661,7 @@ class ProductionRunRecord(Base):
     publication_id = Column(String(255))
     analytics_id = Column(String(255))
     learning_id = Column(String(255))
+    task_id = Column(String(255))
     status = Column(String(40), nullable=False, default="OPEN")
     request = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1714,8 +1716,11 @@ class AnalyticsRecordRow(Base):
     favorites = Column(Integer)
     comments = Column(Integer)
     shares = Column(Integer)
+    clicks = Column(Integer)
     followers_gained = Column(Integer)
+    followers_delta = Column(Integer)
     published_at = Column(String(80))
+    observed_at = Column(String(80))
     topic = Column(Text, nullable=False, default="")
     cover = Column(Text, nullable=False, default="")
     prompt_pattern = Column(Text, nullable=False, default="")
@@ -1736,6 +1741,8 @@ class LearningRecordRow(Base):
     platform = Column(String(120), nullable=False)
     episode_id = Column(String(255))
     analytics_id = Column(String(255))
+    prompt_id = Column(String(255))
+    asset_id = Column(String(255))
     pattern_ids = Column(JSONType, nullable=False, default=list)
     what_worked = Column(Text, nullable=False, default="")
     what_failed = Column(Text, nullable=False, default="")
@@ -1746,6 +1753,12 @@ class LearningRecordRow(Base):
     next_recommendation = Column(Text, nullable=False, default="")
     reason = Column(Text, nullable=False, default="")
     source_episode_ids = Column(JSONType, nullable=False, default=list)
+    evidence_status = Column(String(40), nullable=False, default="NOT_VERIFIED")
+    failure_type = Column(Text, nullable=False, default="")
+    diagnosis = Column(Text, nullable=False, default="")
+    root_cause = Column(Text, nullable=False, default="")
+    evidence_gap = Column(Text, nullable=False, default="")
+    outcome = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -1857,5 +1870,179 @@ class LifecycleTransitionRecord(Base):
     __table_args__ = (
         Index("idx_meiti_lifecycle_transitions_episode", "episode_id"),
         Index("idx_meiti_lifecycle_transitions_account", "account_id"),
+    )
+
+
+class AccountProfileRecord(Base):
+    __tablename__ = "account_profiles"
+
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), primary_key=True)
+    platform = Column(String(120), nullable=False)
+    display_name = Column(Text, nullable=False, default="")
+    external_account_id = Column(String(255), nullable=False, default="")
+    status = Column(String(40), nullable=False, default="DRAFT")
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    account_objective = Column(JSONType, nullable=False, default=dict)
+    target_audience = Column(JSONType, nullable=False, default=dict)
+    positioning = Column(JSONType, nullable=False, default=dict)
+    content_pillars = Column(JSONType, nullable=False, default=dict)
+    brand_voice = Column(JSONType, nullable=False, default=dict)
+    visual_style = Column(JSONType, nullable=False, default=dict)
+    content_frequency = Column(JSONType, nullable=False, default=dict)
+    preferred_publish_windows = Column(JSONType, nullable=False, default=dict)
+    content_formats = Column(JSONType, nullable=False, default=dict)
+    operating_rules = Column(JSONType, nullable=False, default=dict)
+    forbidden_rules = Column(JSONType, nullable=False, default=dict)
+    manual_notes = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_account_profiles_platform", "platform"),
+    )
+
+
+class AccountOperatingStateRecord(Base):
+    __tablename__ = "account_operating_states"
+
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), primary_key=True)
+    platform = Column(String(120), nullable=False)
+    current_objective = Column(Text, nullable=False, default="")
+    current_priority = Column(String(20), nullable=False, default="NORMAL")
+    current_series = Column(String(255))
+    current_episode = Column(String(255))
+    current_task = Column(String(255))
+    current_campaign = Column(String(255))
+    current_strategy = Column(Text, nullable=False, default="")
+    current_content_status = Column(String(40), nullable=False, default="IDEA")
+    last_published_episode = Column(String(255))
+    last_generated_asset = Column(String(255))
+    last_learning = Column(String(255))
+    learning_summary = Column(Text, nullable=False, default="")
+    next_action = Column(Text, nullable=False, default="")
+    next_due_at = Column(String(80))
+    paused_until = Column(String(80))
+    operator_notes = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_account_operating_states_platform", "platform"),
+        Index("idx_meiti_account_operating_states_task", "current_task"),
+    )
+
+
+class ManualOverrideRecord(Base):
+    __tablename__ = "manual_overrides"
+
+    override_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    target_kind = Column(String(40), nullable=False)
+    target_id = Column(String(255), nullable=False)
+    field_name = Column(String(80), nullable=False)
+    old_value = Column(JSONType, nullable=False, default=dict)
+    new_value = Column(JSONType, nullable=False, default=dict)
+    changed_by = Column(String(120), nullable=False, default="operator")
+    reason = Column(Text, nullable=False, default="")
+    source = Column(String(40), nullable=False, default="USER_OVERRIDE")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_manual_overrides_account", "account_id"),
+        Index("idx_meiti_manual_overrides_target", "target_kind", "target_id"),
+    )
+
+
+class CreatorTaskRecord(Base):
+    __tablename__ = "creator_tasks"
+
+    task_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    task_type = Column(String(40), nullable=False)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=False, default="")
+    priority = Column(String(20), nullable=False, default="NORMAL")
+    status = Column(String(40), nullable=False, default="TODO")
+    due_at = Column(String(80))
+    episode_id = Column(String(255))
+    series_id = Column(String(255))
+    prompt_id = Column(String(255))
+    asset_id = Column(String(255))
+    package_id = Column(String(255))
+    production_run_id = Column(String(255))
+    parent_task_id = Column(String(255))
+    next_task_id = Column(String(255))
+    next_task_type = Column(String(40))
+    dependencies = Column(JSONType, nullable=False, default=list)
+    operator_notes = Column(Text, nullable=False, default="")
+    blocked_reason = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            "task_type IN ('ACCOUNT_SETUP','ACCOUNT_MAINTENANCE','CONTENT_IDEA','CONTENT_PLAN','PROMPT_GENERATION','CREATIVE_EXECUTION','ASSET_IMPORT','QA','PACKAGE','HANDOFF','PUBLISH','ANALYTICS','LEARNING','RESEARCH','REVIEW')",
+            name="ck_meiti_creator_task_type",
+        ),
+        CheckConstraint(
+            "status IN ('TODO','READY','IN_PROGRESS','WAITING_OPERATOR','WAITING_EXTERNAL','BLOCKED','DONE','CANCELLED')",
+            name="ck_meiti_creator_task_status",
+        ),
+        CheckConstraint("priority IN ('CRITICAL','HIGH','NORMAL','LOW')", name="ck_meiti_creator_task_priority"),
+        Index("idx_meiti_creator_tasks_account", "account_id"),
+        Index("idx_meiti_creator_tasks_status", "status"),
+        Index("idx_meiti_creator_tasks_due", "due_at"),
+        Index("idx_meiti_creator_tasks_episode", "episode_id"),
+    )
+
+
+class ContentCalendarRecord(Base):
+    __tablename__ = "content_calendar"
+
+    calendar_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    date = Column(String(40), nullable=False)
+    slot = Column(String(40), nullable=False, default="default")
+    episode_id = Column(String(255))
+    task_id = Column(String(255))
+    status = Column(String(40), nullable=False, default="PLANNED")
+    topic = Column(Text, nullable=False, default="")
+    format = Column(String(40), nullable=False, default="image")
+    priority = Column(String(20), nullable=False, default="NORMAL")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "date", "slot", name="uq_meiti_content_calendar_slot"),
+        CheckConstraint(
+            "status IN ('PLANNED','READY','PRODUCING','READY_TO_PUBLISH','PUBLISHED','MISSED','CANCELLED')",
+            name="ck_meiti_content_calendar_status",
+        ),
+        Index("idx_meiti_content_calendar_account", "account_id"),
+        Index("idx_meiti_content_calendar_date", "date"),
+    )
+
+
+class ProductionReadinessRecordRow(Base):
+    __tablename__ = "production_readiness_records"
+
+    record_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255))
+    platform = Column(String(120), nullable=False, default="")
+    core_production = Column(String(40), nullable=False, default="NOT_CONFIGURED")
+    post_production = Column(String(40), nullable=False, default="NOT_VERIFIED")
+    full_loop = Column(String(40), nullable=False, default="NOT_VERIFIED")
+    checks = Column(JSONType, nullable=False, default=dict)
+    detail = Column(JSONType, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_production_readiness_account", "account_id"),
     )
 

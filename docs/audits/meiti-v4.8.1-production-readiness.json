@@ -1,0 +1,43 @@
+{
+  "version": "4.8.1",
+  "CODE_AUDIT": {
+    "status": "PASS",
+    "missing": [],
+    "lane": "ARCHITECTURE"
+  },
+  "PRODUCTION_EVIDENCE": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE",
+    "kinds": [],
+    "days": {
+      "REAL_DAY_1": "NOT_VERIFIED",
+      "REAL_DAY_2": "NOT_VERIFIED",
+      "REAL_DAY_3": "NOT_VERIFIED",
+      "HANDOFF": "NOT_VERIFIED",
+      "ANALYTICS": "NOT_VERIFIED",
+      "LEARNING": "NOT_VERIFIED"
+    }
+  },
+  "REAL_DAY_1": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE"
+  },
+  "REAL_DAY_2": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE"
+  },
+  "REAL_DAY_3": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE"
+  },
+  "HANDOFF": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE"
+  },
+  "PUBLICATION": {
+    "status": "NOT_VERIFIED",
+    "lane": "PRODUCTION_EVIDENCE",
+    "note": "HANDOFF is not PUBLICATION"
+  },
+  "note": "Code tests PASS is never real production PASS. Operator Lechuang assets are required for REAL_DAY_X."
+}

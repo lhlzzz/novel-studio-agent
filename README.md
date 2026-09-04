@@ -1,4 +1,4 @@
-# Meiti V4.8
+# Meiti V4.8.1
 
 Meiti is prompt-first.
 
@@ -52,11 +52,23 @@ Analytics take store/secrets from that runtime. Testing uses
 python scripts/meiti.py bootstrap-production
 ```
 
-V4.8 hardens the real creator production loop on the V4.7.1 asset DNA. MemoryService owns retrieval and writeback,
-Obsidian is the knowledge brain, PostgreSQL stays operational state,
-AccountContext is explicit, and PromptCompiler is the human-execution creative
-bridge. Unverified video APIs stay NOT_VERIFIED. Bootstrap remains read-only
-preflight and never writes credentials.
+V4.8.1 makes the human creator OS production-ready on the V4.8 loop.
+AccountProfile (who I am) is separate from AccountOperatingState (what I am
+doing). TaskOS creates the production chain so the operator only enters at
+CREATIVE_EXECUTION. EpisodePlanner and ContentCalendar own tomorrow's work.
+PromptCompiler remains the unique COPY READY compiler. Primary import requires
+prompt_id or an explicit NO_PROMPT_REFERENCE exception. AnalyticsRecord is the
+canonical analytics store; AgentRecord/MetricSnapshotRecord are projections.
+CORE_PRODUCTION can be READY while Analytics/Learning/real E2E stay
+NOT_VERIFIED. Unverified video APIs stay NOT_VERIFIED. Bootstrap remains
+read-only preflight and never writes credentials.
+
+```bash
+python scripts/meiti.py dashboard
+python scripts/meiti.py task next
+python scripts/meiti_production_readiness.py
+python scripts/meiti_smoke_production.py
+```
 
 ## Current production set
 

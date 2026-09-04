@@ -143,9 +143,9 @@ def test_same_sha_cannot_bind_second_identity(runtime, tmp_path):
     episode = runtime.continue_series(account_id=account.account_id, series_id=runtime.store.active_series(account.account_id).series_id, title="Day 1", brief="第一次")
     path = _png(tmp_path, "same.png", 7)
     service = PlatformAssetService(runtime.store)
-    first = service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", root=tmp_path / "assets")
+    first = service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", no_prompt_reference=True, root=tmp_path / "assets")
     with pytest.raises(ExistingAssetError) as exc:
-        service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", root=tmp_path / "assets")
+        service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", no_prompt_reference=True, root=tmp_path / "assets")
     assert exc.value.code == "EXISTING_ASSET"
     loaded = runtime.store.get_asset_by_sha256(first["asset"].sha256)
     assert loaded.asset_id == first["asset"].asset_id
@@ -157,7 +157,7 @@ def test_cross_platform_primary_blocked_explicit_reference_allowed(runtime, tmp_
     xhs_ep = runtime.continue_series(account_id=xhs.account_id, series_id=runtime.store.active_series(xhs.account_id).series_id, title="X1", brief="x")
     dy_ep = runtime.continue_series(account_id=dy.account_id, series_id=runtime.store.active_series(dy.account_id).series_id, title="D1", brief="d")
     service = PlatformAssetService(runtime.store)
-    xhs_asset = service.import_asset(_png(tmp_path, "xhs.png", 33), account_id=xhs.account_id, platform="xiaohongshu", episode_id=xhs_ep.episode_id, asset_role="GENERATED_PRIMARY", root=tmp_path / "assets")["asset"]
+    xhs_asset = service.import_asset(_png(tmp_path, "xhs.png", 33), account_id=xhs.account_id, platform="xiaohongshu", episode_id=xhs_ep.episode_id, asset_role="GENERATED_PRIMARY", no_prompt_reference=True, root=tmp_path / "assets")["asset"]
     package = ContentPackage(package_id=uuid4().hex, title="dy", body="dy", account_id=dy.account_id, platform="douyin", episode_id=dy_ep.episode_id)
     with pytest.raises(CrossPlatformAssetReuse):
         service.map_package_asset(package, xhs_asset, role="PRIMARY")

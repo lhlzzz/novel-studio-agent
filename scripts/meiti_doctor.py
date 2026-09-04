@@ -614,6 +614,31 @@ V48_KEYS = (
     "REVISION_RUNTIME",
     "LINEAGE_RUNTIME",
     "PUBLICATION_RUNTIME",
+    "ACCOUNT_OS",
+    "TASK_OS",
+    "CONTENT_CALENDAR",
+    "EPISODE_PLANNER",
+    "CORE_PRODUCTION",
+    "POST_PRODUCTION",
+    "FULL_LOOP",
+)
+
+V481_KEYS = (
+    "ACCOUNT_OS",
+    "TASK_OS",
+    "CONTENT_CALENDAR",
+    "EPISODE_PLANNER",
+    "PROMPT_RUNTIME",
+    "MANUAL_LECHUANG",
+    "ASSET_IMPORT",
+    "TECHNICAL_QA",
+    "PACKAGE",
+    "HANDOFF",
+    "ANALYTICS_RUNTIME",
+    "LEARNING_RUNTIME",
+    "CORE_PRODUCTION",
+    "POST_PRODUCTION",
+    "FULL_LOOP",
 )
 
 LANE_BY_KEY = {
@@ -649,6 +674,13 @@ LANE_BY_KEY = {
     "GIT_DIFF_CHECK": "ARCHITECTURE",
     "WORKTREE": "ARCHITECTURE",
     "PUBLICATION_RUNTIME": "PRODUCTION_EVIDENCE",
+    "ACCOUNT_OS": "ARCHITECTURE",
+    "TASK_OS": "ARCHITECTURE",
+    "CONTENT_CALENDAR": "ARCHITECTURE",
+    "EPISODE_PLANNER": "ARCHITECTURE",
+    "CORE_PRODUCTION": "ARCHITECTURE",
+    "POST_PRODUCTION": "PRODUCTION_EVIDENCE",
+    "FULL_LOOP": "PRODUCTION_EVIDENCE",
 }
 
 
@@ -667,6 +699,15 @@ def _v48_status(default: str, existing: dict | None = None) -> dict:
         "OBSIDIAN_WRITEBACK": "OBSIDIAN_EPISODE_MEMORY",
         "NEXT_PROMPT_LEARNING": "PLATFORM_LEARNING_DNA",
         "DOCTOR": "DOCTOR_RUNTIME",
+        "ACCOUNT_OS": "ACCOUNT_RUNTIME",
+        "TASK_OS": "PRODUCTION_RUN",
+        "CONTENT_CALENDAR": "SERIES_RUNTIME",
+        "EPISODE_PLANNER": "SERIES_RUNTIME",
+        "PACKAGE": "CONTENT_PACKAGE_ASSET_MAPPING",
+        "HANDOFF": "PRODUCTION_EVIDENCE",
+        "CORE_PRODUCTION": "PROMPT_COMPILER",
+        "POST_PRODUCTION": "ANALYTICS_RUNTIME",
+        "FULL_LOOP": "LEARNING_RUNTIME",
     }
     for key in V48_KEYS:
         current = existing.get(key)
@@ -796,6 +837,15 @@ def main(argv: list[str] | None = None) -> int:
     for key in V48_KEYS:
         item = v48.get(key) or {}
         print(f"{key}={item.get('status') or 'NOT_VERIFIED'}")
+    print("MEITI_V481_STATUS")
+    for key in V481_KEYS:
+        item = v48.get(key) or {}
+        status = item.get("status") or ("NOT_VERIFIED" if LANE_BY_KEY.get(key) == "PRODUCTION_EVIDENCE" else architecture)
+        if key == "CORE_PRODUCTION" and status in {"PASS", "READY"}:
+            status = "READY"
+        if key in {"POST_PRODUCTION", "FULL_LOOP"} and status not in {"PASS", "READY"}:
+            status = "NOT_VERIFIED"
+        print(f"{key}={status}")
     print(f"DOCTOR_RUNTIME={payload['checks'].get('DOCTOR_RUNTIME') or architecture}")
     write_e2e_audit(checks)
     print(json.dumps({

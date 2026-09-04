@@ -1,7 +1,9 @@
-# Meiti V4.5.4 Next Action
+# Meiti V4.8.1 Next Action
 
-**GOAL:** Keep live READY blocked until real CN credentials, Jushita, and
-the official Lechuang contract exist.
+**GOAL:** CORE_PRODUCTION is READY. Keep POST_PRODUCTION / FULL_LOOP
+NOT_VERIFIED until real operator analytics and learning exist. Keep live
+social publish blocked until real CN credentials, Jushita, and a verified
+Lechuang API contract exist.
 
 1. Set `MEITI_SECRET_DIR` (0700) and PostgreSQL, then run
    `python scripts/meiti.py bootstrap-production`.

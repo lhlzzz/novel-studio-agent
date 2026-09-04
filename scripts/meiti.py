@@ -594,11 +594,110 @@ def cmd_account_history(args: argparse.Namespace) -> int:
 
 def cmd_content_calendar(_args: argparse.Namespace) -> int:
     runtime = _continuity()
-    rows = runtime.calendar()
+    rows = runtime.calendar(account_id=getattr(_args, "account_id", None))
     if not rows:
         print("no content calendar rows")
         return 0
     _print_json(rows)
+    return 0
+
+
+def cmd_content_tomorrow(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    _print_json(runtime.tomorrow(account_id=account.account_id))
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    _print_json(runtime.dashboard(account_id=args.account_id, platform=args.platform))
+    return 0
+
+
+def cmd_task_next(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    task = runtime.get_next_action(account_id=args.account_id, platform=args.platform)
+    if task is None:
+        print("no next action")
+        return 0
+    _print_json({
+        "task_id": task.task_id,
+        "task_type": task.task_type,
+        "status": task.status,
+        "title": task.title,
+        "account_id": task.account_id,
+        "platform": task.platform,
+        "episode_id": task.episode_id,
+        "next_task_type": task.next_task_type,
+        "due_at": task.due_at,
+    })
+    return 0
+
+
+def cmd_task_today(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    rows = runtime.get_today_tasks(account_id=args.account_id, platform=args.platform)
+    _print_json([
+        {
+            "task_id": item.task_id,
+            "task_type": item.task_type,
+            "status": item.status,
+            "title": item.title,
+            "due_at": item.due_at,
+            "episode_id": item.episode_id,
+        }
+        for item in rows
+    ])
+    return 0
+
+
+def cmd_task_blocked(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    rows = runtime.get_blocked_tasks(account_id=args.account_id, platform=args.platform)
+    _print_json([
+        {
+            "task_id": item.task_id,
+            "task_type": item.task_type,
+            "status": item.status,
+            "blocked_reason": item.blocked_reason,
+            "account_id": item.account_id,
+        }
+        for item in rows
+    ])
+    return 0
+
+
+def cmd_production_readiness(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    payload = runtime.production_readiness(account_id=args.account_id)
+    _print_json(payload)
+    return 0 if payload.get("CORE_PRODUCTION") == "READY" else 1
+
+
+def cmd_account_override(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    profile = runtime.override_profile(
+        account.account_id,
+        field_name=args.field,
+        value=args.value,
+        reason=args.reason,
+        changed_by=args.changed_by,
+    )
+    _print_json({
+        "account_id": profile.account_id,
+        "field": args.field,
+        "value": profile.field_value(args.field),
+        "source": "USER_OVERRIDE",
+        "reason": args.reason,
+    })
     return 0
 
 
@@ -705,7 +804,7 @@ def cmd_creative_compile_prompt(args: argparse.Namespace) -> int:
 
 
 def cmd_creative_import_asset(args: argparse.Namespace) -> int:
-    from content.models import AssetFreshnessError, CrossPlatformAssetReuse, ExistingAssetError, IsolationError
+    from content.models import AssetFreshnessError, ConfigurationBlocked, CrossPlatformAssetReuse, ExistingAssetError, IsolationError
 
     runtime = _continuity()
     try:
@@ -722,12 +821,16 @@ def cmd_creative_import_asset(args: argparse.Namespace) -> int:
             prompt_id=args.prompt_id,
             model=args.model,
             tool=args.tool,
+            no_prompt_reference=bool(getattr(args, "no_prompt_reference", False)),
         )
     except FileNotFoundError as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
         return 1
     except IsolationError as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)}, default=str))
+        return 1
+    except ConfigurationBlocked as exc:
+        print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}, default=str))
         return 1
     except ExistingAssetError as exc:
         print(json.dumps({"status": "FAIL", "code": exc.code, "reason": str(exc)}, default=str))
@@ -887,8 +990,11 @@ def cmd_analytics_record(args: argparse.Namespace) -> int:
         favorites=args.favorites,
         comments=args.comments,
         shares=args.shares,
+        clicks=args.clicks,
         followers_gained=args.followers,
+        followers_delta=args.followers_delta,
         published_at=args.published_at,
+        observed_at=args.observed_at,
         topic=args.topic or "",
         cover=args.cover or "",
         prompt_pattern=args.prompt_pattern or "",
@@ -910,6 +1016,8 @@ def cmd_learning_record(args: argparse.Namespace) -> int:
             platform=args.platform,
             episode_id=args.episode_id,
             analytics_id=args.analytics_id,
+            prompt_id=getattr(args, "prompt_id", None),
+            asset_id=getattr(args, "asset_id", None),
             what_worked=args.what_worked or "",
             what_failed=args.what_failed or "",
             visual_learning=args.visual_learning or "",
@@ -1043,6 +1151,7 @@ def main() -> int:
     import_asset.add_argument("--parent-asset-id")
     import_asset.add_argument("--source-asset-id")
     import_asset.add_argument("--prompt-id")
+    import_asset.add_argument("--no-prompt-reference", action="store_true")
     import_asset.add_argument("--model", default="UNKNOWN")
     import_asset.add_argument("--tool", default="lechuang")
     import_asset.set_defaults(func=cmd_creative_import_asset)
@@ -1126,9 +1235,23 @@ def main() -> int:
     account_history.add_argument("--account-id")
     account_history.add_argument("--platform")
     account_history.set_defaults(func=cmd_account_history)
+    account_override = account_sub.add_parser("override")
+    account_override.add_argument("--account-id")
+    account_override.add_argument("--platform")
+    account_override.add_argument("--field", required=True)
+    account_override.add_argument("--value", required=True)
+    account_override.add_argument("--reason", required=True)
+    account_override.add_argument("--changed-by", default="operator")
+    account_override.set_defaults(func=cmd_account_override)
     content = sub.add_parser("content")
     content_sub = content.add_subparsers(dest="command", required=True)
-    content_sub.add_parser("calendar").set_defaults(func=cmd_content_calendar)
+    calendar_cmd = content_sub.add_parser("calendar")
+    calendar_cmd.add_argument("--account-id")
+    calendar_cmd.set_defaults(func=cmd_content_calendar)
+    tomorrow_cmd = content_sub.add_parser("tomorrow")
+    tomorrow_cmd.add_argument("--account-id")
+    tomorrow_cmd.add_argument("--platform")
+    tomorrow_cmd.set_defaults(func=cmd_content_tomorrow)
     package_cmd = content_sub.add_parser("package")
     package_cmd.add_argument("--account-id", required=True)
     package_cmd.add_argument("--episode-id", required=True)
@@ -1202,8 +1325,11 @@ def main() -> int:
     analytics_record.add_argument("--favorites", type=int)
     analytics_record.add_argument("--comments", type=int)
     analytics_record.add_argument("--shares", type=int)
+    analytics_record.add_argument("--clicks", type=int)
     analytics_record.add_argument("--followers", type=int)
+    analytics_record.add_argument("--followers-delta", type=int)
     analytics_record.add_argument("--published-at")
+    analytics_record.add_argument("--observed-at")
     analytics_record.add_argument("--topic")
     analytics_record.add_argument("--cover")
     analytics_record.add_argument("--prompt-pattern")
@@ -1215,6 +1341,8 @@ def main() -> int:
     learning_record.add_argument("--platform", required=True)
     learning_record.add_argument("--episode-id")
     learning_record.add_argument("--analytics-id")
+    learning_record.add_argument("--prompt-id")
+    learning_record.add_argument("--asset-id")
     learning_record.add_argument("--what-worked")
     learning_record.add_argument("--what-failed")
     learning_record.add_argument("--visual-learning")
@@ -1232,6 +1360,27 @@ def main() -> int:
     production_show.add_argument("--platform")
     production_show.add_argument("--episode-id")
     production_show.set_defaults(func=cmd_production_show)
+    production_ready = production_sub.add_parser("readiness")
+    production_ready.add_argument("--account-id")
+    production_ready.set_defaults(func=cmd_production_readiness)
+    dash = sub.add_parser("dashboard")
+    dash.add_argument("--account-id")
+    dash.add_argument("--platform")
+    dash.set_defaults(func=cmd_dashboard)
+    task = sub.add_parser("task")
+    task_sub = task.add_subparsers(dest="command", required=True)
+    task_next = task_sub.add_parser("next")
+    task_next.add_argument("--account-id")
+    task_next.add_argument("--platform")
+    task_next.set_defaults(func=cmd_task_next)
+    task_today = task_sub.add_parser("today")
+    task_today.add_argument("--account-id")
+    task_today.add_argument("--platform")
+    task_today.set_defaults(func=cmd_task_today)
+    task_blocked = task_sub.add_parser("blocked")
+    task_blocked.add_argument("--account-id")
+    task_blocked.add_argument("--platform")
+    task_blocked.set_defaults(func=cmd_task_blocked)
     args = parser.parse_args()
     return args.func(args)
 

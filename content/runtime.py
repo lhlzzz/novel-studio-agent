@@ -13,6 +13,8 @@ from content.dna import merge_creative_dna
 from content.models import (
     LIFECYCLE_OWNERS,
     AccountContext,
+    AccountOperatingState,
+    AccountProfile,
     AccountWorld,
     AnalyticsRecord,
     AssetLineage,
@@ -22,10 +24,13 @@ from content.models import (
     ContentPackage,
     ContentSeries,
     ContinuityMemory,
+    CreatorTask,
     Episode,
     IsolationError,
+    KnowledgeField,
     LearningRecord,
     LifecycleTransition,
+    ManualOverride,
     MemoryWritebackError,
     PatternPromotion,
     PerformanceFeedback,
@@ -38,12 +43,31 @@ from content.models import (
     ResolvedTarget,
     VirtualCharacter,
     WorldRevision,
+    knowledge_field,
     utcnow,
 )
+
+PROFILE_KNOWLEDGE_FIELDS = (
+    "account_objective",
+    "target_audience",
+    "positioning",
+    "content_pillars",
+    "brand_voice",
+    "visual_style",
+    "content_frequency",
+    "preferred_publish_windows",
+    "content_formats",
+    "operating_rules",
+    "forbidden_rules",
+    "manual_notes",
+)
+from content.planner import EpisodePlanner
 from content.platform_policy import differentiate_package, platform_policy
 from content.qa import CharacterContinuityQA, CrossAccountIsolationGuard
+from content.readiness import ProductionReadinessService
 from content.resolve import IntentResolver
 from content.store import ContinuityStore
+from content.tasks import TaskOS, due_iso, sync_operating_state, today_iso
 
 
 @dataclass
@@ -103,6 +127,22 @@ class ContinuityRuntime:
             key="created",
             value={"platform": saved.platform, "display_name": saved.display_name},
         ))
+        self.store.save_account_profile(AccountProfile(
+            account_id=saved.account_id,
+            platform=saved.platform,
+            display_name=saved.display_name,
+            external_account_id=saved.external_account_id,
+            status=saved.status,
+            character_id=saved.character_id,
+            world_id=saved.world_id,
+            series_id=saved.series_id,
+        ))
+        self.store.save_operating_state(AccountOperatingState(
+            account_id=saved.account_id,
+            platform=saved.platform,
+            current_objective="",
+            next_action="ACCOUNT_SETUP",
+        ))
         return saved
 
     def bind_character(self, account_id: str, character: VirtualCharacter) -> VirtualCharacter:
@@ -112,6 +152,7 @@ class ContinuityRuntime:
         saved = self.store.save_character(character)
         account = self.store.get_account(account_id)
         self.store.save_account(PlatformAccount(**{**account.__dict__, "character_id": saved.character_id, "updated_at": utcnow()}))
+        self._sync_profile(account.account_id, character_id=saved.character_id)
         pool = self.store.get_pool(account_id=account_id, platform=account.platform)
         if pool is not None:
             self.store.save_pool(replace(pool, character_id=saved.character_id))
@@ -139,6 +180,7 @@ class ContinuityRuntime:
         saved = self.store.save_world(world)
         account = self.store.get_account(account_id)
         self.store.save_account(PlatformAccount(**{**account.__dict__, "world_id": saved.world_id, "updated_at": utcnow()}))
+        self._sync_profile(account.account_id, world_id=saved.world_id)
         pool = self.store.get_pool(account_id=account_id, platform=account.platform)
         if pool is not None:
             self.store.save_pool(replace(pool, world_id=saved.world_id))
@@ -172,6 +214,10 @@ class ContinuityRuntime:
             status="ACTIVE",
         )
         saved = self.store.save_series(series)
+        if account.series_id is None:
+            self.store.save_account(PlatformAccount(**{**account.__dict__, "series_id": saved.series_id, "updated_at": utcnow()}))
+            self._sync_profile(account.account_id, series_id=saved.series_id)
+            sync_operating_state(self.store, account_id=account.account_id, platform=account.platform, current_series=saved.series_id)
         self.store.save_memory(ContinuityMemory(
             memory_id=uuid4().hex,
             kind="series",
@@ -183,7 +229,18 @@ class ContinuityRuntime:
         return saved
 
     def continue_series(self, *, account_id: str, series_id: str, brief: str = "", title: str = "") -> Episode:
-        return self.engine.create_next_episode(series_id, account_id=account_id, brief=brief, title=title)
+        episode = self.engine.create_next_episode(series_id, account_id=account_id, brief=brief, title=title)
+        account = self.store.get_account(account_id)
+        if account is not None:
+            sync_operating_state(
+                self.store,
+                account_id=account_id,
+                platform=account.platform,
+                current_series=series_id,
+                current_episode=episode.episode_id,
+                current_content_status=episode.content_status,
+            )
+        return episode
 
     def prepare(self, text: str, *, platform: str | None = None, account_id: str | None = None) -> dict[str, Any]:
         target = self.resolver.resolve(text, platform=platform, account_id=account_id)
@@ -323,7 +380,48 @@ class ContinuityRuntime:
         if episode is not None:
             self.transition_episode(episode.episode_id, account_id=account_id, to_status="PROMPT_READY")
             run = self.open_production_run(account_id=account_id, platform=platform, episode_id=episode.episode_id, request=request)
-            self.store.save_production_run(ProductionRun(**{**run.__dict__, "prompt_id": prompt.prompt_id, "status": "AWAITING_CREATIVE", "updated_at": utcnow()}))
+            tasks = TaskOS(self.store).create_production_chain(
+                account_id=account_id,
+                platform=platform,
+                title=request or episode.title,
+                description=request,
+                episode_id=episode.episode_id,
+                series_id=episode.series_id,
+                due_at=today_iso(),
+                production_run_id=run.run_id,
+            )
+            plan = next((item for item in tasks if item.task_type == "CONTENT_PLAN"), None)
+            prompt_task = next((item for item in tasks if item.task_type == "PROMPT_GENERATION"), None)
+            if plan:
+                TaskOS(self.store).transition(plan.task_id, to_status="DONE")
+            if prompt_task:
+                TaskOS(self.store).complete_type(account_id=account_id, episode_id=episode.episode_id, task_type="PROMPT_GENERATION", prompt_id=prompt.prompt_id)
+                TaskOS(self.store).waiting_operator(account_id=account_id, episode_id=episode.episode_id)
+            current_task = TaskOS(self.store).get_next_action(account_id=account_id)
+            self.store.save_production_run(ProductionRun(**{
+                **run.__dict__,
+                "prompt_id": prompt.prompt_id,
+                "task_id": current_task.task_id if current_task else (prompt_task.task_id if prompt_task else None),
+                "status": "AWAITING_CREATIVE",
+                "updated_at": utcnow(),
+            }))
+            EpisodePlanner(self.store).ensure_calendar(
+                account_id=account_id,
+                date=today_iso(),
+                topic=episode.title or request,
+                episode_id=episode.episode_id,
+                task_id=current_task.task_id if current_task else None,
+                status="PRODUCING",
+            )
+            sync_operating_state(
+                self.store,
+                account_id=account_id,
+                platform=platform,
+                current_episode=episode.episode_id,
+                current_task=current_task.task_id if current_task else None,
+                current_content_status="AWAITING_CREATIVE",
+                next_action="CREATIVE_EXECUTION",
+            )
             for asset in refs:
                 asset_id = getattr(asset, "asset_id", None) or str(asset)
                 self.store.save_reference_snapshot(AssetReferenceSnapshot(
@@ -334,10 +432,54 @@ class ContinuityRuntime:
                     reason="previous episode or character continuity",
                     prompt_influence="keep character/world lock; do not reuse as primary",
                 ))
+            self.record_evidence(
+                kind="PROMPT_READY",
+                account_id=account_id,
+                platform=platform,
+                episode_id=episode.episode_id,
+                prompt_id=prompt.prompt_id,
+                production_run_id=run.run_id,
+                source="operator",
+                detail={"copy_ready": True},
+            )
         return prompt
 
     def import_asset(self, path: str, **fields: Any) -> dict[str, Any]:
-        return PlatformAssetService(self.store).import_asset(path, **fields)
+        imported = PlatformAssetService(self.store).import_asset(path, **fields)
+        account_id = str(fields.get("account_id") or "")
+        episode_id = fields.get("episode_id")
+        asset = imported.get("asset")
+        qa = imported.get("qa") or {}
+        asset_id = getattr(asset, "asset_id", None)
+        tasks = TaskOS(self.store)
+        tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="CREATIVE_EXECUTION", asset_id=asset_id)
+        tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="ASSET_IMPORT", asset_id=asset_id)
+        if qa.get("decision") == "pass":
+            tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="QA", asset_id=asset_id)
+            self.record_evidence(
+                kind="QA_PASSED",
+                account_id=account_id,
+                platform=str(fields.get("platform") or ""),
+                episode_id=episode_id,
+                prompt_id=fields.get("prompt_id"),
+                asset_id=asset_id,
+                source="lechuang",
+                detail={"qa": qa.get("decision")},
+            )
+        current = tasks.get_next_action(account_id=account_id)
+        account = self.store.get_account(account_id) if account_id else None
+        if account is not None:
+            sync_operating_state(
+                self.store,
+                account_id=account_id,
+                platform=account.platform,
+                current_episode=episode_id,
+                current_task=current.task_id if current else None,
+                last_generated_asset=asset_id,
+                current_content_status="QA_PASSED" if qa.get("decision") == "pass" else "QA_FAILED",
+                next_action=current.task_type if current else "PACKAGE",
+            )
+        return imported
 
     def package_from_generation(self, *, context, assets: list[Any], title: str = "", body: str = "", package_id: str | None = None, status: str = "GENERATED", prompt_id: str | None = None, reference_assets: tuple[str, ...] = ()) -> ContentPackage:
         from content.assets import REFERENCE_ROLES
@@ -402,6 +544,32 @@ class ContinuityRuntime:
                     package_id=package.package_id,
                     prompt_id=prompt_id,
                     asset_id=primary_ids[0] if primary_ids else None,
+                )
+                TaskOS(self.store).complete_type(
+                    account_id=context.account_id,
+                    episode_id=context.episode_id,
+                    task_type="PACKAGE",
+                    package_id=package.package_id,
+                    prompt_id=prompt_id,
+                    asset_id=primary_ids[0] if primary_ids else None,
+                )
+                current = TaskOS(self.store).get_next_action(account_id=context.account_id)
+                sync_operating_state(
+                    self.store,
+                    account_id=context.account_id,
+                    platform=context.platform,
+                    current_episode=context.episode_id,
+                    current_task=current.task_id if current else None,
+                    current_content_status="PACKAGE_READY",
+                    next_action=current.task_type if current else "HANDOFF",
+                )
+                EpisodePlanner(self.store).ensure_calendar(
+                    account_id=context.account_id,
+                    date=today_iso(),
+                    topic=package.title,
+                    episode_id=context.episode_id,
+                    task_id=current.task_id if current else None,
+                    status="READY_TO_PUBLISH",
                 )
         return package
 
@@ -527,9 +695,39 @@ class ContinuityRuntime:
     def record_feedback(self, feedback: PerformanceFeedback) -> PerformanceFeedback:
         return self.store.save_feedback(feedback)
 
-    def calendar(self) -> list[dict[str, Any]]:
+    def calendar(self, *, account_id: str | None = None) -> list[dict[str, Any]]:
+        entries = self.store.list_calendar(account_id=account_id)
+        if entries:
+            rows = []
+            for item in entries:
+                episode = self.store.get_episode(item.episode_id, account_id=item.account_id) if item.episode_id else None
+                published = item.status == "PUBLISHED" or bool(episode and episode.content_status == "PUBLISHED")
+                rows.append({
+                    "calendar_id": item.calendar_id,
+                    "platform": item.platform,
+                    "account_id": item.account_id,
+                    "date": item.date,
+                    "slot": item.slot,
+                    "topic": item.topic,
+                    "format": item.format,
+                    "status": "PUBLISHED" if published else item.status,
+                    "episode_id": item.episode_id,
+                    "task_id": item.task_id,
+                    "priority": item.priority,
+                    "published": published,
+                    "content_status": episode.content_status if episode else item.status,
+                    "display_name": "",
+                    "series": "",
+                    "episode_no": episode.episode_no if episode else 0,
+                    "generated": bool(episode and episode.content_package_id),
+                    "failed": bool(episode and episode.content_status == "FAILED"),
+                })
+            return rows
         rows = []
-        for account in self.store.list_accounts():
+        accounts = [self.store.get_account(account_id)] if account_id else self.store.list_accounts()
+        for account in accounts:
+            if account is None:
+                continue
             series = self.store.active_series(account.account_id)
             episode = self.store.latest_episode(series.series_id) if series else None
             rows.append({
@@ -553,12 +751,18 @@ class ContinuityRuntime:
         world = self.store.get_world(account.world_id, account_id=account.account_id) if account.world_id else None
         series = self.store.active_series(account.account_id)
         episode = self.store.latest_episode(series.series_id) if series else None
+        profile = self.store.get_account_profile(account_id)
+        state = self.store.get_operating_state(account_id)
+        next_action = TaskOS(self.store).get_next_action(account_id=account_id)
         return {
             "account": account,
             "character": character,
             "world": world,
             "series": series,
             "episode": episode,
+            "profile": profile,
+            "operating_state": state,
+            "current_task": next_action,
         }
 
     def history(self, account_id: str) -> dict[str, Any]:
@@ -669,6 +873,31 @@ class ContinuityRuntime:
                 "status": "HANDED_OFF",
                 "updated_at": utcnow(),
             }))
+        TaskOS(self.store).complete_type(
+            account_id=package.account_id,
+            episode_id=package.episode_id,
+            task_type="HANDOFF",
+            package_id=package.package_id,
+        )
+        current = TaskOS(self.store).get_next_action(account_id=package.account_id)
+        sync_operating_state(
+            self.store,
+            account_id=package.account_id,
+            platform=package.platform,
+            current_episode=package.episode_id,
+            current_task=current.task_id if current else None,
+            last_published_episode=package.episode_id,
+            current_content_status="HANDOFF_READY",
+            next_action=current.task_type if current else "ANALYTICS",
+        )
+        EpisodePlanner(self.store).ensure_calendar(
+            account_id=package.account_id,
+            date=today_iso(),
+            topic=package.title,
+            episode_id=package.episode_id,
+            task_id=current.task_id if current else None,
+            status="READY_TO_PUBLISH",
+        )
         return self.record_evidence(
             kind="XHS_HANDOFF" if package.platform == "xiaohongshu" else "HANDOFF",
             account_id=package.account_id,
@@ -683,9 +912,16 @@ class ContinuityRuntime:
         )
 
     def record_analytics(self, record: AnalyticsRecord) -> AnalyticsRecord:
+        if not record.episode_id:
+            raise ConfigurationBlocked("ANALYTICS_EPISODE_REQUIRED", "analytics must bind an episode")
         saved = self.store.save_analytics(record)
         if saved.episode_id:
             self.transition_episode(saved.episode_id, account_id=saved.account_id, to_status="ANALYTICS_PENDING")
+        TaskOS(self.store).complete_type(
+            account_id=saved.account_id,
+            episode_id=saved.episode_id,
+            task_type="ANALYTICS",
+        )
         self.record_evidence(
             kind="ANALYTICS_IMPORTED",
             account_id=saved.account_id,
@@ -697,10 +933,32 @@ class ContinuityRuntime:
             analytics_id=saved.analytics_id,
             source="analytics",
         )
+        current = TaskOS(self.store).get_next_action(account_id=saved.account_id)
+        sync_operating_state(
+            self.store,
+            account_id=saved.account_id,
+            platform=saved.platform,
+            current_episode=saved.episode_id,
+            current_task=current.task_id if current else None,
+            current_content_status="ANALYTICS_PENDING",
+            next_action=current.task_type if current else "LEARNING",
+        )
         return saved
 
     def record_learning(self, record: LearningRecord) -> LearningRecord:
-        saved = self.store.save_learning(record)
+        evidence_status = record.evidence_status
+        sources = tuple(item for item in (record.episode_id, record.analytics_id, record.prompt_id, record.asset_id) if item)
+        source_episodes = record.source_episode_ids or ((record.episode_id,) if record.episode_id else ())
+        if evidence_status == "NOT_VERIFIED":
+            if record.analytics_id and (record.episode_id or source_episodes):
+                evidence_status = "VERIFIED"
+            elif sources:
+                evidence_status = "NOT_ENOUGH_EVIDENCE"
+        saved = self.store.save_learning(LearningRecord(**{
+            **record.__dict__,
+            "evidence_status": evidence_status,
+            "source_episode_ids": source_episodes,
+        }))
         profile = self.store.get_learning_profile(saved.account_id, saved.platform)
         if profile is not None:
             worked = tuple(dict.fromkeys(list(profile.successful_patterns) + ([saved.what_worked] if saved.what_worked else [])))
@@ -738,6 +996,11 @@ class ContinuityRuntime:
             raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
         if saved.episode_id:
             self.transition_episode(saved.episode_id, account_id=saved.account_id, to_status="LEARNED")
+        TaskOS(self.store).complete_type(
+            account_id=saved.account_id,
+            episode_id=saved.episode_id,
+            task_type="LEARNING",
+        )
         self.record_evidence(
             kind="LEARNING_WRITTEN",
             account_id=saved.account_id,
@@ -745,8 +1008,19 @@ class ContinuityRuntime:
             episode_id=saved.episode_id,
             analytics_id=saved.analytics_id,
             learning_id=saved.learning_id,
+            prompt_id=saved.prompt_id,
+            asset_id=saved.asset_id,
             source="memory",
-            detail={"reason": saved.reason, "next_recommendation": saved.next_recommendation},
+            detail={"reason": saved.reason, "next_recommendation": saved.next_recommendation, "evidence_status": saved.evidence_status},
+        )
+        sync_operating_state(
+            self.store,
+            account_id=saved.account_id,
+            platform=saved.platform,
+            last_learning=saved.learning_id,
+            learning_summary=saved.next_recommendation or saved.what_worked or saved.reason,
+            current_content_status="LEARNED",
+            next_action="CONTENT_PLAN",
         )
         return saved
 
@@ -781,6 +1055,167 @@ class ContinuityRuntime:
             confidence=confidence,
             reason=reason,
         ))
+
+    def _sync_profile(self, account_id: str, **fields: Any) -> AccountProfile:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        current = self.store.get_account_profile(account_id)
+        if current is None:
+            current = AccountProfile(
+                account_id=account.account_id,
+                platform=account.platform,
+                display_name=account.display_name,
+                external_account_id=account.external_account_id,
+                status=account.status,
+                character_id=account.character_id,
+                world_id=account.world_id,
+                series_id=account.series_id,
+            )
+        payload = {**current.__dict__, **{key: value for key, value in fields.items() if value is not None}, "updated_at": utcnow()}
+        payload.setdefault("display_name", account.display_name)
+        payload.setdefault("status", account.status)
+        payload.setdefault("character_id", account.character_id)
+        payload.setdefault("world_id", account.world_id)
+        payload.setdefault("series_id", account.series_id)
+        return self.store.save_account_profile(AccountProfile(**payload))
+
+    def override_profile(
+        self,
+        account_id: str,
+        *,
+        field_name: str,
+        value: Any,
+        reason: str,
+        changed_by: str = "operator",
+    ) -> AccountProfile:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        profile = self.store.get_account_profile(account_id) or self._sync_profile(account_id)
+        if field_name not in PROFILE_KNOWLEDGE_FIELDS:
+            raise ConfigurationBlocked("UNKNOWN_PROFILE_FIELD", f"cannot override {field_name}")
+        old = getattr(profile, field_name)
+        old_value = old.value if isinstance(old, KnowledgeField) else old
+        field = knowledge_field(value, source="USER_OVERRIDE", reason=reason, changed_by=changed_by)
+        saved = self.store.save_account_profile(AccountProfile(**{**profile.__dict__, field_name: field, "updated_at": utcnow()}))
+        self.store.save_override(ManualOverride(
+            override_id=uuid4().hex,
+            account_id=account_id,
+            platform=account.platform,
+            target_kind="account_profile",
+            target_id=account_id,
+            field_name=field_name,
+            old_value=old_value,
+            new_value=value,
+            changed_by=changed_by,
+            reason=reason,
+            source="USER_OVERRIDE",
+        ))
+        return saved
+
+    def override_character(
+        self,
+        account_id: str,
+        *,
+        field_name: str,
+        value: Any,
+        reason: str,
+        changed_by: str = "operator",
+    ) -> VirtualCharacter:
+        account = self.store.get_account(account_id)
+        if account is None or not account.character_id:
+            raise IsolationError("character override requires a bound character")
+        character = self.store.get_character(account.character_id, account_id=account_id)
+        if character is None:
+            raise IsolationError("character not found")
+        if not hasattr(character, field_name):
+            raise ConfigurationBlocked("UNKNOWN_CHARACTER_FIELD", f"cannot override {field_name}")
+        old_value = getattr(character, field_name)
+        next_version = int(character.version or 1) + 1
+        payload = {**character.__dict__, field_name: value, "version": next_version, "updated_at": utcnow()}
+        saved = self.store.save_character(VirtualCharacter(**payload))
+        self.store.save_character_revision(CharacterRevision(
+            revision_id=uuid4().hex,
+            character_id=saved.character_id,
+            account_id=account_id,
+            version=saved.version,
+            snapshot={"name": saved.name, "appearance": dict(saved.appearance_profile), field_name: value},
+        ))
+        self.store.save_override(ManualOverride(
+            override_id=uuid4().hex,
+            account_id=account_id,
+            platform=account.platform,
+            target_kind="character",
+            target_id=saved.character_id,
+            field_name=field_name,
+            old_value=old_value,
+            new_value=value,
+            changed_by=changed_by,
+            reason=reason,
+            source="USER_OVERRIDE",
+        ))
+        return saved
+
+    def get_today_tasks(self, *, account_id: str | None = None, platform: str | None = None) -> list[CreatorTask]:
+        return TaskOS(self.store).get_today_tasks(account_id=account_id, platform=platform)
+
+    def get_blocked_tasks(self, *, account_id: str | None = None, platform: str | None = None) -> list[CreatorTask]:
+        return TaskOS(self.store).get_blocked_tasks(account_id=account_id, platform=platform)
+
+    def get_next_action(self, *, account_id: str | None = None, platform: str | None = None) -> CreatorTask | None:
+        return TaskOS(self.store).get_next_action(account_id=account_id, platform=platform)
+
+    def plan_next(self, *, account_id: str, request: str = "", format: str = "image"):
+        return EpisodePlanner(self.store).plan_next(account_id=account_id, request=request, format=format)
+
+    def tomorrow(self, *, account_id: str) -> dict[str, Any]:
+        return EpisodePlanner(self.store).tomorrow(account_id=account_id)
+
+    def production_readiness(self, *, account_id: str | None = None, persist: bool = True) -> dict[str, Any]:
+        return ProductionReadinessService(self.store).evaluate(account_id=account_id, persist=persist)
+
+    def dashboard(self, *, account_id: str | None = None, platform: str | None = None) -> dict[str, Any]:
+        account = self.store.get_account(account_id) if account_id else self.store.active_account(platform=platform)
+        if account is None:
+            account = self.store.active_account()
+        if account is None:
+            return {"status": "NOT_CONFIGURED", "reason": "no platform account"}
+        view = self.show_account(account.account_id)
+        state = view.get("operating_state")
+        episode = view.get("episode")
+        series = view.get("series")
+        task = view.get("current_task") or self.get_next_action(account_id=account.account_id)
+        tasks = self.get_today_tasks(account_id=account.account_id)
+        learning = self.store.list_learning(account_id=account.account_id, platform=account.platform)
+        pending_creative = [item for item in tasks if item.task_type == "CREATIVE_EXECUTION" and item.status in {"WAITING_OPERATOR", "READY", "IN_PROGRESS"}]
+        pending_import = [item for item in tasks if item.task_type == "ASSET_IMPORT" and item.status in {"READY", "TODO", "IN_PROGRESS"}]
+        pending_handoff = [item for item in tasks if item.task_type == "HANDOFF" and item.status in {"READY", "TODO", "IN_PROGRESS"}]
+        return {
+            "account": account.label(),
+            "account_id": account.account_id,
+            "platform": account.platform,
+            "current_objective": (state.current_objective if state else "") or (view["profile"].field_value("account_objective") if view.get("profile") else ""),
+            "current_series": series.name if series else (state.current_series if state else None),
+            "current_episode": episode.title if episode else None,
+            "current_episode_id": episode.episode_id if episode else None,
+            "current_task": None if task is None else {
+                "task_id": task.task_id,
+                "task_type": task.task_type,
+                "status": task.status,
+                "title": task.title,
+                "next_task_type": task.next_task_type,
+            },
+            "pending_creative": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_creative],
+            "pending_import": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_import],
+            "pending_handoff": [{"task_id": item.task_id, "status": item.status, "episode_id": item.episode_id} for item in pending_handoff],
+            "recent_learning": [{"learning_id": item.learning_id, "reason": item.reason, "next_recommendation": item.next_recommendation} for item in learning[:5]],
+            "next_recommended_action": None if task is None else {
+                "task_type": task.task_type,
+                "status": task.status,
+                "title": task.title,
+            },
+        }
 
     def seed_sandbox(self) -> dict[str, Any]:
         xhs = self._seed_platform_account(
@@ -878,6 +1313,13 @@ class ContinuityRuntime:
             "PUBLICATION_RUNTIME": _prod("PUBLICATION"),
             "ANALYTICS_RUNTIME": _prod("ANALYTICS_IMPORTED"),
             "PRODUCTION_RUN": _arch(ready),
+            "ACCOUNT_OS": _arch(ready, owner="content.models.AccountProfile"),
+            "TASK_OS": _arch(ready, owner="content.tasks.TaskOS"),
+            "CONTENT_CALENDAR": _arch(ready, owner="content.planner.EpisodePlanner"),
+            "EPISODE_PLANNER": _arch(True, owner="content.planner.EpisodePlanner"),
+            "CORE_PRODUCTION": {"status": "READY" if ready else "NOT_CONFIGURED", "lane": "ARCHITECTURE"},
+            "POST_PRODUCTION": _prod("ANALYTICS_IMPORTED"),
+            "FULL_LOOP": _prod("LEARNING_WRITTEN"),
             "LEARNING_RUNTIME": _prod("LEARNING_WRITTEN"),
             "PRODUCTION_EVIDENCE": _arch(ready, count=len(evidence)),
             "REAL_DAY_1": _prod("DAY_001_REAL_ASSET_IMPORTED"),

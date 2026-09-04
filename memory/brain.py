@@ -25,6 +25,9 @@ SCOPE_DIRS = {
     "CAMPAIGN": "strategy",
     "PUBLICATION": "learnings",
     "ANALYTICS": "analytics",
+    "TASK": "tasks",
+    "PROMPT": "prompts",
+    "ASSET": "assets",
 }
 
 FRONTMATTER_KEYS = (
@@ -61,7 +64,7 @@ class KnowledgeBrain:
     def __init__(self, root: Path | None = None) -> None:
         self.root = Path(root or DEFAULT_VAULT)
         self.root.mkdir(parents=True, exist_ok=True)
-        for name in ("accounts", "characters", "worlds", "series", "episodes", "strategy", "platforms", "research", "learnings", "decisions", "analytics"):
+        for name in ("accounts", "characters", "worlds", "series", "episodes", "strategy", "platforms", "research", "learnings", "decisions", "analytics", "tasks", "prompts", "assets"):
             (self.root / name).mkdir(parents=True, exist_ok=True)
 
     def path_for(self, document: KnowledgeDocument) -> Path:

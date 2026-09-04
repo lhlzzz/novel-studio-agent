@@ -14,11 +14,14 @@ from sqlalchemy.pool import StaticPool
 
 from content.models import (
     ACCOUNT_PLATFORMS,
+    AccountOperatingState,
+    AccountProfile,
     AccountWorld,
     AnalyticsRecord,
     AssetLineage,
     AssetReferenceSnapshot,
     CharacterRevision,
+    ContentCalendarEntry,
     ContentPackage,
     ContentPackageAsset,
     ContentRevision,
@@ -26,12 +29,15 @@ from content.models import (
     ContinuityMemory,
     CreativeContext,
     CreativeExecutionReceipt,
+    CreatorTask,
     Episode,
     EpisodeConflict,
     ExistingAssetError,
     IsolationError,
+    KnowledgeField,
     LearningRecord,
     LifecycleTransition,
+    ManualOverride,
     PatternPromotion,
     PerformanceFeedback,
     PlatformAccount,
@@ -39,6 +45,7 @@ from content.models import (
     PlatformCreativeDNA,
     PlatformLearningProfile,
     ProductionEvidence,
+    ProductionReadinessRecord,
     ProductionRun,
     PromptPackage,
     PromptPattern,
@@ -83,6 +90,12 @@ CONTINUITY_TABLE_NAMES = (
     "asset_reference_snapshots",
     "pattern_promotions",
     "lifecycle_transitions",
+    "account_profiles",
+    "account_operating_states",
+    "manual_overrides",
+    "creator_tasks",
+    "content_calendar",
+    "production_readiness_records",
 )
 
 
@@ -212,6 +225,7 @@ class ContinuityStore:
             "credential_ref": account.credential_ref,
             "character_id": account.character_id,
             "world_id": account.world_id,
+            "series_id": account.series_id,
             "default_style_profile_id": account.default_style_profile_id,
             "social_account_id": account.social_account_id,
             "activated_at": _parse_dt(account.activated_at),
@@ -1213,6 +1227,7 @@ class ContinuityStore:
             "publication_id": run.publication_id,
             "analytics_id": run.analytics_id,
             "learning_id": run.learning_id,
+            "task_id": run.task_id,
             "status": run.status,
             "request": run.request,
             "updated_at": _now(),
@@ -1276,8 +1291,11 @@ class ContinuityStore:
             "favorites": record.favorites,
             "comments": record.comments,
             "shares": record.shares,
+            "clicks": record.clicks,
             "followers_gained": record.followers_gained,
+            "followers_delta": record.followers_delta,
             "published_at": record.published_at,
+            "observed_at": record.observed_at,
             "topic": record.topic,
             "cover": record.cover,
             "prompt_pattern": record.prompt_pattern,
@@ -1301,6 +1319,8 @@ class ContinuityStore:
             "platform": record.platform,
             "episode_id": record.episode_id,
             "analytics_id": record.analytics_id,
+            "prompt_id": record.prompt_id,
+            "asset_id": record.asset_id,
             "pattern_ids": list(record.pattern_ids),
             "what_worked": record.what_worked,
             "what_failed": record.what_failed,
@@ -1311,6 +1331,12 @@ class ContinuityStore:
             "next_recommendation": record.next_recommendation,
             "reason": record.reason,
             "source_episode_ids": list(record.source_episode_ids),
+            "evidence_status": record.evidence_status,
+            "failure_type": record.failure_type,
+            "diagnosis": record.diagnosis,
+            "root_cause": record.root_cause,
+            "evidence_gap": record.evidence_gap,
+            "outcome": record.outcome,
         })
         return record
 
@@ -1349,6 +1375,25 @@ class ContinuityStore:
             "snapshot": dict(revision.snapshot),
         })
         return revision
+
+    def list_character_revisions(self, character_id: str) -> list[CharacterRevision]:
+        from scripts.db.models import CharacterRevisionRecord
+
+        with self._session() as session:
+            stmt = select(CharacterRevisionRecord).where(CharacterRevisionRecord.character_id == character_id)
+            rows = list(session.execute(stmt).scalars())
+        rows.sort(key=lambda item: item.version)
+        return [
+            CharacterRevision(
+                revision_id=row.revision_id,
+                character_id=row.character_id,
+                account_id=row.account_id,
+                version=int(row.version or 1),
+                snapshot=_json(row.snapshot, {}),
+                created_at=_iso(row.created_at),
+            )
+            for row in rows
+        ]
 
     def save_world_revision(self, revision: WorldRevision) -> WorldRevision:
         from scripts.db.models import WorldRevisionRecord
@@ -1403,6 +1448,220 @@ class ContinuityStore:
         })
         return transition
 
+    def save_account_profile(self, profile: AccountProfile) -> AccountProfile:
+        from scripts.db.models import AccountProfileRecord
+
+        self._require_account(profile.account_id)
+        self._upsert(AccountProfileRecord, "account_id", profile.account_id, {
+            "platform": profile.platform,
+            "display_name": profile.display_name,
+            "external_account_id": profile.external_account_id,
+            "status": profile.status,
+            "character_id": profile.character_id,
+            "world_id": profile.world_id,
+            "series_id": profile.series_id,
+            "account_objective": profile.account_objective.as_dict(),
+            "target_audience": profile.target_audience.as_dict(),
+            "positioning": profile.positioning.as_dict(),
+            "content_pillars": profile.content_pillars.as_dict(),
+            "brand_voice": profile.brand_voice.as_dict(),
+            "visual_style": profile.visual_style.as_dict(),
+            "content_frequency": profile.content_frequency.as_dict(),
+            "preferred_publish_windows": profile.preferred_publish_windows.as_dict(),
+            "content_formats": profile.content_formats.as_dict(),
+            "operating_rules": profile.operating_rules.as_dict(),
+            "forbidden_rules": profile.forbidden_rules.as_dict(),
+            "manual_notes": profile.manual_notes.as_dict(),
+            "updated_at": _now(),
+        })
+        return profile
+
+    def get_account_profile(self, account_id: str) -> AccountProfile | None:
+        from scripts.db.models import AccountProfileRecord
+
+        with self._session() as session:
+            row = session.get(AccountProfileRecord, account_id)
+            return _account_profile_from_row(row) if row else None
+
+    def save_operating_state(self, state: AccountOperatingState) -> AccountOperatingState:
+        from scripts.db.models import AccountOperatingStateRecord
+
+        self._require_account(state.account_id)
+        self._upsert(AccountOperatingStateRecord, "account_id", state.account_id, {
+            "platform": state.platform,
+            "current_objective": state.current_objective,
+            "current_priority": state.current_priority,
+            "current_series": state.current_series,
+            "current_episode": state.current_episode,
+            "current_task": state.current_task,
+            "current_campaign": state.current_campaign,
+            "current_strategy": state.current_strategy,
+            "current_content_status": state.current_content_status,
+            "last_published_episode": state.last_published_episode,
+            "last_generated_asset": state.last_generated_asset,
+            "last_learning": state.last_learning,
+            "learning_summary": state.learning_summary,
+            "next_action": state.next_action,
+            "next_due_at": state.next_due_at,
+            "paused_until": state.paused_until,
+            "operator_notes": state.operator_notes,
+            "updated_at": _now(),
+        })
+        return state
+
+    def get_operating_state(self, account_id: str) -> AccountOperatingState | None:
+        from scripts.db.models import AccountOperatingStateRecord
+
+        with self._session() as session:
+            row = session.get(AccountOperatingStateRecord, account_id)
+            return _operating_state_from_row(row) if row else None
+
+    def save_override(self, override: ManualOverride) -> ManualOverride:
+        from scripts.db.models import ManualOverrideRecord
+
+        self._require_account(override.account_id)
+        self._upsert(ManualOverrideRecord, "override_id", override.override_id, {
+            "account_id": override.account_id,
+            "platform": override.platform,
+            "target_kind": override.target_kind,
+            "target_id": override.target_id,
+            "field_name": override.field_name,
+            "old_value": override.old_value if isinstance(override.old_value, dict) else {"value": override.old_value},
+            "new_value": override.new_value if isinstance(override.new_value, dict) else {"value": override.new_value},
+            "changed_by": override.changed_by,
+            "reason": override.reason,
+            "source": override.source,
+        })
+        return override
+
+    def list_overrides(self, account_id: str, *, target_kind: str | None = None) -> list[ManualOverride]:
+        from scripts.db.models import ManualOverrideRecord
+
+        with self._session() as session:
+            stmt = select(ManualOverrideRecord).where(ManualOverrideRecord.account_id == account_id)
+            if target_kind:
+                stmt = stmt.where(ManualOverrideRecord.target_kind == target_kind)
+            return [_override_from_row(row) for row in session.execute(stmt).scalars()]
+
+    def save_task(self, task: CreatorTask) -> CreatorTask:
+        from scripts.db.models import CreatorTaskRecord
+
+        self._require_account(task.account_id)
+        self._upsert(CreatorTaskRecord, "task_id", task.task_id, {
+            "account_id": task.account_id,
+            "platform": task.platform,
+            "task_type": task.task_type,
+            "title": task.title,
+            "description": task.description,
+            "priority": task.priority,
+            "status": task.status,
+            "due_at": task.due_at,
+            "episode_id": task.episode_id,
+            "series_id": task.series_id,
+            "prompt_id": task.prompt_id,
+            "asset_id": task.asset_id,
+            "package_id": task.package_id,
+            "production_run_id": task.production_run_id,
+            "parent_task_id": task.parent_task_id,
+            "next_task_id": task.next_task_id,
+            "next_task_type": task.next_task_type,
+            "dependencies": list(task.dependencies),
+            "operator_notes": task.operator_notes,
+            "blocked_reason": task.blocked_reason,
+            "updated_at": _now(),
+            "completed_at": _parse_dt(task.completed_at),
+        })
+        return task
+
+    def get_task(self, task_id: str) -> CreatorTask | None:
+        from scripts.db.models import CreatorTaskRecord
+
+        with self._session() as session:
+            row = session.get(CreatorTaskRecord, task_id)
+            return _task_from_row(row) if row else None
+
+    def list_tasks(
+        self,
+        *,
+        account_id: str | None = None,
+        platform: str | None = None,
+        status: str | None = None,
+        episode_id: str | None = None,
+        open_only: bool = False,
+    ) -> list[CreatorTask]:
+        from scripts.db.models import CreatorTaskRecord
+
+        with self._session() as session:
+            stmt = select(CreatorTaskRecord)
+            if account_id:
+                stmt = stmt.where(CreatorTaskRecord.account_id == account_id)
+            if platform:
+                stmt = stmt.where(CreatorTaskRecord.platform == platform)
+            if status:
+                stmt = stmt.where(CreatorTaskRecord.status == status)
+            if episode_id:
+                stmt = stmt.where(CreatorTaskRecord.episode_id == episode_id)
+            if open_only:
+                stmt = stmt.where(CreatorTaskRecord.status.notin_(("DONE", "CANCELLED")))
+            rows = [_task_from_row(row) for row in session.execute(stmt).scalars()]
+        rows.sort(key=lambda item: (item.due_at or "9999", {"CRITICAL": 0, "HIGH": 1, "NORMAL": 2, "LOW": 3}.get(item.priority, 9), item.created_at or ""))
+        return rows
+
+    def save_calendar_entry(self, entry: ContentCalendarEntry) -> ContentCalendarEntry:
+        from scripts.db.models import ContentCalendarRecord
+
+        self._require_account(entry.account_id)
+        self._upsert(ContentCalendarRecord, "calendar_id", entry.calendar_id, {
+            "account_id": entry.account_id,
+            "platform": entry.platform,
+            "date": entry.date,
+            "slot": entry.slot,
+            "episode_id": entry.episode_id,
+            "task_id": entry.task_id,
+            "status": entry.status,
+            "topic": entry.topic,
+            "format": entry.format,
+            "priority": entry.priority,
+            "updated_at": _now(),
+        })
+        return entry
+
+    def get_calendar_entry(self, calendar_id: str) -> ContentCalendarEntry | None:
+        from scripts.db.models import ContentCalendarRecord
+
+        with self._session() as session:
+            row = session.get(ContentCalendarRecord, calendar_id)
+            return _calendar_from_row(row) if row else None
+
+    def list_calendar(self, *, account_id: str | None = None, date: str | None = None, platform: str | None = None) -> list[ContentCalendarEntry]:
+        from scripts.db.models import ContentCalendarRecord
+
+        with self._session() as session:
+            stmt = select(ContentCalendarRecord)
+            if account_id:
+                stmt = stmt.where(ContentCalendarRecord.account_id == account_id)
+            if date:
+                stmt = stmt.where(ContentCalendarRecord.date == date)
+            if platform:
+                stmt = stmt.where(ContentCalendarRecord.platform == platform)
+            rows = [_calendar_from_row(row) for row in session.execute(stmt).scalars()]
+        rows.sort(key=lambda item: (item.date, item.slot, item.platform))
+        return rows
+
+    def save_readiness(self, record: ProductionReadinessRecord) -> ProductionReadinessRecord:
+        from scripts.db.models import ProductionReadinessRecordRow
+
+        self._upsert(ProductionReadinessRecordRow, "record_id", record.record_id, {
+            "account_id": record.account_id,
+            "platform": record.platform,
+            "core_production": record.core_production,
+            "post_production": record.post_production,
+            "full_loop": record.full_loop,
+            "checks": dict(record.checks),
+            "detail": dict(record.detail),
+        })
+        return record
+
     def _require_account(self, account_id: str) -> PlatformAccount:
         account = self.get_account(account_id)
         if account is None:
@@ -1420,6 +1679,7 @@ def _account_from_row(row) -> PlatformAccount:
         credential_ref=row.credential_ref or "",
         character_id=row.character_id,
         world_id=row.world_id,
+        series_id=getattr(row, "series_id", None),
         default_style_profile_id=row.default_style_profile_id,
         social_account_id=row.social_account_id,
         activated_at=_iso(row.activated_at),
@@ -1860,6 +2120,7 @@ def _production_run_from_row(row) -> ProductionRun:
         publication_id=row.publication_id,
         analytics_id=row.analytics_id,
         learning_id=row.learning_id,
+        task_id=getattr(row, "task_id", None),
         status=row.status or "OPEN",
         request=row.request or "",
         created_at=_iso(row.created_at),
@@ -1903,8 +2164,11 @@ def _analytics_from_row(row) -> AnalyticsRecord:
         favorites=row.favorites,
         comments=row.comments,
         shares=row.shares,
+        clicks=getattr(row, "clicks", None),
         followers_gained=row.followers_gained,
+        followers_delta=getattr(row, "followers_delta", None),
         published_at=row.published_at,
+        observed_at=getattr(row, "observed_at", None),
         topic=row.topic or "",
         cover=row.cover or "",
         prompt_pattern=row.prompt_pattern or "",
@@ -1920,6 +2184,8 @@ def _learning_record_from_row(row) -> LearningRecord:
         platform=row.platform,
         episode_id=row.episode_id,
         analytics_id=row.analytics_id,
+        prompt_id=getattr(row, "prompt_id", None),
+        asset_id=getattr(row, "asset_id", None),
         pattern_ids=_tuple(row.pattern_ids),
         what_worked=row.what_worked or "",
         what_failed=row.what_failed or "",
@@ -1930,5 +2196,147 @@ def _learning_record_from_row(row) -> LearningRecord:
         next_recommendation=row.next_recommendation or "",
         reason=row.reason or "",
         source_episode_ids=_tuple(row.source_episode_ids),
+        evidence_status=getattr(row, "evidence_status", None) or "NOT_VERIFIED",
+        failure_type=getattr(row, "failure_type", "") or "",
+        diagnosis=getattr(row, "diagnosis", "") or "",
+        root_cause=getattr(row, "root_cause", "") or "",
+        evidence_gap=getattr(row, "evidence_gap", "") or "",
+        outcome=getattr(row, "outcome", "") or "",
         created_at=_iso(row.created_at),
+    )
+
+
+def _knowledge_from_payload(value: Any) -> KnowledgeField:
+    if isinstance(value, KnowledgeField):
+        return value
+    if isinstance(value, dict) and ("source" in value or "value" in value):
+        return KnowledgeField(
+            value=value.get("value"),
+            source=value.get("source") or "UNKNOWN",
+            reason=value.get("reason") or "",
+            changed_by=value.get("changed_by") or "",
+            changed_at=value.get("changed_at"),
+        )
+    return KnowledgeField(value=value, source="UNKNOWN")
+
+
+def _account_profile_from_row(row) -> AccountProfile:
+    return AccountProfile(
+        account_id=row.account_id,
+        platform=row.platform,
+        display_name=row.display_name or "",
+        external_account_id=row.external_account_id or "",
+        status=row.status or "DRAFT",
+        character_id=row.character_id,
+        world_id=row.world_id,
+        series_id=row.series_id,
+        account_objective=_knowledge_from_payload(row.account_objective),
+        target_audience=_knowledge_from_payload(row.target_audience),
+        positioning=_knowledge_from_payload(row.positioning),
+        content_pillars=_knowledge_from_payload(row.content_pillars),
+        brand_voice=_knowledge_from_payload(row.brand_voice),
+        visual_style=_knowledge_from_payload(row.visual_style),
+        content_frequency=_knowledge_from_payload(row.content_frequency),
+        preferred_publish_windows=_knowledge_from_payload(row.preferred_publish_windows),
+        content_formats=_knowledge_from_payload(row.content_formats),
+        operating_rules=_knowledge_from_payload(row.operating_rules),
+        forbidden_rules=_knowledge_from_payload(row.forbidden_rules),
+        manual_notes=_knowledge_from_payload(row.manual_notes),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _operating_state_from_row(row) -> AccountOperatingState:
+    return AccountOperatingState(
+        account_id=row.account_id,
+        platform=row.platform,
+        current_objective=row.current_objective or "",
+        current_priority=row.current_priority or "NORMAL",
+        current_series=row.current_series,
+        current_episode=row.current_episode,
+        current_task=row.current_task,
+        current_campaign=row.current_campaign,
+        current_strategy=row.current_strategy or "",
+        current_content_status=row.current_content_status or "IDEA",
+        last_published_episode=row.last_published_episode,
+        last_generated_asset=row.last_generated_asset,
+        last_learning=row.last_learning,
+        learning_summary=row.learning_summary or "",
+        next_action=row.next_action or "",
+        next_due_at=row.next_due_at,
+        paused_until=row.paused_until,
+        operator_notes=row.operator_notes or "",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _override_from_row(row) -> ManualOverride:
+    old_value = _json(row.old_value, {})
+    new_value = _json(row.new_value, {})
+    if isinstance(old_value, dict) and set(old_value.keys()) == {"value"}:
+        old_value = old_value.get("value")
+    if isinstance(new_value, dict) and set(new_value.keys()) == {"value"}:
+        new_value = new_value.get("value")
+    return ManualOverride(
+        override_id=row.override_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        target_kind=row.target_kind,
+        target_id=row.target_id,
+        field_name=row.field_name,
+        old_value=old_value,
+        new_value=new_value,
+        changed_by=row.changed_by or "operator",
+        reason=row.reason or "",
+        source=row.source or "USER_OVERRIDE",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _task_from_row(row) -> CreatorTask:
+    return CreatorTask(
+        task_id=row.task_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        task_type=row.task_type,
+        title=row.title,
+        description=row.description or "",
+        priority=row.priority or "NORMAL",
+        status=row.status or "TODO",
+        due_at=row.due_at,
+        episode_id=row.episode_id,
+        series_id=row.series_id,
+        prompt_id=row.prompt_id,
+        asset_id=row.asset_id,
+        package_id=row.package_id,
+        production_run_id=row.production_run_id,
+        parent_task_id=row.parent_task_id,
+        next_task_id=row.next_task_id,
+        next_task_type=row.next_task_type,
+        dependencies=_tuple(row.dependencies),
+        operator_notes=row.operator_notes or "",
+        blocked_reason=row.blocked_reason or "",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+        completed_at=_iso(row.completed_at),
+    )
+
+
+def _calendar_from_row(row) -> ContentCalendarEntry:
+    return ContentCalendarEntry(
+        calendar_id=row.calendar_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        date=row.date,
+        slot=row.slot or "default",
+        episode_id=row.episode_id,
+        task_id=row.task_id,
+        status=row.status or "PLANNED",
+        topic=row.topic or "",
+        format=row.format or "image",
+        priority=row.priority or "NORMAL",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
     )

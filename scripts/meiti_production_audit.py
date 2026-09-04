@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-AUDIT_PATH = ROOT / "docs/audits/meiti-v4.8-production-loop.json"
+AUDIT_PATH = ROOT / "docs/audits/meiti-v4.8.1-production-readiness.json"
 
 
 def _status(ok: bool, *, missing: bool = False, evidence: bool = False) -> str:
@@ -23,12 +23,15 @@ def _status(ok: bool, *, missing: bool = False, evidence: bool = False) -> str:
 
 def code_audit() -> dict:
     required = {
-        "content/models.py": ("class ProductionRun", "class ProductionEvidence", "class LearningRecord", "class AnalyticsRecord"),
-        "content/runtime.py": ("def compile_prompt", "def record_handoff", "def record_analytics", "def record_learning"),
-        "content/assets.py": ("EXISTING_ASSET", "CROSS_PLATFORM_ASSET_REUSE", "class PlatformAssetService"),
+        "content/models.py": ("class ProductionRun", "class AccountProfile", "class AccountOperatingState", "class CreatorTask", "class AnalyticsRecord", "CANONICAL_ANALYTICS_STORE"),
+        "content/runtime.py": ("def compile_prompt", "def record_handoff", "def record_analytics", "def record_learning", "def dashboard", "def get_next_action"),
+        "content/assets.py": ("EXISTING_ASSET", "CROSS_PLATFORM_ASSET_REUSE", "NO_PROMPT_REFERENCE", "class PlatformAssetService"),
         "content/compiler.py": ("COPY READY", "DUPLICATE_CONTENT", "class PromptCompiler"),
-        "migrations/versions/0014_v48_production_loop.py": ('revision = "0014_v48_production_loop"',),
-        "scripts/meiti.py": ("compile-prompt", "import-asset", "cmd_analytics_record", "cmd_learning_record"),
+        "content/tasks.py": ("class TaskOS", "PRODUCTION_CHAIN"),
+        "content/planner.py": ("class EpisodePlanner", "NEW_PRIMARY_REQUIRED"),
+        "content/readiness.py": ("class ProductionReadinessService", "CORE_PRODUCTION"),
+        "migrations/versions/0015_v481_production_ready_creator_os.py": ('revision = "0015_v481_production_ready_creator_os"',),
+        "scripts/meiti.py": ("compile-prompt", "import-asset", "cmd_analytics_record", "cmd_learning_record", "cmd_task_next", "cmd_dashboard"),
     }
     missing = []
     for path, tokens in required.items():
@@ -75,7 +78,7 @@ def run() -> dict:
     evidence = production_evidence()
     days = evidence.get("days") or {}
     payload = {
-        "version": "4.8",
+        "version": "4.8.1",
         "CODE_AUDIT": code_audit(),
         "PRODUCTION_EVIDENCE": evidence,
         "REAL_DAY_1": {"status": days.get("REAL_DAY_1") or "NOT_VERIFIED", "lane": "PRODUCTION_EVIDENCE"},

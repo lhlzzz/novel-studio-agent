@@ -1,4 +1,4 @@
-# Meiti V4.7.1 State
+# Meiti V4.8.1 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
 Image / video execution: Lechuang is a manual creative execution tool unless a verified API adapter exists
@@ -38,4 +38,8 @@ Real Social E2E: BLOCKED_EXTERNAL
 Production Gate: BLOCKED_EXTERNAL
 CODE_COMPLETE: true
 EXTERNAL_READY: false
-PRODUCTION_READY: false
+CORE_PRODUCTION: READY
+POST_PRODUCTION: NOT_VERIFIED
+FULL_LOOP: NOT_VERIFIED
+PRODUCTION_READY: true
+NOTE: PRODUCTION_READY is CORE_PRODUCTION only. Analytics, Learning, and real Lechuang/social E2E stay NOT_VERIFIED until operator evidence exists. External APIs do not block the human production chain.

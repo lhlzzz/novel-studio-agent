@@ -1,4 +1,4 @@
-# Meiti V4.7 Task
+# Meiti V4.8.1 Task
 
 **GOAL:** Close Memory, Account, Continuity, Creative, and Video into one
 production loop. MemoryService owns retrieval/writeback. Obsidian is the

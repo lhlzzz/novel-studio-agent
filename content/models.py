@@ -196,6 +196,7 @@ class PlatformAccount:
     credential_ref: str = ""
     character_id: str | None = None
     world_id: str | None = None
+    series_id: str | None = None
     default_style_profile_id: str | None = None
     social_account_id: str | None = None
     activated_at: str | None = None
@@ -872,6 +873,67 @@ def with_status(package: ContentPackage, status: str) -> ContentPackage:
 PATTERN_PROMOTION_STATES = ("PLATFORM", "GLOBAL_CANDIDATE", "GLOBAL_PATTERN", "REJECTED")
 PRODUCTION_RUN_STATES = ("OPEN", "AWAITING_CREATIVE", "IMPORTED", "PACKAGED", "HANDED_OFF", "LEARNED", "CLOSED", "BLOCKED")
 EVIDENCE_SOURCES = ("code", "operator", "lechuang", "analytics", "memory", "audit")
+KNOWLEDGE_SOURCES = (
+    "USER_OVERRIDE",
+    "USER_DEFINED",
+    "LEARNED",
+    "SYSTEM_DERIVED",
+    "SYSTEM_RECOMMENDED",
+    "DEFAULT",
+    "TEMPORARY",
+    "UNKNOWN",
+)
+TASK_TYPES = (
+    "ACCOUNT_SETUP",
+    "ACCOUNT_MAINTENANCE",
+    "CONTENT_IDEA",
+    "CONTENT_PLAN",
+    "PROMPT_GENERATION",
+    "CREATIVE_EXECUTION",
+    "ASSET_IMPORT",
+    "QA",
+    "PACKAGE",
+    "HANDOFF",
+    "PUBLISH",
+    "ANALYTICS",
+    "LEARNING",
+    "RESEARCH",
+    "REVIEW",
+)
+TASK_STATES = (
+    "TODO",
+    "READY",
+    "IN_PROGRESS",
+    "WAITING_OPERATOR",
+    "WAITING_EXTERNAL",
+    "BLOCKED",
+    "DONE",
+    "CANCELLED",
+)
+TASK_PRIORITIES = ("CRITICAL", "HIGH", "NORMAL", "LOW")
+PRODUCTION_CHAIN = (
+    "CONTENT_PLAN",
+    "PROMPT_GENERATION",
+    "CREATIVE_EXECUTION",
+    "ASSET_IMPORT",
+    "QA",
+    "PACKAGE",
+    "HANDOFF",
+    "ANALYTICS",
+    "LEARNING",
+)
+CALENDAR_STATES = (
+    "PLANNED",
+    "READY",
+    "PRODUCING",
+    "READY_TO_PUBLISH",
+    "PUBLISHED",
+    "MISSED",
+    "CANCELLED",
+)
+READINESS_STATES = ("READY", "PARTIAL", "BLOCKED", "NOT_CONFIGURED", "PASS", "FAIL", "NOT_VERIFIED", "BLOCKED_EXTERNAL", "NEEDS_MORE_EVIDENCE", "UNKNOWN")
+LEARNING_EVIDENCE_STATES = ("VERIFIED", "NOT_ENOUGH_EVIDENCE", "NOT_VERIFIED")
+CANONICAL_ANALYTICS_STORE = "content.models.AnalyticsRecord"
 
 
 @dataclass(frozen=True)
@@ -887,6 +949,7 @@ class ProductionRun:
     publication_id: str | None = None
     analytics_id: str | None = None
     learning_id: str | None = None
+    task_id: str | None = None
     status: str = "OPEN"
     request: str = ""
     created_at: str | None = None
@@ -950,8 +1013,11 @@ class AnalyticsRecord:
     favorites: int | None = None
     comments: int | None = None
     shares: int | None = None
+    clicks: int | None = None
     followers_gained: int | None = None
+    followers_delta: int | None = None
     published_at: str | None = None
+    observed_at: str | None = None
     topic: str = ""
     cover: str = ""
     prompt_pattern: str = ""
@@ -959,6 +1025,12 @@ class AnalyticsRecord:
     created_at: str | None = None
 
     def __post_init__(self) -> None:
+        if self.followers_delta is None and self.followers_gained is not None:
+            object.__setattr__(self, "followers_delta", self.followers_gained)
+        if self.followers_gained is None and self.followers_delta is not None:
+            object.__setattr__(self, "followers_gained", self.followers_delta)
+        if not self.observed_at:
+            object.__setattr__(self, "observed_at", utcnow())
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
 
@@ -974,6 +1046,8 @@ class LearningRecord:
     platform: str
     episode_id: str | None = None
     analytics_id: str | None = None
+    prompt_id: str | None = None
+    asset_id: str | None = None
     pattern_ids: tuple[str, ...] = ()
     what_worked: str = ""
     what_failed: str = ""
@@ -984,9 +1058,17 @@ class LearningRecord:
     next_recommendation: str = ""
     reason: str = ""
     source_episode_ids: tuple[str, ...] = ()
+    evidence_status: str = "NOT_VERIFIED"
+    failure_type: str = ""
+    diagnosis: str = ""
+    root_cause: str = ""
+    evidence_gap: str = ""
+    outcome: str = ""
     created_at: str | None = None
 
     def __post_init__(self) -> None:
+        if self.evidence_status not in LEARNING_EVIDENCE_STATES:
+            raise ValueError(f"invalid learning evidence status: {self.evidence_status}")
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
 
@@ -1120,3 +1202,273 @@ class LifecycleTransition:
     @property
     def id(self) -> str:
         return self.transition_id
+
+
+@dataclass(frozen=True)
+class KnowledgeField:
+    value: Any = None
+    source: str = "UNKNOWN"
+    reason: str = ""
+    changed_by: str = ""
+    changed_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source not in KNOWLEDGE_SOURCES:
+            raise ValueError(f"invalid knowledge source: {self.source}")
+        if not self.changed_at and self.value not in (None, "", (), []):
+            object.__setattr__(self, "changed_at", utcnow())
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "value": self.value,
+            "source": self.source,
+            "reason": self.reason,
+            "changed_by": self.changed_by,
+            "changed_at": self.changed_at,
+        }
+
+
+def knowledge_field(value: Any = None, *, source: str = "UNKNOWN", reason: str = "", changed_by: str = "", changed_at: str | None = None) -> KnowledgeField:
+    if isinstance(value, KnowledgeField):
+        return value
+    return KnowledgeField(value=value, source=source, reason=reason, changed_by=changed_by, changed_at=changed_at)
+
+
+@dataclass(frozen=True)
+class AccountProfile:
+    account_id: str
+    platform: str
+    display_name: str = ""
+    external_account_id: str = ""
+    status: str = "DRAFT"
+    character_id: str | None = None
+    world_id: str | None = None
+    series_id: str | None = None
+    account_objective: KnowledgeField = field(default_factory=KnowledgeField)
+    target_audience: KnowledgeField = field(default_factory=KnowledgeField)
+    positioning: KnowledgeField = field(default_factory=KnowledgeField)
+    content_pillars: KnowledgeField = field(default_factory=KnowledgeField)
+    brand_voice: KnowledgeField = field(default_factory=KnowledgeField)
+    visual_style: KnowledgeField = field(default_factory=KnowledgeField)
+    content_frequency: KnowledgeField = field(default_factory=KnowledgeField)
+    preferred_publish_windows: KnowledgeField = field(default_factory=KnowledgeField)
+    content_formats: KnowledgeField = field(default_factory=KnowledgeField)
+    operating_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    forbidden_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    manual_notes: KnowledgeField = field(default_factory=KnowledgeField)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        object.__setattr__(self, "account_objective", knowledge_field(self.account_objective))
+        object.__setattr__(self, "target_audience", knowledge_field(self.target_audience))
+        object.__setattr__(self, "positioning", knowledge_field(self.positioning))
+        object.__setattr__(self, "content_pillars", knowledge_field(self.content_pillars))
+        object.__setattr__(self, "brand_voice", knowledge_field(self.brand_voice))
+        object.__setattr__(self, "visual_style", knowledge_field(self.visual_style))
+        object.__setattr__(self, "content_frequency", knowledge_field(self.content_frequency))
+        object.__setattr__(self, "preferred_publish_windows", knowledge_field(self.preferred_publish_windows))
+        object.__setattr__(self, "content_formats", knowledge_field(self.content_formats))
+        object.__setattr__(self, "operating_rules", knowledge_field(self.operating_rules))
+        object.__setattr__(self, "forbidden_rules", knowledge_field(self.forbidden_rules))
+        object.__setattr__(self, "manual_notes", knowledge_field(self.manual_notes))
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.account_id
+
+    def field_value(self, name: str) -> Any:
+        field_obj = getattr(self, name)
+        if isinstance(field_obj, KnowledgeField):
+            return field_obj.value
+        return field_obj
+
+
+@dataclass(frozen=True)
+class AccountOperatingState:
+    account_id: str
+    platform: str
+    current_objective: str = ""
+    current_priority: str = "NORMAL"
+    current_series: str | None = None
+    current_episode: str | None = None
+    current_task: str | None = None
+    current_campaign: str | None = None
+    current_strategy: str = ""
+    current_content_status: str = "IDEA"
+    last_published_episode: str | None = None
+    last_generated_asset: str | None = None
+    last_learning: str | None = None
+    learning_summary: str = ""
+    next_action: str = ""
+    next_due_at: str | None = None
+    paused_until: str | None = None
+    operator_notes: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if self.current_priority not in TASK_PRIORITIES:
+            raise ValueError(f"invalid priority: {self.current_priority}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.account_id
+
+
+@dataclass(frozen=True)
+class ManualOverride:
+    override_id: str
+    account_id: str
+    platform: str
+    target_kind: str
+    target_id: str
+    field_name: str
+    old_value: Any = None
+    new_value: Any = None
+    changed_by: str = "operator"
+    reason: str = ""
+    source: str = "USER_OVERRIDE"
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source not in KNOWLEDGE_SOURCES:
+            raise ValueError(f"invalid override source: {self.source}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.override_id
+
+
+@dataclass(frozen=True)
+class CreatorTask:
+    task_id: str
+    account_id: str
+    platform: str
+    task_type: str
+    title: str
+    description: str = ""
+    priority: str = "NORMAL"
+    status: str = "TODO"
+    due_at: str | None = None
+    episode_id: str | None = None
+    series_id: str | None = None
+    prompt_id: str | None = None
+    asset_id: str | None = None
+    package_id: str | None = None
+    production_run_id: str | None = None
+    parent_task_id: str | None = None
+    next_task_id: str | None = None
+    next_task_type: str | None = None
+    dependencies: tuple[str, ...] = ()
+    operator_notes: str = ""
+    blocked_reason: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.task_type not in TASK_TYPES:
+            raise ValueError(f"invalid task type: {self.task_type}")
+        if self.status not in TASK_STATES:
+            raise ValueError(f"invalid task status: {self.status}")
+        if self.priority not in TASK_PRIORITIES:
+            raise ValueError(f"invalid task priority: {self.priority}")
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.task_id
+
+
+@dataclass(frozen=True)
+class ContentCalendarEntry:
+    calendar_id: str
+    account_id: str
+    platform: str
+    date: str
+    slot: str = "default"
+    episode_id: str | None = None
+    task_id: str | None = None
+    status: str = "PLANNED"
+    topic: str = ""
+    format: str = "image"
+    priority: str = "NORMAL"
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in CALENDAR_STATES:
+            raise ValueError(f"invalid calendar status: {self.status}")
+        if self.priority not in TASK_PRIORITIES:
+            raise ValueError(f"invalid calendar priority: {self.priority}")
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.calendar_id
+
+
+@dataclass(frozen=True)
+class EpisodeConcept:
+    account_id: str
+    platform: str
+    series_id: str | None
+    title: str
+    topic: str
+    format: str
+    brief: str
+    reason: str
+    freshness: str
+    continuity: str
+    learning_basis: tuple[str, ...] = ()
+    reference_asset_ids: tuple[str, ...] = ()
+    prompt_kind: str = "IMAGE"
+    recent_topics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProductionReadinessRecord:
+    record_id: str
+    account_id: str | None = None
+    platform: str = ""
+    core_production: str = "NOT_CONFIGURED"
+    post_production: str = "NOT_VERIFIED"
+    full_loop: str = "NOT_VERIFIED"
+    checks: dict[str, str] = field(default_factory=dict)
+    detail: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.core_production not in READINESS_STATES:
+            raise ValueError(f"invalid core_production: {self.core_production}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.record_id

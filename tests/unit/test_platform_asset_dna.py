@@ -71,9 +71,9 @@ def test_import_same_file_is_existing_asset_not_new_id(runtime, tmp_path):
     episode = runtime.continue_series(account_id=account.account_id, series_id=runtime.store.active_series(account.account_id).series_id, title="Day 1", brief="第一次晨跑")
     path = _png(tmp_path, "day1.png", 12)
     service = PlatformAssetService(runtime.store)
-    first = service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", root=tmp_path / "assets")
+    first = service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", no_prompt_reference=True, root=tmp_path / "assets")
     with pytest.raises(ExistingAssetError) as exc:
-        service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", root=tmp_path / "assets")
+        service.import_asset(path, account_id=account.account_id, platform="xiaohongshu", episode_id=episode.episode_id, asset_role="GENERATED_PRIMARY", no_prompt_reference=True, root=tmp_path / "assets")
     assert exc.value.code == "EXISTING_ASSET"
     assert first["asset"].sha256 in str(exc.value)
 
@@ -89,6 +89,7 @@ def test_next_episode_requires_new_primary_and_allows_derived(runtime, tmp_path)
         platform="xiaohongshu",
         episode_id=day1.episode_id,
         asset_role="GENERATED_PRIMARY",
+        no_prompt_reference=True,
         root=tmp_path / "assets",
     )
     day2 = runtime.continue_series(account_id=account.account_id, series_id=series.series_id, title="Day 2", brief="继续昨天")
@@ -120,6 +121,7 @@ def test_next_episode_requires_new_primary_and_allows_derived(runtime, tmp_path)
         asset_role="GENERATED_PRIMARY",
         parent_asset_id=first["asset"].asset_id,
         reuse_mode="DERIVED",
+        no_prompt_reference=True,
         root=tmp_path / "assets",
     )
     assert second["asset"].sha256 != first["asset"].sha256
@@ -140,6 +142,7 @@ def test_cross_platform_primary_is_blocked_but_reference_is_allowed(runtime, tmp
         platform="xiaohongshu",
         episode_id=xhs_ep.episode_id,
         asset_role="GENERATED_PRIMARY",
+        no_prompt_reference=True,
         root=tmp_path / "assets",
     )["asset"]
     package = ContentPackage(package_id=uuid4().hex, title="dy", body="dy", account_id=dy.account_id, platform="douyin", episode_id=dy_ep.episode_id)
@@ -246,6 +249,7 @@ def test_list_assets_does_not_return_other_platform_primary(runtime, tmp_path):
         platform="xiaohongshu",
         episode_id=xhs_ep.episode_id,
         asset_role="GENERATED_PRIMARY",
+        no_prompt_reference=True,
         root=tmp_path / "assets",
     )
     dy_assets = service.list_assets(dy.account_id, "douyin", role="GENERATED_PRIMARY", include_global=False)

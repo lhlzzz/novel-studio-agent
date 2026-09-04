@@ -12,6 +12,7 @@ from content.models import (
     ASSET_ROLES,
     AssetFreshnessError,
     AssetLineage,
+    ConfigurationBlocked,
     ContentPackage,
     ContentPackageAsset,
     CreativeExecutionReceipt,
@@ -251,10 +252,16 @@ class PlatformAssetService:
         tool: str = "lechuang",
         generation_mode: str = "MANUAL_CREATIVE_TOOL",
         generation_timestamp: str | None = None,
+        no_prompt_reference: bool = False,
         root: Path | None = None,
     ) -> dict[str, Any]:
         if asset_role not in ASSET_ROLES:
             raise ValueError(f"invalid asset_role: {asset_role}")
+        if asset_role in PRIMARY_ASSET_ROLES and not prompt_id and not no_prompt_reference:
+            raise ConfigurationBlocked(
+                "NO_PROMPT_REFERENCE",
+                "primary asset import requires prompt_id or explicit NO_PROMPT_REFERENCE",
+            )
         account = self.store.get_account(account_id)
         if account is None:
             raise IsolationError(f"unknown platform account: {account_id}")

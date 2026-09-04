@@ -1,4 +1,4 @@
-# Meiti V4.5.4 Handoff
+# Meiti V4.8.1 Handoff
 
 Branch `main`. Production activation hardening of V4.5.
 
@@ -15,5 +15,6 @@ Credentials enter RuntimeSecretStore only via OAuth callback or
 `python scripts/meiti.py credentials put --provider lechuang` using `XIAOLEAI_API_KEY`.
 Provider get_status/analytics require account_id.
 XHS publish returns HandoffOutcome. Xianyu returns ListingOutcome.
-CODE_COMPLETE = true. IMAGE_PRODUCTION_READY depends on live Xiaole credential +
-real image E2E. VIDEO_PRODUCTION_READY = NOT_VERIFIED. PRODUCTION_READY = false.
+CODE_COMPLETE = true. CORE_PRODUCTION = READY. IMAGE_PRODUCTION_READY depends on
+operator Lechuang import. VIDEO_PRODUCTION_READY = NOT_VERIFIED.
+POST_PRODUCTION = NOT_VERIFIED. PRODUCTION_READY = true for the human chain only.
