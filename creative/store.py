@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import create_engine, or_, select, update
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -135,6 +136,7 @@ class CreativeStore:
         self.assets._persist_asset = self.save_asset
         self.assets._persist_character = self.save_character
         self.assets._load_character = self.get_character
+        self._lease_lock = threading.Lock()
         self._hydrate_assets()
 
     @classmethod
@@ -144,6 +146,7 @@ class CreativeStore:
         store.lease_seconds = LEASE_SECONDS
         store.engine = production_engine()
         store.Session = sessionmaker(autocommit=False, autoflush=False, bind=store.engine)
+        store._lease_lock = threading.Lock()
         ensure_creative_schema(store.engine, allow_create=False)
         store.assets._persist_asset = store.save_asset
         store.assets._persist_character = store.save_character
@@ -321,23 +324,24 @@ class CreativeStore:
 
         ttl = int(seconds if seconds is not None else self.lease_seconds)
         now = _now()
-        with self._session() as session:
-            result = session.execute(
-                update(CreativeRunRecord)
-                .where(CreativeRunRecord.run_id == run_id)
-                .where(
-                    or_(
-                        CreativeRunRecord.worker_id.is_(None),
-                        CreativeRunRecord.worker_id == "",
-                        CreativeRunRecord.worker_id == worker_id,
-                        CreativeRunRecord.lease_until.is_(None),
-                        CreativeRunRecord.lease_until < now,
-                    )
-                )
-                .values(worker_id=worker_id, lease_until=now + timedelta(seconds=ttl), heartbeat_at=now)
-            )
-            session.commit()
-            return int(result.rowcount or 0) == 1
+        with self._lease_lock:
+            with self._session() as session:
+                row = session.execute(
+                    select(CreativeRunRecord).where(CreativeRunRecord.run_id == run_id).with_for_update()
+                ).scalar_one_or_none()
+                if row is None:
+                    return False
+                owner = row.worker_id
+                until = row.lease_until
+                same_owner = owner in {None, "", worker_id}
+                expired = until is None or until < now
+                if not same_owner and not expired:
+                    return False
+                row.worker_id = worker_id
+                row.lease_until = now + timedelta(seconds=ttl)
+                row.heartbeat_at = now
+                session.commit()
+                return True
 
     def heartbeat(self, run_id: str, worker_id: str, *, seconds: int | None = None) -> bool:
         return self.acquire_lease(run_id, worker_id, seconds=seconds)
@@ -345,15 +349,16 @@ class CreativeStore:
     def release_lease(self, run_id: str, worker_id: str | None = None) -> None:
         from scripts.db.models import CreativeRunRecord
 
-        with self._session() as session:
-            row = session.get(CreativeRunRecord, run_id)
-            if row is None:
-                return
-            if worker_id and row.worker_id not in {None, "", worker_id}:
-                return
-            row.worker_id = None
-            row.lease_until = None
-            session.commit()
+        with self._lease_lock:
+            with self._session() as session:
+                row = session.get(CreativeRunRecord, run_id)
+                if row is None:
+                    return
+                if worker_id and row.worker_id not in {None, "", worker_id}:
+                    return
+                row.worker_id = None
+                row.lease_until = None
+                session.commit()
 
     def save_node_output(self, run_id: str, node_id: str, output: dict[str, Any], assets: list[Any] | None = None) -> None:
         from scripts.db.models import CreativeNodeOutputRecord

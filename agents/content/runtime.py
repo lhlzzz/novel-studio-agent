@@ -18,7 +18,7 @@ class ContentAgent:
     tests = ("tests/unit/test_commerce.py",)
 
     def run(self, task: dict[str, Any]) -> dict[str, Any]:
-        retrieve(task)
+        memory = task.get("memory") or retrieve(task)
         now = datetime.now(timezone.utc).isoformat()
         campaign = None
         if task.get("campaign") or task.get("objective"):
@@ -74,4 +74,5 @@ class ContentAgent:
             "campaign": campaign,
             "variants": variants,
             "creative_brief": creative_brief,
+            "memory": memory,
         }

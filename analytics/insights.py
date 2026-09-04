@@ -38,10 +38,13 @@ def build_insight(metrics: NormalizedMetrics) -> Insight:
         insight = Insight("neutral", "Metrics ingested without a dominant signal", "views", views, "collect another snapshot before changing the format", 0.4)
     write_patterns({
         "kind": insight.kind,
+        "account_id": values.get("account_id"),
+        "publication_id": metrics.publication_id,
         "successful_pattern": insight.summary if insight.kind == "performance" else None,
         "platform_preference": values.get("platform"),
         "content_pattern": insight.recommendation,
         "confidence": insight.confidence,
+        "source": "analytics",
     })
     return insight
 

@@ -43,6 +43,17 @@ models:
     async: false
     verified: true
     capabilities: [text_to_image, image_generation]
+  - provider: xai
+    model: grok-imagine-video-1.5
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image, character]
+    resolution: [720p]
+    aspect_ratio: ["9:16", "16:9", "1:1"]
+    duration: ["6", "10"]
+    async: true
+    verified: false
+    capabilities: [text_to_video, image_to_video, video_generation]
   - provider: mock
     model: mock.default
     input_types: [text, image, video]

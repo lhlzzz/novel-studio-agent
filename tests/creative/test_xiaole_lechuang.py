@@ -206,7 +206,7 @@ def test_cli_generate_image_blocked_without_key(monkeypatch, capsys):
         aspect_ratio = "9:16"
     code = cmd_creative_generate_image(Args())
     assert code == 1
-    out = capsys.readouterr().out
+    out = capsys.readouterr().out.strip().splitlines()[-1]
     payload = json.loads(out)
     assert payload["status"] == "BLOCKED_EXTERNAL"
 

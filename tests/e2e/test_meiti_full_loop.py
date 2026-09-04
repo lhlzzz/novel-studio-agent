@@ -44,7 +44,7 @@ def test_mock_package_to_memory_loop():
     results = run_once(adapter=adapter, store=store, window="1h")
     metrics = normalize_metrics(publication.distribution_job_id, adapter.get_analytics(publication.provider_post_id), platform="x", post_id=publication.provider_post_id)
     insight = build_insight(metrics)
-    memory = retrieve({"query": "hook"})
+    memory = retrieve({"query": "hook", "account_id": "x-test"})
     assert results
     assert insight.metric == "views"
     assert "historical_successful_patterns" in memory

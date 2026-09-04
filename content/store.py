@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -21,6 +22,7 @@ from content.models import (
     ContinuityMemory,
     CreativeContext,
     Episode,
+    EpisodeConflict,
     IsolationError,
     PerformanceFeedback,
     PlatformAccount,
@@ -44,6 +46,8 @@ CONTINUITY_TABLE_NAMES = (
     "episode_memories",
     "performance_feedback",
     "asset_lineage",
+    "account_selections",
+    "knowledge_documents",
 )
 
 
@@ -200,22 +204,61 @@ class ContinuityStore:
         return accounts
 
     def active_account(self, *, platform: str | None = None) -> PlatformAccount | None:
+        selected = self.current_account(platform=platform)
+        if selected is not None:
+            return selected
         accounts = [item for item in self.list_accounts(platform=platform) if item.status == "ACTIVE"]
         if not accounts:
             return None
-        accounts.sort(key=lambda item: item.activated_at or item.updated_at or "", reverse=True)
+        if len(accounts) > 1:
+            return None
         return accounts[0]
+
+    def current_account(self, *, platform: str | None = None) -> PlatformAccount | None:
+        from scripts.db.models import AccountSelectionRecord
+
+        key = f"platform:{platform}" if platform else "global"
+        with self._session() as session:
+            row = session.get(AccountSelectionRecord, key)
+            if row is None and platform:
+                row = session.get(AccountSelectionRecord, "global")
+            if row is None:
+                return None
+            account = self.get_account(row.account_id)
+        if account is None:
+            return None
+        if platform and account.platform != platform:
+            return None
+        return account
+
+    def select_current_account(self, account_id: str, *, reason: str = "explicit") -> PlatformAccount:
+        from scripts.db.models import AccountSelectionRecord
+
+        account = self.get_account(account_id)
+        if account is None:
+            raise KeyError(account_id)
+        now = _now()
+        with self._session() as session:
+            for key in (f"platform:{account.platform}", "global"):
+                row = session.get(AccountSelectionRecord, key)
+                fields = {"account_id": account.account_id, "platform": account.platform, "reason": reason, "updated_at": now}
+                if row is None:
+                    session.add(AccountSelectionRecord(selection_key=key, **fields))
+                else:
+                    for name, value in fields.items():
+                        setattr(row, name, value)
+            session.commit()
+        return account
 
     def activate_account(self, account_id: str) -> PlatformAccount:
         account = self.get_account(account_id)
         if account is None:
             raise KeyError(account_id)
         now = utcnow()
-        for item in self.list_accounts(platform=account.platform):
-            if item.account_id != account_id and item.status == "ACTIVE":
-                self.save_account(PlatformAccount(**{**item.__dict__, "status": "PAUSED", "updated_at": now}))
         updated = PlatformAccount(**{**account.__dict__, "status": "ACTIVE", "activated_at": now, "updated_at": now})
-        return self.save_account(updated)
+        saved = self.save_account(updated)
+        self.select_current_account(saved.account_id, reason="activate")
+        return saved
 
     def save_character(self, character: VirtualCharacter) -> VirtualCharacter:
         from scripts.db.models import VirtualCharacterRecord
@@ -550,9 +593,12 @@ class ContinuityStore:
             "provider_task_id": lineage.provider_task_id,
             "model": lineage.model,
             "attempt_no": lineage.attempt_no,
-            "parent_asset_id": lineage.parent_asset_id,
+            "parent_asset_id": lineage.parent_asset_id or "",
             "qa_decision": lineage.qa_decision,
             "published": bool(lineage.published),
+            "selected_for_package": bool(lineage.selected_for_package),
+            "source_asset_id": lineage.source_asset_id,
+            "workflow_id": lineage.workflow_id,
         })
         return lineage
 
@@ -579,10 +625,89 @@ class ContinuityStore:
             return [_lineage_from_row(row) for row in session.execute(stmt).scalars()]
 
     def next_attempt(self, *, account_id: str, episode_id: str | None, parent_asset_id: str | None) -> int:
-        items = self.list_lineage(account_id=account_id, episode_id=episode_id)
-        if parent_asset_id:
-            items = [item for item in items if item.parent_asset_id == parent_asset_id or item.asset_id == parent_asset_id]
-        return max((item.attempt_no for item in items), default=0) + 1
+        from scripts.db.models import AssetLineageRecord
+
+        parent = parent_asset_id or ""
+        with self._session() as session:
+            stmt = select(AssetLineageRecord.attempt_no).where(
+                AssetLineageRecord.account_id == account_id,
+                AssetLineageRecord.episode_id == episode_id,
+            )
+            values = [int(item or 0) for item in session.execute(stmt).scalars()]
+            return max(values, default=0) + 1
+
+    def allocate_attempt(self, *, account_id: str, episode_id: str | None, parent_asset_id: str | None, lineage: AssetLineage) -> AssetLineage:
+        from scripts.db.models import AssetLineageRecord
+
+        parent = parent_asset_id or ""
+        last_error = None
+        for _ in range(8):
+            attempt = self.next_attempt(account_id=account_id, episode_id=episode_id, parent_asset_id=parent)
+            candidate = AssetLineage(**{**lineage.__dict__, "attempt_no": attempt, "parent_asset_id": parent or None})
+            try:
+                return self.save_lineage(candidate)
+            except IntegrityError as exc:
+                last_error = exc
+                continue
+        raise EpisodeConflict("concurrent attempt allocation conflict") from last_error
+
+    def create_next_episode_tx(self, episode: Episode, *, previous: Episode | None, series: ContentSeries) -> Episode:
+        from scripts.db.models import ContentSeriesRecord, EpisodeRecord
+
+        now = _now()
+        with self._session() as session:
+            series_row = session.get(ContentSeriesRecord, series.series_id)
+            if series_row is None:
+                raise IsolationError(f"series {series.series_id} is missing")
+            dialect = getattr(getattr(session.get_bind(), "dialect", None), "name", "")
+            if dialect == "postgresql":
+                session.execute(text("SELECT series_id FROM content_series WHERE series_id = :sid FOR UPDATE"), {"sid": series.series_id})
+            previous_row = session.get(EpisodeRecord, previous.episode_id) if previous else None
+            expected_no = int(series_row.current_episode_no or 0) + 1
+            if previous_row is not None:
+                expected_no = int(previous_row.episode_no) + 1
+            if episode.episode_no != expected_no:
+                raise EpisodeConflict(f"episode {expected_no} already exists for series {series.series_id}")
+            existing = session.execute(
+                select(EpisodeRecord).where(
+                    EpisodeRecord.series_id == series.series_id,
+                    EpisodeRecord.episode_no == episode.episode_no,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                raise EpisodeConflict(f"episode {episode.episode_no} already exists for series {series.series_id}")
+            session.add(EpisodeRecord(
+                episode_id=episode.episode_id,
+                series_id=episode.series_id,
+                account_id=episode.account_id,
+                episode_no=episode.episode_no,
+                title=episode.title,
+                brief=episode.brief,
+                previous_episode_id=episode.previous_episode_id,
+                next_episode_id=episode.next_episode_id,
+                continuity_context=dict(episode.continuity_context),
+                character_state=dict(episode.character_state),
+                world_state=dict(episode.world_state),
+                location_state=dict(episode.location_state),
+                visual_state=dict(episode.visual_state),
+                story_state=dict(episode.story_state),
+                content_status=episode.content_status,
+                campaign_id=episode.campaign_id,
+                content_package_id=episode.content_package_id,
+                created_at=now,
+                updated_at=now,
+            ))
+            if previous_row is not None:
+                previous_row.next_episode_id = episode.episode_id
+                previous_row.updated_at = now
+            series_row.current_episode_no = episode.episode_no
+            series_row.updated_at = now
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise EpisodeConflict(f"episode {episode.episode_no} already exists for series {series.series_id}") from exc
+        return episode
 
     def save_package(self, package: ContentPackage) -> ContentPackage:
         from scripts.db.models import ContentPackageRecord
@@ -616,6 +741,7 @@ class ContinuityStore:
             "world_id": package.world_id,
             "creative_context_id": package.creative_context_id,
             "revision": package.revision,
+            "current_revision": package.current_revision,
             "updated_at": _now(),
         })
         return package
@@ -638,7 +764,7 @@ class ContinuityStore:
             "episode_id": package.episode_id,
             "metadata": dict(package.metadata or {}),
         }
-        return self.save_revision(ContentRevision(
+        revision = self.save_revision(ContentRevision(
             revision_id=uuid4().hex,
             content_package_id=package.package_id,
             version=version,
@@ -647,6 +773,8 @@ class ContinuityStore:
             snapshot=snapshot,
             created_by=created_by,
         ))
+        self.save_package(ContentPackage(**{**package.__dict__, "revision": version, "current_revision": revision.revision_id}))
+        return revision
 
     def delete_episode(self, episode_id: str) -> None:
         from scripts.db.models import EpisodeRecord
@@ -888,8 +1016,11 @@ def _lineage_from_row(row) -> AssetLineage:
         provider_task_id=row.provider_task_id or "",
         model=row.model or "",
         attempt_no=int(row.attempt_no or 1),
-        parent_asset_id=row.parent_asset_id,
+        parent_asset_id=row.parent_asset_id or None,
         qa_decision=row.qa_decision or "",
         published=bool(row.published),
+        selected_for_package=bool(getattr(row, "selected_for_package", False)),
+        source_asset_id=getattr(row, "source_asset_id", None),
+        workflow_id=getattr(row, "workflow_id", None),
         created_at=_iso(row.created_at),
     )

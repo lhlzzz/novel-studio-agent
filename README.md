@@ -1,9 +1,10 @@
-# Meiti V4.5.1
+# Meiti V4.7
 
 Meiti is an AI Creator Operating System.
 
 ```text
-Lechuang = Creative Provider
+Lechuang = Image generation provider
+xAI = Video generation provider (grok-imagine-video-1.5)
 Xiaohongshu = Handoff
 Douyin = Native API
 Kuaishou = Native API
@@ -12,12 +13,21 @@ Postiz = does not exist
 ```
 
 ```text
-User -> MediaAgent -> Creative Workflow -> Provider Resolver -> Lechuang
--> MediaAsset -> Technical QA -> AI Judge -> ContentPackage
--> Platform Variant -> Publish Gate -> DistributionJob
+User -> Intent -> AccountContext
+-> PostgreSQL operational state
+-> Obsidian knowledge brain
+-> pgvector retrieval
+-> Strategy -> Content -> CreativeWorkflowEngine
+-> Provider Resolver
+   ├── Lechuang image
+   └── xAI video / grok-imagine-video-1.5
+-> MediaAsset -> Technical QA -> AI Judge
+-> ContentPackage -> Platform Variant
+-> Publish Gate -> DistributionJob
 -> CN Social Provider Resolver
 -> XHS Handoff / Douyin Publication / Kuaishou Publication / Xianyu Listing
--> Reconciliation -> Analytics -> Memory
+-> Reconciliation -> Analytics -> MemoryService writeback
+-> Obsidian + pgvector
 ```
 
 Creative generates media. Social publishes or hands off. Creative never
@@ -36,9 +46,12 @@ Analytics take store/secrets from that runtime. Testing uses
 python scripts/meiti.py bootstrap-production
 ```
 
-V4.5.1 hardens production activation: bootstrap is read-only preflight,
-provider status is account-scoped, and production CI injects GitHub secrets
-into process environment. Bootstrap never writes credentials.
+V4.7 hardens the long-running creator loop: MemoryService owns retrieval and
+writeback, Obsidian is the knowledge brain, PostgreSQL stays operational state,
+AccountContext is explicit, same-platform accounts can all be ACTIVE with a
+single current selection, episodes are transactional, and video generation is
+xAI `grok-imagine-video-1.5` (unverified until real E2E). Bootstrap remains
+read-only preflight and never writes credentials.
 
 ## Current production set
 

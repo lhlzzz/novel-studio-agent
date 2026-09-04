@@ -339,41 +339,52 @@ def cmd_creative_doctor(_args: argparse.Namespace) -> int:
 
 
 def cmd_creative_generate_image(args: argparse.Namespace) -> int:
-    from creative.errors import AuthError, ProviderBlocked, UnsupportedCapability
-    from creative.providers.lechuang.adapter import LechuangAdapter
+    from agents.media.runtime import MediaAgent
+    from creative.runtime.container import CreativeRuntime
 
-    adapter = LechuangAdapter()
-    try:
-        task = adapter.generate_image({
-            "prompt": args.prompt,
-            "model": args.model,
-            "image_size": args.image_size,
-            "aspect_ratio": args.aspect_ratio,
-            "n": 1,
-        })
-    except (ProviderBlocked, UnsupportedCapability, AuthError) as exc:
-        print(json.dumps({"status": "BLOCKED_EXTERNAL", "reason": str(exc)}, default=str))
+    if not getattr(args, "prompt", None):
+        print(json.dumps({"status": "FAIL", "reason": "prompt is required"}, default=str))
         return 1
-    asset = (task.result or {}).get("asset")
-    qa = (task.result or {}).get("qa") or {}
-    if task.status == "succeeded" and asset is not None:
+    creative = CreativeRuntime.create(allow_mock=False)
+    generated = MediaAgent(runtime=creative).run({
+        "kind": "generate",
+        "brief": args.prompt,
+        "workflow_id": "creator-lifestyle-v1",
+        "model": args.model,
+        "image_size": args.image_size,
+        "aspect_ratio": args.aspect_ratio,
+        "variant_count": 1,
+    })
+    run = generated.get("run")
+    status = getattr(run, "status", None) or ("BLOCKED" if generated.get("blocked") else "FAILED")
+    assets = generated.get("assets") or []
+    asset = assets[0] if assets else None
+    if status == "SUCCEEDED" and asset is not None:
         from scripts.meiti_doctor import record_image_real_e2e
         record_image_real_e2e(
             asset_id=str(getattr(asset, "asset_id", "") or ""),
-            qa_decision=str(qa.get("decision") or ""),
+            qa_decision=str(getattr(asset, "qa_decision", "") or ""),
             sha256=str(getattr(asset, "sha256", "") or ""),
             mime_type=str(getattr(asset, "mime_type", "") or ""),
             path=str(getattr(asset, "path", "") or ""),
             width=getattr(asset, "width", None),
             height=getattr(asset, "height", None),
             size=getattr(asset, "size", None),
-            model=str((task.result or {}).get("model") or args.model or ""),
-            request_id=str((task.result or {}).get("request_id") or task.provider_task_id or ""),
+            model=str(getattr(asset, "model", "") or args.model or ""),
+            request_id=str(getattr(run, "request_id", "") or getattr(asset, "provider_task_id", "") or ""),
         )
+    if generated.get("blocked") or status in {"BLOCKED", "FAILED"}:
+        print(json.dumps({
+            "status": "BLOCKED_EXTERNAL" if generated.get("blocked") or status == "BLOCKED" else "FAIL",
+            "reason": generated.get("error") or generated.get("blocked_reason") or status,
+            "workflow_id": generated.get("workflow_id"),
+            "run_id": getattr(run, "run_id", None),
+        }, default=str))
+        return 1
     payload = {
-        "status": task.status,
+        "status": "succeeded" if status == "SUCCEEDED" else status,
         "provider": "xiaole-lechuang",
-        "provider_task_id": task.provider_task_id,
+        "provider_task_id": getattr(asset, "provider_task_id", None),
         "asset_id": getattr(asset, "asset_id", None),
         "path": getattr(asset, "path", None),
         "sha256": getattr(asset, "sha256", None),
@@ -381,25 +392,37 @@ def cmd_creative_generate_image(args: argparse.Namespace) -> int:
         "height": getattr(asset, "height", None),
         "mime_type": getattr(asset, "mime_type", None),
         "size": getattr(asset, "size", None),
-        "qa": qa,
+        "workflow_id": generated.get("workflow_id"),
+        "run_id": getattr(run, "run_id", None),
     }
     print(json.dumps(payload, default=str))
-    return 0 if task.status == "succeeded" else 1
+    return 0 if status == "SUCCEEDED" else 1
 
 
-def cmd_creative_generate_video(_args: argparse.Namespace) -> int:
-    from creative.providers.lechuang.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
+def cmd_creative_generate_video(args: argparse.Namespace) -> int:
+    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_MODEL, VIDEO_NOT_VERIFIED
+    from creative.runtime.container import CreativeRuntime
+
+    runtime = CreativeRuntime.create(allow_mock=False)
+    adapter = runtime.provider_resolver.providers.get("xai")
+    capability = adapter.capability_status("text_to_video") if adapter is not None else {
+        "status": "NOT_VERIFIED",
+        "reason": VIDEO_NOT_VERIFIED,
+    }
     print(json.dumps({
         "status": "NOT_VERIFIED",
         "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
         "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
-        "reason": VIDEO_NOT_VERIFIED,
+        "reason": capability.get("reason") or VIDEO_NOT_VERIFIED,
+        "provider": "xai",
+        "model": VIDEO_MODEL,
+        "prompt_required_context": ["CreativeContext", "PlatformStrategy", "ContinuityContext"],
+        "source_asset_id": getattr(args, "source_asset_id", None),
         "evidence_checked": [
-            "creative/providers/lechuang/models.yaml",
-            "creative/providers/lechuang/client.py",
-            "creative/providers/lechuang/README.md",
-            ".agents/skills/media/xiaoleai-image-generation/SKILL.md",
-            "docs.xiaoleai.team public pages",
+            "creative/providers/xai/models.yaml",
+            "creative/providers/xai/client.py",
+            "creative/providers/xai/adapter.py",
+            "creative/providers/capabilities/registry.yaml",
         ],
     }))
     return 1
@@ -570,10 +593,11 @@ def cmd_content_calendar(_args: argparse.Namespace) -> int:
 
 
 def cmd_creative_continue(args: argparse.Namespace) -> int:
+    from agents.media.runtime import MediaAgent
     from content.models import IsolationError
-    from creative.errors import AuthError, ProviderBlocked, SchemaNotReady, UnsupportedCapability
-    from creative.providers.lechuang.adapter import LechuangAdapter
-    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
+    from creative.errors import SchemaNotReady
+    from creative.runtime.container import CreativeRuntime
+    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
 
     text = " ".join(getattr(args, "text", None) or ()) or getattr(args, "prompt", None) or "继续昨天"
     try:
@@ -592,92 +616,74 @@ def cmd_creative_continue(args: argparse.Namespace) -> int:
         return 1
     results = []
     overall = 0
+    creative = CreativeRuntime.create(allow_mock=False)
+    agent = MediaAgent(runtime=creative)
     for prepared in prepared_list:
         extras = dict(prepared["target"].extras or {})
         context = prepared["context"]
-        if extras.get("video"):
+        generated = agent.run({
+            "kind": "generate",
+            "brief": context.normalized_prompt,
+            "creative_context": context,
+            "account_id": context.account_id,
+            "series_id": context.series_id,
+            "episode_id": context.episode_id,
+            "platform": context.platform,
+            "character_id": context.character_id,
+            "world_id": context.world_id,
+            "aspect_ratio": (context.platform_context or {}).get("aspect_ratio") or getattr(args, "aspect_ratio", None) or "9:16",
+            "model": getattr(args, "model", None),
+            "variant_count": 1,
+            "workflow_id": "creator-image-to-video-v1" if extras.get("video") else "creator-lifestyle-v1",
+        })
+        run = generated.get("run")
+        blocked = bool(generated.get("blocked"))
+        status = getattr(run, "status", None) or ("BLOCKED" if blocked else "FAILED")
+        if extras.get("video") or status == "BLOCKED":
+            reason = generated.get("error") or generated.get("blocked_reason") or VIDEO_NOT_VERIFIED
             results.append({
-                "status": "NOT_VERIFIED",
+                "status": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else "BLOCKED_EXTERNAL",
                 "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
-                "reason": VIDEO_NOT_VERIFIED,
+                "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
+                "reason": reason,
                 "resolved_target": context.resolved_target,
-            })
-            overall = 1
-            continue
-        adapter = LechuangAdapter()
-        try:
-            task = adapter.generate_image({
-                "prompt": context.normalized_prompt,
-                "model": getattr(args, "model", None) or "gpt-image-2",
-                "image_size": getattr(args, "image_size", None) or "2K",
-                "aspect_ratio": (context.platform_context or {}).get("aspect_ratio") or getattr(args, "aspect_ratio", None) or "9:16",
-                "n": 1,
+                "workflow_id": generated.get("workflow_id"),
                 "account_id": context.account_id,
-                "series_id": context.series_id,
                 "episode_id": context.episode_id,
-                "character_id": context.character_id,
-                "world_id": context.world_id,
-                "creative_context_id": context.context_id,
-            })
-        except (ProviderBlocked, UnsupportedCapability, AuthError) as exc:
-            results.append({
-                "status": "BLOCKED_EXTERNAL",
-                "reason": str(exc),
-                "resolved_target": context.resolved_target,
             })
             overall = 1
             continue
-        asset = (task.result or {}).get("asset")
-        qa = (task.result or {}).get("qa") or {}
-        assets = [asset] if asset is not None else []
-        status = "QA_PASSED" if qa.get("decision") == "pass" else "GENERATED"
-        package = runtime.package_from_generation(
+        assets = generated.get("assets") or []
+        asset = assets[0] if assets else None
+        package = generated.get("package") or runtime.package_from_generation(
             context=context,
             assets=assets,
             title=prepared["episode"].title if prepared.get("episode") else text,
-            status=status,
         )
         if asset is not None:
             runtime.record_lineage(
                 asset=asset,
                 context=context,
-                qa_decision=str(qa.get("decision") or ""),
-                provider="xiaole-lechuang",
-                provider_task_id=task.provider_task_id,
-                model=str((task.result or {}).get("model") or ""),
-                package_id=package.package_id,
+                qa_decision="",
+                provider=getattr(asset, "provider", "") or "",
+                provider_task_id=getattr(asset, "provider_task_id", "") or "",
+                model=getattr(asset, "model", "") or "",
+                package_id=getattr(package, "package_id", None),
             )
-            if task.status == "succeeded":
-                from scripts.meiti_doctor import record_image_real_e2e
-                record_image_real_e2e(
-                    asset_id=str(getattr(asset, "asset_id", "") or ""),
-                    qa_decision=str(qa.get("decision") or ""),
-                    sha256=str(getattr(asset, "sha256", "") or ""),
-                    mime_type=str(getattr(asset, "mime_type", "") or ""),
-                    path=str(getattr(asset, "path", "") or ""),
-                    width=getattr(asset, "width", None),
-                    height=getattr(asset, "height", None),
-                    size=getattr(asset, "size", None),
-                    model=str((task.result or {}).get("model") or ""),
-                    request_id=str((task.result or {}).get("request_id") or task.provider_task_id or ""),
-                )
-        if task.status != "succeeded":
+        if status != "SUCCEEDED":
             overall = 1
         results.append({
-            "status": task.status,
+            "status": status,
             "resolved_target": context.resolved_target,
             "platform": context.platform,
             "account_id": context.account_id,
             "series_id": context.series_id,
             "episode_id": context.episode_id,
             "episode_no": prepared["episode"].episode_no if prepared.get("episode") else None,
-            "package_id": package.package_id,
-            "content_type": package.content_type,
-            "provider": "xiaole-lechuang",
-            "provider_task_id": task.provider_task_id,
+            "package_id": getattr(package, "package_id", None),
+            "workflow_id": generated.get("workflow_id"),
             "asset_id": getattr(asset, "asset_id", None),
             "path": getattr(asset, "path", None),
-            "qa": qa,
             "isolation": prepared["isolation"],
             "character_qa": prepared["character_qa"],
         })

@@ -282,7 +282,12 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
         capability = KIND_CAPABILITY.get(kind, kind)
     variants = int(data.get("variant_count") or workflow.quality_policy.get("variants") or 1)
     variants = max(1, min(variants, int(workflow.quality_policy.get("max_variants") or variants)))
-    provider_name = str(run.inputs.get("provider_override") or node.provider or "lechuang")
+    provider_name = str(run.inputs.get("provider_override") or node.provider or "")
+    if capability in {"image_to_video", "text_to_video", "video_generation"}:
+        if provider_name in {"", "lechuang", "xiaole", "xiaoleai"}:
+            provider_name = "xai"
+    elif not provider_name:
+        provider_name = "lechuang"
     if run.inputs.get("regen_action") == "change_model":
         provider_name = str(run.inputs.get("model_override") or provider_name)
     provider, resolved_name = resolver.resolve(provider_name)
@@ -319,13 +324,38 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
                     assets.append(restored)
                 continue
             raise RuntimeError(existing.error or existing.status)
+        source_asset = None
+        if isinstance(reference, MediaAsset):
+            source_asset = reference
+        elif isinstance(reference, list) and reference and isinstance(reference[0], MediaAsset):
+            source_asset = reference[0]
+        context = run.inputs.get("creative_context") or {}
+        if hasattr(context, "normalized_prompt"):
+            context = {
+                "normalized_prompt": context.normalized_prompt,
+                "character_context": dict(getattr(context, "character_context", {}) or {}),
+                "world_context": dict(getattr(context, "world_context", {}) or {}),
+                "continuity_context": dict(getattr(context, "continuity_context", {}) or {}),
+                "platform_context": dict(getattr(context, "platform_context", {}) or {}),
+            }
+        elif not isinstance(context, dict):
+            context = {}
+        if capability in {"image_to_video", "text_to_video"}:
+            prompt = _video_prompt(prompt, context, source_asset)
         payload = {
             "prompt": prompt,
             "negative_prompt": data.get("negative_prompt") or "",
             "reference": reference_value,
+            "source_asset_id": getattr(source_asset, "asset_id", None) or data.get("source_asset_id") or run.inputs.get("source_asset_id"),
+            "source_url": data.get("source_url") or run.inputs.get("source_url"),
             "character_id": data.get("character_id") or run.inputs.get("character_id"),
-            "aspect_ratio": data.get("aspect_ratio") or "9:16",
-            "duration_seconds": data.get("duration_seconds") or 15,
+            "account_id": run.inputs.get("account_id"),
+            "series_id": run.inputs.get("series_id"),
+            "episode_id": run.inputs.get("episode_id"),
+            "world_id": run.inputs.get("world_id"),
+            "creative_context_id": run.inputs.get("creative_context_id") or (context.get("context_id") if isinstance(context, dict) else None),
+            "aspect_ratio": data.get("aspect_ratio") or run.inputs.get("aspect_ratio") or "9:16",
+            "duration_seconds": data.get("duration_seconds") or run.inputs.get("duration_seconds") or ((workflow.inputs.get("duration_seconds") or {}).get("default") if isinstance(workflow.inputs.get("duration_seconds"), dict) else None) or 15,
             "width": 720 if str(data.get("aspect_ratio") or "9:16") == "9:16" else 1280,
             "height": 1280 if str(data.get("aspect_ratio") or "9:16") == "9:16" else 720,
             "run_id": run.run_id,
@@ -336,7 +366,7 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
             "camera": camera,
             "motion": data.get("motion"),
             "seed": run.inputs.get("seed") or (index + 1 if run.inputs.get("regen_action") == "change_variation" else index),
-            "model": node.model or run.inputs.get("model"),
+            "model": node.model or run.inputs.get("model") or ("grok-imagine-video-1.5" if capability in {"image_to_video", "text_to_video"} else None),
             "angle": data.get("angle") or ("three-quarter" if node.type == "multi_angle" else None),
         }
         quote = quote_task(provider, kind, payload)
@@ -390,6 +420,26 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
         return {"_pending": pending, "assets": assets, "output": assets[0] if assets else None}
     ranked = assets
     return {"output": ranked[0], "asset": ranked[0], "variants": ranked, "assets": ranked}
+
+
+def _video_prompt(prompt: Any, context: dict[str, Any], source_asset: MediaAsset | None) -> str:
+    parts = [str(prompt or "").strip()]
+    character = dict(context.get("character_context") or {})
+    world = dict(context.get("world_context") or {})
+    continuity = dict(context.get("continuity_context") or {})
+    platform = dict(context.get("platform_context") or {})
+    if character.get("name"):
+        parts.append(f"character continuity: {character.get('name')}")
+    if world.get("name"):
+        parts.append(f"world continuity: {world.get('name')}")
+    narrative = dict(continuity.get("narrative_continuity") or {})
+    if narrative.get("previous_title"):
+        parts.append(f"previous episode: {narrative.get('previous_title')}")
+    if platform.get("visual"):
+        parts.append(f"platform visual: {platform.get('visual')}")
+    if source_asset is not None:
+        parts.append(f"source image: {source_asset.asset_id}")
+    return "\n".join(item for item in parts if item)
 
 
 def _assert_capability(provider, capability: str, resolved_name: str, kind: str) -> None:

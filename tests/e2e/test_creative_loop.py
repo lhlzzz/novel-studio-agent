@@ -13,7 +13,7 @@ def test_brief_to_package_mock_loop(tmp_path):
     mock = MockGenerationProvider(store=assets)
     engine = CreativeWorkflowEngine(
         store=store,
-        resolver=GenerationProviderResolver(providers={"mock": mock, "lechuang": mock}, allow_mock=True),
+        resolver=GenerationProviderResolver(providers={"mock": mock, "lechuang": mock, "xai": mock}, allow_mock=True),
         allow_mock=True,
     )
     strategy = StrategyAgent().run({
@@ -25,6 +25,7 @@ def test_brief_to_package_mock_loop(tmp_path):
         "face_visible": False,
         "style": "natural lifestyle",
         "commerce_intent": "none",
+        "account_id": "acc-test",
     })
     content = ContentAgent().run({
         "title": "Morning light",
@@ -32,12 +33,15 @@ def test_brief_to_package_mock_loop(tmp_path):
         "format": "short",
         "strategy": strategy,
         "commerce_intent": "none",
+        "account_id": "acc-test",
+        "memory": strategy["memory"],
     })
     media = MediaAgent(engine=engine).run({
         "creative_brief": content["creative_brief"],
         "allow_mock": True,
         "title": "Morning light",
         "body": content["package"].body,
+        "account_id": "acc-test",
     })
     assert media["valid"] is True
     assert media["run"].status == "SUCCEEDED"

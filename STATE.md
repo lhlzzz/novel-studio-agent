@@ -1,7 +1,8 @@
-# Meiti V4.5.4 State
+# Meiti V4.7 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
-Creative Provider: Lechuang
+Image Provider: Lechuang
+Video Provider: xAI grok-imagine-video-1.5 (contract implemented, live E2E NOT_VERIFIED)
 Postiz: REMOVED
 
 V4.5.1 = Production Activation Hardening
@@ -21,7 +22,11 @@ Security: PASS
 Bootstrap: read-only preflight
 Production CI: secret injection wired
 
-Lechuang/Xiaole: image contract verified; real image E2E PASS; IMAGE_PRODUCTION_READY PASS when credential is present; video NOT_VERIFIED; image-to-video NOT_VERIFIED
+Lechuang/Xiaole: image contract verified; real image E2E depends on live evidence; video is owned by xAI, not Lechuang
+xAI video: grok-imagine-video-1.5; VIDEO_CONTRACT_VERIFIED=False until real MediaAsset + TechnicalQA
+Memory: MemoryService + KnowledgeBrain + pgvector; process _FACTS removed
+Accounts: multiple ACTIVE per platform; current selection is single-value
+Episodes: identity/order/lifecycle in PostgreSQL; narrative in Obsidian; create_next_episode is transactional
 Xiaohongshu: HANDOFF_ONLY; direct publish BLOCKED_EXTERNAL
 Douyin: adapter implemented; real OAuth BLOCKED_EXTERNAL
 Kuaishou: adapter implemented; real OAuth BLOCKED_EXTERNAL

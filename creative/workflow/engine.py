@@ -71,9 +71,11 @@ class CreativeWorkflowEngine:
                     polls_until_done=getattr(mock, "polls_until_done", 0),
                 )
                 self.resolver.providers["mock"] = mock
-            if "lechuang" not in self.resolver.providers or getattr(self.resolver.providers.get("lechuang"), "name", "") != "mock":
-                if self.allow_mock:
-                    self.resolver.providers.setdefault("lechuang", mock)
+            if self.allow_mock:
+                if getattr(self.resolver.providers.get("lechuang"), "name", "") != "mock":
+                    self.resolver.providers["lechuang"] = mock
+                if getattr(self.resolver.providers.get("xai"), "name", "") != "mock":
+                    self.resolver.providers["xai"] = mock
 
     @classmethod
     def production(cls, **kwargs: Any) -> "CreativeWorkflowEngine":
@@ -231,8 +233,8 @@ class CreativeWorkflowEngine:
                 except ValueError:
                     pass
             provider, _ = self.resolver.resolve(task.provider if task.provider != "mock" else "mock")
-            if task.provider == "lechuang" and self.allow_mock:
-                provider, _ = self.resolver.resolve("lechuang")
+            if task.provider in {"lechuang", "xai"} and self.allow_mock:
+                provider, _ = self.resolver.resolve(task.provider)
             if task.poll_count >= 30:
                 task.status = "FAILED"
                 task.error = "generation timed out"

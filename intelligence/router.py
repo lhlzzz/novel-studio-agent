@@ -251,8 +251,9 @@ def route_research(task: dict[str, Any], *, client: ScrapeCreatorsClient | None 
                 "kind": "validated_research",
                 "successful_pattern": claim.claim,
                 "platform_preference": skill,
-                "source": claim.source,
+                "source": "research",
                 "confidence": claim.confidence,
+                "scope_type": "GLOBAL",
             }).get("written") or 0)
     artifact = ResearchArtifact(
         artifact_id=uuid4().hex,

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from content.models import (
     AccountWorld,
+    ContinuityContext,
     ContinuityError,
     ContinuityMemory,
     CreativeContext,
@@ -109,6 +110,8 @@ class ContinuityEngine:
         world = None
         if series.world_id:
             world = self.store.get_world(series.world_id, account_id=account_id)
+        seed = Episode(episode_id="seed", series_id=series.series_id, episode_no=0, account_id=account_id)
+        continuity = self.build_continuity_bundle(previous, account_id=account_id, series_id=series.series_id, character=character, world=world)
         episode = Episode(
             episode_id=uuid4().hex,
             series_id=series.series_id,
@@ -116,39 +119,76 @@ class ContinuityEngine:
             title=title or (brief[:40] if brief else f"Day {episode_no}"),
             brief=brief,
             previous_episode_id=previous.episode_id if previous else None,
-            continuity_context=self.build_continuity_context(previous) if previous else {},
-            character_state=self.extract_character_state(previous, character) if previous else self.extract_character_state(Episode(episode_id="seed", series_id=series.series_id, episode_no=0, account_id=account_id), character),
+            continuity_context=continuity.as_dict() if previous else {},
+            character_state=self.extract_character_state(previous or seed, character),
             world_state={"world_id": world.world_id, "name": world.name} if world else {},
             location_state=dict((previous.location_state if previous else {}) or {}),
-            visual_state=self.extract_visual_state(previous, world) if previous else self.extract_visual_state(Episode(episode_id="seed", series_id=series.series_id, episode_no=0, account_id=account_id), world),
+            visual_state=self.extract_visual_state(previous or seed, world),
             story_state=self.extract_story_state(previous) if previous else {},
             content_status="BRIEFED",
             account_id=account_id,
         )
-        saved = self.store.save_episode(episode)
-        if previous is not None:
-            self.store.save_episode(Episode(**{**previous.__dict__, "next_episode_id": saved.episode_id, "updated_at": utcnow()}))
-        self.store.save_series(type(series)(**{**series.__dict__, "current_episode_no": saved.episode_no, "updated_at": utcnow()}))
-        return saved
+        return self.store.create_next_episode_tx(episode, previous=previous, series=series)
 
     def build_continuity_context(self, previous: Episode | None) -> dict[str, Any]:
         if previous is None:
             return {}
-        failures = self.validate_continuity(previous) if previous.episode_no > 1 else []
-        if failures:
-            raise ContinuityError("continuity broken: " + ",".join(failures))
-        return {
-            "previous_episode_id": previous.episode_id,
-            "previous_episode_no": previous.episode_no,
-            "previous_title": previous.title,
-            "previous_brief": previous.brief,
-            "character_state": dict(previous.character_state or {}),
-            "world_state": dict(previous.world_state or {}),
-            "location_state": dict(previous.location_state or {}),
-            "visual_state": dict(previous.visual_state or {}),
-            "story_state": dict(previous.story_state or {}),
-            "content_package_id": previous.content_package_id,
+        return self.build_continuity_bundle(previous, account_id=previous.account_id, series_id=previous.series_id).as_dict()
+
+    def build_continuity_bundle(
+        self,
+        previous: Episode | None,
+        *,
+        account_id: str,
+        series_id: str | None = None,
+        character: VirtualCharacter | None = None,
+        world: AccountWorld | None = None,
+        episode: Episode | None = None,
+    ) -> ContinuityContext:
+        if previous is not None and previous.episode_no > 1:
+            failures = self.validate_continuity(previous)
+            if failures:
+                raise ContinuityError("continuity broken: " + ",".join(failures))
+        knowledge = self._knowledge(
+            account_id=account_id,
+            series_id=series_id or (previous.series_id if previous else None),
+            episode_id=previous.episode_id if previous else None,
+            character_id=character.character_id if character else None,
+            world_id=world.world_id if world else None,
+        )
+        narrative = {
+            "previous_title": previous.title if previous else "",
+            "previous_brief": previous.brief if previous else "",
+            "knowledge": [item.title for item in knowledge],
         }
+        return ContinuityContext(
+            previous_episode_id=previous.episode_id if previous else None,
+            previous_episode_no=previous.episode_no if previous else None,
+            current_episode_id=episode.episode_id if episode else None,
+            current_episode_no=episode.episode_no if episode else None,
+            next_episode_id=previous.next_episode_id if previous else None,
+            character_continuity=self.extract_character_state(previous or Episode(episode_id="seed", series_id=series_id or "", episode_no=0, account_id=account_id), character) if previous or character else {},
+            world_continuity=self.extract_visual_state(previous or Episode(episode_id="seed", series_id=series_id or "", episode_no=0, account_id=account_id), world) if previous or world else {},
+            series_continuity={"series_id": series_id, "previous_episode_id": previous.episode_id if previous else None},
+            narrative_continuity=narrative,
+            knowledge=tuple(item.title for item in knowledge),
+        )
+
+    def _knowledge(self, **filters) -> list[Any]:
+        try:
+            from memory.service import get_memory_service
+            service = get_memory_service()
+            retrieved = service.retrieve({
+                "account_id": filters.get("account_id"),
+                "query": "continuity",
+                "character_id": filters.get("character_id"),
+                "world_id": filters.get("world_id"),
+                "series_id": filters.get("series_id"),
+                "episode_id": filters.get("episode_id"),
+            })
+            return list(retrieved.get("continuity") or retrieved.get("documents") or [])
+        except Exception:
+            return []
 
     def build_creative_context(
         self,
@@ -176,7 +216,8 @@ class ContinuityEngine:
         if target.episode_id:
             episode = self.store.get_episode(target.episode_id, account_id=account.account_id)
         previous = self.get_previous_episode(episode) if episode else None
-        continuity = self.build_continuity_context(previous) if previous else (episode.continuity_context if episode else {})
+        bundle = self.build_continuity_bundle(previous, account_id=account.account_id, series_id=series.series_id if series else target.series_id, character=character, world=world, episode=episode)
+        continuity = bundle.as_dict() if previous or episode else (episode.continuity_context if episode else {})
         policy = platform_policy(account.platform)
         extras = dict(extras or {})
         character_context = _character_context(character)
@@ -223,6 +264,9 @@ class ContinuityEngine:
             key=key,
             value=value,
         ))
+
+
+ContinuityService = ContinuityEngine
 
 
 def _character_context(character: VirtualCharacter | None) -> dict[str, Any]:

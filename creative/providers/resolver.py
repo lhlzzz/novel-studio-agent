@@ -9,6 +9,7 @@ from typing import Any
 from creative.errors import ProviderBlocked, UnsupportedCapability
 from creative.providers.lechuang.adapter import LechuangAdapter
 from creative.providers.mock import MockGenerationProvider
+from creative.providers.xai.adapter import XAIVideoAdapter
 
 try:
     import yaml
@@ -135,6 +136,8 @@ class GenerationProviderResolver:
         self.ranker = ranker or ProviderRanker()
         if "lechuang" not in self.providers:
             self.providers["lechuang"] = LechuangAdapter()
+        if "xai" not in self.providers:
+            self.providers["xai"] = XAIVideoAdapter()
         if allow_mock and "mock" not in self.providers:
             self.providers["mock"] = MockGenerationProvider()
         if not allow_mock and "mock" not in (providers or {}):
@@ -154,6 +157,19 @@ class GenerationProviderResolver:
             if self.allow_mock:
                 return self.providers["mock"], "mock"
             raise ProviderBlocked("lechuang", reason)
+        if name == "xai":
+            adapter = self.providers.get("xai")
+            if adapter is None:
+                raise UnsupportedCapability(name, provider="resolver")
+            live_ready = getattr(adapter, "live_ready", None)
+            if not callable(live_ready):
+                return adapter, "xai"
+            ready, reason = live_ready()
+            if ready:
+                return adapter, "xai"
+            if self.allow_mock:
+                return self.providers["mock"], "mock"
+            raise ProviderBlocked("xai", reason)
         if name == "mock" and not self.allow_mock:
             raise ProviderBlocked("mock", "mock is tests only")
         if name not in self.providers:
@@ -170,6 +186,9 @@ class GenerationProviderResolver:
         provider_name = chosen.provider if chosen else str(requirement.get("provider") or "lechuang")
         if provider_name in {"xiaole", "xiaoleai"}:
             provider_name = "lechuang"
+        capability = str(requirement.get("capability") or "")
+        if provider_name == "lechuang" and capability in {"text_to_video", "image_to_video", "video_generation"}:
+            provider_name = "xai"
         if provider_name == "mock" and not self.allow_mock:
             raise ProviderBlocked("mock", "mock is tests only")
         implementation, resolved = self.resolve(provider_name, requirement=requirement)

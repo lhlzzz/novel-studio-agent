@@ -41,6 +41,11 @@ class Vector(UserDefinedType):
     def get_col_spec(self, **_kw) -> str:
         return f"vector({self.dim})"
 
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(Text())
+        return super().load_dialect_impl(dialect)
+
     def bind_processor(self, _dialect):
         def process(value):
             if value is None:
@@ -79,8 +84,8 @@ class AgentRun(Base):
     status = Column(String(40), nullable=False, default="running")
     model = Column(String(120))
     prompt_summary = Column(Text)
-    inputs = Column(JSONB, nullable=False, default=dict)
-    outputs = Column(JSONB, nullable=False, default=dict)
+    inputs = Column(JSONType, nullable=False, default=dict)
+    outputs = Column(JSONType, nullable=False, default=dict)
     error_message = Column(Text)
     source = Column(Text, nullable=False, default="meiti")
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -112,7 +117,7 @@ class AgentTask(Base):
     status = Column(String(40), nullable=False, default="pending")
     priority = Column(String(40), nullable=False, default="normal")
     owner_model = Column(String(120))
-    payload = Column(JSONB, nullable=False, default=dict)
+    payload = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
@@ -141,7 +146,7 @@ class AgentDecision(Base):
     decision_type = Column(String(80), nullable=False, default="architecture")
     summary = Column(Text, nullable=False)
     rationale = Column(Text)
-    alternatives = Column(JSONB, nullable=False, default=list)
+    alternatives = Column(JSONType, nullable=False, default=list)
     source = Column(Text, nullable=False, default="meiti")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -165,7 +170,7 @@ class AgentArtifact(Base):
     path = Column(Text)
     uri = Column(Text)
     checksum = Column(String(128))
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -187,7 +192,7 @@ class AgentMetric(Base):
     metric_name = Column(String(120), nullable=False)
     metric_value = Column(Numeric(18, 6), nullable=False)
     unit = Column(String(40))
-    dimensions = Column(JSONB, nullable=False, default=dict)
+    dimensions = Column(JSONType, nullable=False, default=dict)
     observed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -205,7 +210,7 @@ class AgentRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     record_key = Column(String(255), nullable=False)
     record_type = Column(String(80), nullable=False, default="runtime")
-    payload = Column(JSONB, nullable=False, default=dict)
+    payload = Column(JSONType, nullable=False, default=dict)
     source = Column(Text, nullable=False, default="meiti")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
@@ -241,7 +246,16 @@ class ContentEmbedding(Base):
     model = Column(String(120), nullable=False, default="pending")
     dim = Column(Integer, nullable=False, default=DEFAULT_EMBEDDING_DIM)
     embedding = Column(Vector(DEFAULT_EMBEDDING_DIM))
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONType, nullable=False, default=dict)
+    account_id = Column(String(255))
+    scope_type = Column(String(40))
+    scope_id = Column(String(255))
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    publication_id = Column(String(255))
+    source_document_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
@@ -255,6 +269,9 @@ class ContentEmbedding(Base):
         Index("idx_meiti_content_embeddings_type", "content_type"),
         Index("idx_meiti_content_embeddings_line", "source_line"),
         Index("idx_meiti_content_embeddings_platform", "platform"),
+        Index("idx_meiti_content_embeddings_account", "account_id"),
+        Index("idx_meiti_content_embeddings_scope", "scope_type", "scope_id"),
+        Index("idx_meiti_content_embeddings_document", "source_document_id"),
     )
 
 
@@ -270,7 +287,7 @@ class ContentEntity(Base):
     name = Column(Text, nullable=False)
     description = Column(Text)
     source_line = Column(String(40), nullable=False, default="shared")
-    properties = Column(JSONB, nullable=False, default=dict)
+    properties = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
@@ -302,7 +319,7 @@ class ContentRelation(Base):
         Integer, ForeignKey("content_entities.id", ondelete="CASCADE"), nullable=False
     )
     weight = Column(Numeric(12, 6), nullable=False, default=1.0)
-    properties = Column(JSONB, nullable=False, default=dict)
+    properties = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -329,8 +346,8 @@ class PublishGate(Base):
     requested_by = Column(String(120), nullable=False, default="agent")
     approved_by = Column(String(120))
     rationale = Column(Text)
-    checks = Column(JSONB, nullable=False, default=dict)
-    evidence = Column(JSONB, nullable=False, default=dict)
+    checks = Column(JSONType, nullable=False, default=dict)
+    evidence = Column(JSONType, nullable=False, default=dict)
     expires_at = Column(DateTime)
     decided_at = Column(DateTime)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -362,7 +379,7 @@ class CampaignRecord(Base):
     strategy_id = Column(String(255))
     start_at = Column(DateTime)
     end_at = Column(DateTime)
-    success_metrics = Column(JSONB, nullable=False, default=list)
+    success_metrics = Column(JSONType, nullable=False, default=list)
     status = Column(String(40), nullable=False, default="draft")
     account_id = Column(String(255))
     platform = Column(String(120), nullable=False, default="")
@@ -390,11 +407,11 @@ class ContentPackageRecord(Base):
     title = Column(Text, nullable=False)
     caption = Column(Text, nullable=False, default="")
     body = Column(Text, nullable=False)
-    evidence_ids = Column(JSONB, nullable=False, default=list)
-    media_assets = Column(JSONB, nullable=False, default=list)
+    evidence_ids = Column(JSONType, nullable=False, default=list)
+    media_assets = Column(JSONType, nullable=False, default=list)
     commerce_intent = Column(String(120), nullable=False, default="none")
-    variants = Column(JSONB, nullable=False, default=list)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    variants = Column(JSONType, nullable=False, default=list)
+    metadata_json = Column("metadata", JSONType, nullable=False, default=dict)
     account_id = Column(String(255))
     series_id = Column(String(255))
     episode_id = Column(String(255))
@@ -404,6 +421,7 @@ class ContentPackageRecord(Base):
     world_id = Column(String(255))
     creative_context_id = Column(String(255))
     revision = Column(Integer, nullable=False, default=1)
+    current_revision = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -419,9 +437,9 @@ class ContentVariantRecord(Base):
     body = Column(Text, nullable=False, default="")
     title = Column(Text, nullable=False, default="")
     caption = Column(Text, nullable=False, default="")
-    media = Column(JSONB, nullable=False, default=list)
-    settings = Column(JSONB, nullable=False, default=dict)
-    platform_metadata = Column(JSONB, nullable=False, default=dict)
+    media = Column(JSONType, nullable=False, default=list)
+    settings = Column(JSONType, nullable=False, default=dict)
+    platform_metadata = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -443,7 +461,7 @@ class SocialAccountRecord(Base):
     display_name = Column(Text, nullable=False, default="")
     avatar_url = Column(Text, nullable=False, default="")
     status = Column(String(40), nullable=False, default="PENDING")
-    capabilities = Column(JSONB, nullable=False, default=dict)
+    capabilities = Column(JSONType, nullable=False, default=dict)
     credential_ref = Column(String(255), nullable=False, default="")
     provider_account_id = Column(String(255), nullable=False, default="")
     region = Column(String(80), nullable=False, default="global")
@@ -480,7 +498,7 @@ class SocialHandoffRecord(Base):
     export_path = Column(Text, nullable=False, default="")
     export_status = Column(String(40), nullable=False, default="PENDING")
     distribution_job_id = Column(String(255), nullable=False, default="")
-    package = Column(JSONB, nullable=False, default=dict)
+    package = Column(JSONType, nullable=False, default=dict)
     expires_at = Column(DateTime)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -526,7 +544,7 @@ class IntegrationRecord(Base):
     region = Column(String(80), nullable=False, default="global")
     state = Column(String(40), nullable=False, default="REGISTERED")
     enabled = Column(Integer, nullable=False, default=0)
-    capabilities = Column(JSONB, nullable=False, default=dict)
+    capabilities = Column(JSONType, nullable=False, default=dict)
     verified_at = Column(DateTime)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -549,13 +567,13 @@ class DistributionJobRecord(Base):
     action = Column(String(40), nullable=False, default="publish")
     status = Column(String(40), nullable=False, default="DRAFT")
     idempotency_key = Column(String(255), nullable=False, unique=True)
-    variant = Column(JSONB, nullable=False, default=dict)
+    variant = Column(JSONType, nullable=False, default=dict)
     scheduled_at = Column(DateTime)
     last_attempt_at = Column(DateTime)
     attempt_count = Column(Integer, nullable=False, default=0)
     error_code = Column(String(120))
     error_message = Column(Text)
-    provider_response = Column(JSONB)
+    provider_response = Column(JSONType)
     brand_id = Column(String(255))
     creator_id = Column(String(255))
     campaign_id = Column(String(255))
@@ -596,7 +614,7 @@ class DistributionAttemptRecord(Base):
     error_message = Column(Text)
     provider_request_id = Column(String(255))
     provider_object_id = Column(String(255))
-    response_summary = Column(JSONB)
+    response_summary = Column(JSONType)
     request_id = Column(String(255), nullable=False, default="")
 
     __table_args__ = (
@@ -680,16 +698,16 @@ class XianyuListingRecord(Base):
     description = Column(Text, nullable=False, default="")
     price = Column(String(40), nullable=False, default="")
     category_id = Column(String(255), nullable=False, default="")
-    media_assets = Column(JSONB, nullable=False, default=list)
+    media_assets = Column(JSONType, nullable=False, default=list)
     status = Column(String(40), nullable=False, default="DRAFT")
-    provider_response = Column(JSONB, nullable=False, default=dict)
+    provider_response = Column(JSONType, nullable=False, default=dict)
     quantity = Column(Integer, nullable=False, default=1)
     content_package_id = Column(String(255), nullable=False, default="")
     distribution_job_id = Column(String(255), nullable=False, default="")
     condition = Column(String(40), nullable=False, default="new")
     location = Column(Text, nullable=False, default="")
-    shipping = Column(JSONB, nullable=False, default=dict)
-    attributes = Column(JSONB, nullable=False, default=dict)
+    shipping = Column(JSONType, nullable=False, default=dict)
+    attributes = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1346,14 +1364,69 @@ class AssetLineageRecord(Base):
     provider_task_id = Column(String(255), nullable=False, default="")
     model = Column(String(120), nullable=False, default="")
     attempt_no = Column(Integer, nullable=False, default=1)
-    parent_asset_id = Column(String(255))
+    parent_asset_id = Column(String(255), nullable=False, default="")
     qa_decision = Column(String(40), nullable=False, default="")
     published = Column(Boolean, nullable=False, default=False)
+    selected_for_package = Column(Boolean, nullable=False, default=False)
+    source_asset_id = Column(String(255))
+    workflow_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
+        UniqueConstraint("account_id", "episode_id", "parent_asset_id", "attempt_no", name="uq_meiti_lineage_attempt"),
         Index("idx_meiti_asset_lineage_asset", "asset_id"),
         Index("idx_meiti_asset_lineage_account", "account_id"),
         Index("idx_meiti_asset_lineage_episode", "episode_id"),
+    )
+
+
+class AccountSelectionRecord(Base):
+    """Single current account selection. ACTIVE is not exclusive."""
+
+    __tablename__ = "account_selections"
+
+    selection_key = Column(String(80), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    reason = Column(String(80), nullable=False, default="explicit")
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_account_selections_account", "account_id"),
+        Index("idx_meiti_account_selections_platform", "platform"),
+    )
+
+
+class KnowledgeDocumentRecord(Base):
+    """PostgreSQL index for Obsidian knowledge documents. Not a second brain."""
+
+    __tablename__ = "knowledge_documents"
+
+    document_id = Column(String(255), primary_key=True)
+    scope_type = Column(String(40), nullable=False)
+    scope_id = Column(String(255))
+    account_id = Column(String(255))
+    platform = Column(String(120), nullable=False, default="")
+    source_type = Column(String(80), nullable=False, default="obsidian")
+    title = Column(Text, nullable=False)
+    path = Column(Text, nullable=False, default="")
+    content = Column(Text, nullable=False, default="")
+    tags = Column(JSONType, nullable=False, default=list)
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String(40), nullable=False, default="ACTIVE")
+    content_hash = Column(String(64), nullable=False)
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    publication_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_knowledge_documents_account", "account_id"),
+        Index("idx_meiti_knowledge_documents_scope", "scope_type", "scope_id"),
+        Index("idx_meiti_knowledge_documents_hash", "content_hash"),
+        Index("idx_meiti_knowledge_documents_platform", "platform"),
     )
 

@@ -63,7 +63,7 @@ nodes:
     judge: image
 - node_id: video
   type: video_generate
-  provider: lechuang
+  provider: xai
   config:
     mode: image_to_video
 - node_id: video_qa

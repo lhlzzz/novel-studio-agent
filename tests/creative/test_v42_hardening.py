@@ -21,7 +21,7 @@ def _engine(tmp_path, *, polls=0, allow_mock=True, db=None, lease_seconds=30):
     assets = AssetStore(root=tmp_path / "assets")
     store = CreativeStore(assets=assets, engine=sqlite_engine(db) if db else None, lease_seconds=lease_seconds)
     mock = MockGenerationProvider(store=assets, polls_until_done=polls)
-    resolver = GenerationProviderResolver(providers={"mock": mock, "lechuang": mock}, allow_mock=allow_mock)
+    resolver = GenerationProviderResolver(providers={"mock": mock, "lechuang": mock, "xai": mock}, allow_mock=allow_mock)
     return CreativeWorkflowEngine(store=store, resolver=resolver, allow_mock=allow_mock)
 
 
@@ -79,6 +79,7 @@ def test_lease_contention_exactly_one_owner(tmp_path):
     engine = _engine(tmp_path, polls=4)
     run = engine.execute("creator-lifestyle-v1", {"brief": "lease-race", "variant_count": 1, "budget": 40})
     assert run.status == "WAITING_PROVIDER"
+    engine.store.release_lease(run.run_id)
     results = []
 
     def claim(name):

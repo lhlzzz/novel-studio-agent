@@ -102,6 +102,7 @@ class ContentPackage:
     world_id: str | None = None
     creative_context_id: str | None = None
     revision: int = 1
+    current_revision: str | None = None
 
     @property
     def id(self) -> str:
@@ -404,6 +405,9 @@ class AssetLineage:
     parent_asset_id: str | None = None
     qa_decision: str = ""
     published: bool = False
+    selected_for_package: bool = False
+    source_asset_id: str | None = None
+    workflow_id: str | None = None
     created_at: str | None = None
 
     def __post_init__(self) -> None:
@@ -413,6 +417,66 @@ class AssetLineage:
     @property
     def id(self) -> str:
         return self.lineage_id
+
+
+@dataclass(frozen=True)
+class AccountContext:
+    account_id: str
+    platform: str
+    account_name: str = ""
+    character_id: str | None = None
+    world_id: str | None = None
+    series_id: str | None = None
+    episode_id: str | None = None
+    creative_context_id: str | None = None
+    campaign_id: str | None = None
+    selection_reason: str = "explicit_account"
+    resolution_source: str = "explicit_account"
+    intent: str = "GENERATE"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "account_id": self.account_id,
+            "platform": self.platform,
+            "account_name": self.account_name,
+            "character_id": self.character_id,
+            "world_id": self.world_id,
+            "series_id": self.series_id,
+            "episode_id": self.episode_id,
+            "creative_context_id": self.creative_context_id,
+            "campaign_id": self.campaign_id,
+            "selection_reason": self.selection_reason,
+            "resolution_source": self.resolution_source,
+            "intent": self.intent,
+        }
+
+
+@dataclass(frozen=True)
+class ContinuityContext:
+    previous_episode_id: str | None = None
+    previous_episode_no: int | None = None
+    current_episode_id: str | None = None
+    current_episode_no: int | None = None
+    next_episode_id: str | None = None
+    character_continuity: dict[str, Any] = field(default_factory=dict)
+    world_continuity: dict[str, Any] = field(default_factory=dict)
+    series_continuity: dict[str, Any] = field(default_factory=dict)
+    narrative_continuity: dict[str, Any] = field(default_factory=dict)
+    knowledge: tuple[Any, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "previous_episode_id": self.previous_episode_id,
+            "previous_episode_no": self.previous_episode_no,
+            "current_episode_id": self.current_episode_id,
+            "current_episode_no": self.current_episode_no,
+            "next_episode_id": self.next_episode_id,
+            "character_continuity": dict(self.character_continuity),
+            "world_continuity": dict(self.world_continuity),
+            "series_continuity": dict(self.series_continuity),
+            "narrative_continuity": dict(self.narrative_continuity),
+            "knowledge": list(self.knowledge),
+        }
 
 
 @dataclass(frozen=True)
@@ -447,6 +511,14 @@ class ContinuityError(ValueError):
 
 class IsolationError(PermissionError):
     """Raised when a cross-account or cross-platform read is not explicitly allowed."""
+
+
+class AmbiguousTarget(IsolationError):
+    """Raised when more than one account or series matches and guessing is forbidden."""
+
+
+class EpisodeConflict(ContinuityError):
+    """Raised when concurrent episode or attempt allocation collides."""
 
 
 def with_status(package: ContentPackage, status: str) -> ContentPackage:

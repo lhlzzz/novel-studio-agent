@@ -5,7 +5,10 @@ import pytest
 
 from content.models import (
     AccountWorld,
+    AmbiguousTarget,
+    AssetLineage,
     ContinuityError,
+    EpisodeConflict,
     IsolationError,
     PerformanceFeedback,
     VirtualCharacter,
@@ -149,7 +152,7 @@ def test_cli_continue_resolves_xiaohongshu_series(runtime):
     assert target.platform == "xiaohongshu"
     assert target.account_id == account.account_id
     assert target.series_id == series.series_id
-    assert target.reason in {"active_account_context", "named_account", "platform_only"}
+    assert target.reason in {"current_selection", "active_account", "named_account", "platform_only"}
     prepared = runtime.prepare("继续昨天的小红书系列")
     assert prepared["episode"].episode_no == 2
     assert prepared["episode"].previous_episode_id
@@ -208,10 +211,69 @@ def test_named_account_and_active_reason_are_recorded(runtime):
     runtime.store.activate_account(first.account_id)
     silent = IntentResolver(runtime.store).resolve("继续昨天")
     assert silent.account_id == first.account_id
-    assert silent.reason == "active_account_context"
+    assert silent.reason in {"current_selection", "active_account"}
     named = IntentResolver(runtime.store).resolve("给小红书账号B做今天的内容。")
     assert named.account_id.endswith("B")
     assert named.reason == "named_account"
+
+
+def test_activate_does_not_pause_sibling_active_accounts(runtime):
+    first = _seed_account(runtime, platform="xiaohongshu", name="A", character="角色A", world="世界A", series="系列A")
+    second = _seed_account(runtime, platform="xiaohongshu", name="B", character="角色B", world="世界B", series="系列B")
+    runtime.store.activate_account(first.account_id)
+    runtime.store.activate_account(second.account_id)
+    assert runtime.store.get_account(first.account_id).status == "ACTIVE"
+    assert runtime.store.get_account(second.account_id).status == "ACTIVE"
+    selected = runtime.store.current_account(platform="xiaohongshu")
+    assert selected.account_id == second.account_id
+    silent = IntentResolver(runtime.store).resolve("继续昨天的小红书系列")
+    assert silent.account_id == second.account_id
+    assert silent.reason == "current_selection"
+
+
+def test_ambiguous_accounts_fail_closed_without_current_selection(runtime):
+    from content.models import PlatformAccount
+
+    runtime.store.save_account(PlatformAccount(account_id="xiaohongshu-A", platform="xiaohongshu", display_name="A", status="ACTIVE"))
+    runtime.store.save_account(PlatformAccount(account_id="xiaohongshu-B", platform="xiaohongshu", display_name="B", status="ACTIVE"))
+    with pytest.raises(AmbiguousTarget):
+        IntentResolver(runtime.store).resolve("继续昨天的小红书系列")
+
+
+def test_create_next_episode_is_transactional_and_unique(runtime):
+    account = _seed_account(runtime, platform="xiaohongshu", name="A", character="张满血", world="世界A", series="系列A")
+    series = runtime.store.active_series(account.account_id)
+    first = runtime.continue_series(account_id=account.account_id, series_id=series.series_id, title="第一天", brief="第一天")
+    second = runtime.continue_series(account_id=account.account_id, series_id=series.series_id, title="第二天", brief="第二天")
+    assert first.episode_no == 1
+    assert second.episode_no == 2
+    assert second.previous_episode_id == first.episode_id
+    linked = runtime.store.get_episode(first.episode_id, account_id=account.account_id)
+    assert linked.next_episode_id == second.episode_id
+    refreshed = runtime.store.get_series(series.series_id, account_id=account.account_id)
+    assert refreshed.current_episode_no == 2
+    duplicate = type(second)(**{**second.__dict__, "episode_id": "dup-2", "title": "冲突第二集"})
+    with pytest.raises(EpisodeConflict):
+        runtime.store.create_next_episode_tx(duplicate, previous=first, series=refreshed)
+
+
+def test_attempt_allocator_is_unique(runtime):
+    account = _seed_account(runtime, platform="xiaohongshu", name="A", character="张满血", world="世界A", series="系列A")
+    series = runtime.store.active_series(account.account_id)
+    episode = runtime.continue_series(account_id=account.account_id, series_id=series.series_id, title="第一天", brief="第一天")
+    def _lineage(lineage_id: str, asset_id: str) -> AssetLineage:
+        return AssetLineage(
+            lineage_id=lineage_id,
+            asset_id=asset_id,
+            account_id=account.account_id,
+            series_id=series.series_id,
+            episode_id=episode.episode_id,
+            user_request="generate",
+        )
+    first = runtime.store.allocate_attempt(account_id=account.account_id, episode_id=episode.episode_id, parent_asset_id=None, lineage=_lineage("lin-1", "asset-1"))
+    second = runtime.store.allocate_attempt(account_id=account.account_id, episode_id=episode.episode_id, parent_asset_id=None, lineage=_lineage("lin-2", "asset-2"))
+    assert first.attempt_no != second.attempt_no
+    assert {first.attempt_no, second.attempt_no} == {1, 2}
 
 
 def test_cli_surface_has_continuity_commands():

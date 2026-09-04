@@ -28,11 +28,11 @@ def test_content_package_fields_are_first_class():
 def test_campaign_and_strategy_plan():
     campaign = Campaign("camp-1", "grow replies", audience="founders", status="active")
     assert campaign.id == "camp-1"
-    result = StrategyAgent().run({"objective": "grow replies", "audience": "founders"})
+    result = StrategyAgent().run({"objective": "grow replies", "audience": "founders", "account_id": "acc-test"})
     plan = result["plan"]
     assert isinstance(plan, StrategyPlan)
     assert plan.objective == "grow replies"
     assert plan.experiment_plan["observation_window"]
-    content = ContentAgent().run({"title": "A", "body": "B", "hook": "H", "campaign_id": campaign.campaign_id})
+    content = ContentAgent().run({"title": "A", "body": "B", "hook": "H", "campaign_id": campaign.campaign_id, "account_id": "acc-test"})
     assert content["package"].hook == "H"
     assert content["package"].campaign_id == "camp-1"

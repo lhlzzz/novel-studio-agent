@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""meiti content embedding pipeline: chunk → embed → upsert → search.
+"""Embedding indexing utility. Production retrieval is MemoryService, not this CLI.
 
 Default embedder is a local deterministic hash vector (no external API).
 Set MEITI_EMBEDDING_PROVIDER=openai and OPENAI_API_KEY to use real embeddings.
@@ -256,35 +256,20 @@ def search(
     limit: int = 5,
     source_line: str | None = None,
     platform: str | None = None,
+    account_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    vectors, model = embed_texts([query])
-    qvec = vectors[0]
-    q_literal = "[" + ",".join(str(float(x)) for x in qvec) + "]"
-    sql = """
-        SELECT embedding_key, title, content_type, source_line, platform, path,
-               left(body, 240) AS body_preview,
-               embedding <=> CAST(:q AS vector) AS distance
-        FROM content_embeddings
-        WHERE embedding IS NOT NULL
-    """
-    params: dict[str, Any] = {"q": q_literal, "lim": limit}
-    if source_line:
-        sql += " AND source_line = :source_line"
-        params["source_line"] = source_line
+    from memory.embeddings import search_scoped
+
+    filters = {}
+    if account_id:
+        filters["account_id"] = account_id
     if platform:
-        sql += " AND platform = :platform"
-        params["platform"] = platform
-    sql += " ORDER BY embedding <=> CAST(:q AS vector) ASC LIMIT :lim"
-    with engine.connect() as conn:
-        rows = conn.execute(text(sql), params).mappings().all()
-    return [
-        {
-            **dict(row),
-            "query_model": model,
-            "distance": float(row["distance"]) if row["distance"] is not None else None,
-        }
-        for row in rows
-    ]
+        filters["platform"] = platform
+    if source_line:
+        filters["source_line"] = source_line
+    with SessionLocal() as session:
+        rows = search_scoped(session, query, filters=filters, limit=limit)
+    return rows[:limit]
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -320,6 +305,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         limit=args.limit,
         source_line=args.source_line,
         platform=args.platform,
+        account_id=getattr(args, "account_id", None),
     )
     print(json.dumps(rows, ensure_ascii=False, indent=2))
     return 0
@@ -387,6 +373,7 @@ def main() -> int:
     p_s.add_argument("--limit", type=int, default=5)
     p_s.add_argument("--source-line", default=None)
     p_s.add_argument("--platform", default=None)
+    p_s.add_argument("--account-id", default=None)
     p_s.set_defaults(func=cmd_search)
 
     p_t = sub.add_parser("selftest", help="offline ingest+search smoke")

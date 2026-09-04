@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from content.continuity import ContinuityEngine
 from content.models import (
+    AccountContext,
     AccountWorld,
     AssetLineage,
     ContentPackage,
@@ -68,7 +69,7 @@ class ContinuityRuntime:
         )
         saved = self.store.save_account(account)
         if saved.status == "ACTIVE":
-            saved = self.store.activate_account(saved.account_id)
+            saved = self.store.select_current_account(saved.account_id, reason="create")
         self.store.save_memory(ContinuityMemory(
             memory_id=uuid4().hex,
             kind="account",
@@ -145,13 +146,18 @@ class ContinuityRuntime:
 
     def prepare_target(self, target: ResolvedTarget, *, text: str) -> dict[str, Any]:
         extras = dict(target.extras or {})
+        intent = str(extras.get("intent") or "GENERATE")
         account = self.store.get_account(target.account_id)
         if account is None:
             raise IsolationError(f"unknown platform account: {target.account_id}")
         series = self.store.get_series(target.series_id, account_id=account.account_id) if target.series_id else self.store.active_series(account.account_id)
         episode = None
-        if extras.get("reuse_episode") and target.episode_id:
-            episode = self.store.get_episode(target.episode_id, account_id=account.account_id)
+        read_only = extras.get("reuse_episode") or intent in {"READ", "INSPECT", "HISTORY", "SEARCH", "ANALYTICS", "DOCTOR"}
+        if read_only:
+            if target.episode_id:
+                episode = self.store.get_episode(target.episode_id, account_id=account.account_id)
+            elif series is not None:
+                episode = self.store.latest_episode(series.series_id)
         else:
             if series is None:
                 series = self.create_series(account_id=account.account_id, name=text[:40] or "untitled series")
@@ -170,12 +176,27 @@ class ContinuityRuntime:
         context = self.engine.build_creative_context(target=target, request=text, brief=episode.brief if episode else text)
         isolation = self.isolation.inspect(context)
         character_qa = self.character_qa.inspect(context, store=self.store)
+        account_context = AccountContext(
+            account_id=account.account_id,
+            platform=account.platform,
+            account_name=account.display_name,
+            character_id=account.character_id,
+            world_id=account.world_id,
+            series_id=series.series_id if series else None,
+            episode_id=episode.episode_id if episode else None,
+            creative_context_id=context.context_id,
+            campaign_id=context.campaign_id,
+            selection_reason=target.reason,
+            resolution_source=target.reason,
+            intent=intent,
+        )
         return {
             "target": target,
             "context": context,
             "episode": episode,
             "series": series,
             "account": account,
+            "account_context": account_context,
             "isolation": isolation,
             "character_qa": character_qa,
             "policy": platform_policy(account.platform),
@@ -200,8 +221,9 @@ class ContinuityRuntime:
             creative_context_id=context.context_id,
         )
         package = differentiate_package(package, context)
-        self.store.save_package(package)
-        self.store.save_package_snapshot(package, change_summary=f"{status} v{package.revision}")
+        saved = self.store.save_package(package)
+        revision = self.store.save_package_snapshot(saved, change_summary=f"{status} v{saved.revision}")
+        package = ContentPackage(**{**saved.__dict__, "revision": revision.version, "current_revision": revision.revision_id})
         if context.episode_id:
             episode = self.store.get_episode(context.episode_id, account_id=context.account_id)
             if episode is not None:
@@ -222,7 +244,6 @@ class ContinuityRuntime:
         package_id: str | None = None,
     ) -> AssetLineage:
         asset_id = getattr(asset, "asset_id", None) or str(asset)
-        attempt = attempt_no or self.store.next_attempt(account_id=context.account_id, episode_id=context.episode_id, parent_asset_id=parent_asset_id)
         if provider or provider_task_id or model:
             self.store.save_context(replace(
                 context,
@@ -249,10 +270,19 @@ class ContinuityRuntime:
             provider=provider or context.provider,
             provider_task_id=provider_task_id or context.provider_task_id,
             model=model or context.model,
-            attempt_no=attempt,
+            attempt_no=attempt_no or 1,
             parent_asset_id=parent_asset_id,
             qa_decision=qa_decision,
+            source_asset_id=parent_asset_id,
+            workflow_id=str((context.generation_parameters or {}).get("workflow_id") or ""),
         )
+        if attempt_no is None:
+            return self.store.allocate_attempt(
+                account_id=context.account_id,
+                episode_id=context.episode_id,
+                parent_asset_id=parent_asset_id,
+                lineage=lineage,
+            )
         return self.store.save_lineage(lineage)
 
     def record_publication(self, *, package: ContentPackage, publication) -> ContinuityMemory:
@@ -278,33 +308,46 @@ class ContinuityRuntime:
                 episode = self.store.get_episode(package.episode_id, account_id=package.account_id)
                 if episode is not None:
                     self.store.save_episode(Episode(**{**episode.__dict__, "content_status": "PUBLISHED", "updated_at": utcnow()}))
-            seen = set()
-            candidates = [str(item) for item in package.media_assets]
-            if package.episode_id:
-                for lineage in self.store.list_lineage(account_id=package.account_id, episode_id=package.episode_id):
-                    if lineage.lineage_id not in seen:
-                        self.store.save_lineage(replace(lineage, published=True, content_package_id=package.package_id))
-                        seen.add(lineage.lineage_id)
-            for asset_id in candidates:
+            selected = {str(item) for item in package.media_assets}
+            for lineage in self.store.list_lineage(account_id=package.account_id, episode_id=package.episode_id):
+                chosen = (
+                    lineage.asset_id in selected
+                    or lineage.content_package_id == package.package_id
+                    or lineage.selected_for_package
+                )
+                if chosen:
+                    self.store.save_lineage(replace(
+                        lineage,
+                        published=True,
+                        selected_for_package=True,
+                        content_package_id=package.package_id,
+                    ))
+            for asset_id in selected:
                 lineage = self.store.get_lineage(asset_id, account_id=package.account_id)
-                if lineage is not None and lineage.lineage_id not in seen:
-                    self.store.save_lineage(replace(lineage, published=True, content_package_id=package.package_id))
-                    seen.add(lineage.lineage_id)
-            self.store.save_feedback(PerformanceFeedback(
-                feedback_id=uuid4().hex,
-                account_id=package.account_id,
-                platform=package.platform,
-                content_package_id=package.package_id,
-                episode_id=package.episode_id,
-                topic=package.topic,
-                hook=package.hook,
-                visual_style=str((package.metadata or {}).get("platform_policy", {}).get("visual") or ""),
-                caption_style=package.caption,
-                publication_id=str(getattr(publication, "publication_id", "") or ""),
-            ))
-        return self.store.list_memories(account_id=package.account_id or "", kind="episode")[-1] if package.account_id else ContinuityMemory(
-            memory_id="none", kind="episode", account_id="", subject_id="", key="published", value={}
-        )
+                if lineage is not None:
+                    self.store.save_lineage(replace(lineage, published=True, selected_for_package=True, content_package_id=package.package_id))
+            try:
+                from memory.service import get_memory_service
+                get_memory_service().writeback({
+                    "kind": "PUBLICATION_LEARNING",
+                    "account_id": package.account_id,
+                    "platform": package.platform,
+                    "series_id": package.series_id,
+                    "episode_id": package.episode_id,
+                    "publication_id": getattr(publication, "publication_id", ""),
+                    "source": "publication",
+                    "content_pattern": {
+                        "package_id": package.package_id,
+                        "media_asset_ids": list(package.media_assets),
+                    },
+                })
+            except Exception:
+                pass
+        memories = self.store.list_memories(account_id=package.account_id or "", kind="episode") if package.account_id else []
+        published = [item for item in memories if item.key == "published"]
+        if published:
+            return published[-1]
+        return ContinuityMemory(memory_id="none", kind="episode", account_id=package.account_id or "", subject_id="", key="published", value={})
 
     def record_feedback(self, feedback: PerformanceFeedback) -> PerformanceFeedback:
         return self.store.save_feedback(feedback)
@@ -377,10 +420,13 @@ class ContinuityRuntime:
             "CHARACTER_RUNTIME": _status(ready, count=len(characters)),
             "WORLD_RUNTIME": _status(ready, count=len(worlds)),
             "SERIES_RUNTIME": _status(ready, count=len(series)),
-            "CONTINUITY_RUNTIME": _status(ready and hasattr(self.engine, "build_continuity_context")),
-            "ASSET_LINEAGE": _status(ready and hasattr(self.store, "save_lineage")),
+            "CONTINUITY_RUNTIME": _status(ready and hasattr(self.engine, "build_continuity_bundle")),
+            "ASSET_LINEAGE": _status(ready and hasattr(self.store, "allocate_attempt")),
             "PLATFORM_VARIANT": _status(callable(differentiate_package)),
             "CREATIVE_RUNTIME": _status(True, owner="creative.runtime.container.CreativeRuntime"),
+            "ACCOUNT_CONTEXT": _status(True, owner="content.models.AccountContext"),
+            "MULTI_ACCOUNT_RUNTIME": _status(ready and hasattr(self.store, "select_current_account")),
+            "EPISODE_TRANSACTION": _status(ready and hasattr(self.store, "create_next_episode_tx")),
         }
 
     def packages_for_request(self, text: str) -> list[dict[str, Any]]:

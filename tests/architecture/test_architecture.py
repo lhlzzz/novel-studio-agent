@@ -39,6 +39,9 @@ def test_media_agent_does_not_import_lechuang_adapter():
     source = (ROOT / "agents/media/runtime.py").read_text(encoding="utf-8")
     assert "LechuangAdapter" not in source
     assert "providers.lechuang" not in source
+    cli = (ROOT / "scripts/meiti.py").read_text(encoding="utf-8")
+    assert "LechuangAdapter(" not in cli
+    assert "XAIVideoAdapter(" not in cli
 
 
 def test_creative_does_not_import_social_adapters():

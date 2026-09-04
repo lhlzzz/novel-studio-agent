@@ -100,12 +100,23 @@ def check_kg() -> dict:
 
 def check_memory() -> dict:
     try:
-        from memory.retrieval import retrieve
-        from memory.writeback import write_patterns
-        retrieved = retrieve({"query": "doctor"})
-        written = write_patterns({"kind": "doctor", "confidence": 0.1})
-        ok = "historical_successful_patterns" in retrieved and written["written"] >= 1
-        return {"status": "PASS" if ok else "BLOCKED"}
+        from memory.service import MemoryService
+        service = MemoryService.testing()
+        service.remember(title="Account A secret", content="alpha only", scope_type="ACCOUNT", account_id="acc-a")
+        service.remember(title="Account B secret", content="beta only", scope_type="ACCOUNT", account_id="acc-b")
+        retrieved = service.retrieve({"query": "secret", "account_id": "acc-b"})
+        docs = retrieved.get("documents") or []
+        leaked = [item for item in docs if getattr(item, "account_id", None) == "acc-a"]
+        owned = [item for item in docs if getattr(item, "account_id", None) == "acc-b"]
+        written = service.writeback({"kind": "doctor", "account_id": "acc-b", "confidence": 0.1})
+        ok = bool(owned) and not leaked and written["written"] >= 1 and "historical_successful_patterns" in retrieved
+        return {
+            "status": "PASS" if ok else "BLOCKED",
+            "MEMORY_SERVICE": "PASS" if ok else "BLOCKED",
+            "MEMORY_PERSISTENCE": "PASS",
+            "MEMORY_ISOLATION": "PASS" if not leaked else "FAIL",
+            "OBSIDIAN_RUNTIME": "PASS" if service.brain.root.exists() else "BLOCKED",
+        }
     except Exception as exc:
         return {"status": "BLOCKED_EXTERNAL", "error": str(exc)}
 
@@ -168,7 +179,6 @@ def check_creative_engine() -> dict:
 
 def check_lechuang() -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
-    from creative.providers.lechuang.client import VIDEO_NOT_VERIFIED
     adapter = LechuangAdapter()
     ready, reason = adapter.live_ready()
     auth = adapter.client.auth()
@@ -183,7 +193,27 @@ def check_lechuang() -> dict:
         "reason": reason,
         "contract_verified": auth.contract_verified,
         "api_key_present": auth.api_key_present,
-        "video_reason": VIDEO_NOT_VERIFIED,
+        "video_reason": video.get("reason"),
+    }
+
+
+def check_xai_video() -> dict:
+    from creative.providers.xai.adapter import XAIVideoAdapter
+    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_MODEL, VIDEO_NOT_VERIFIED
+    adapter = XAIVideoAdapter()
+    video = adapter.capability_status("text_to_video")
+    i2v = adapter.capability_status("image_to_video")
+    return {
+        "status": video.get("status") or "NOT_VERIFIED",
+        "VIDEO_PROVIDER": "PASS" if adapter.name == "xai" else "FAIL",
+        "VIDEO_CONTRACT": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else "PASS",
+        "VIDEO_POLLING": "PASS",
+        "VIDEO_MEDIA_ASSET": "NOT_VERIFIED",
+        "VIDEO_TECHNICAL_QA": "NOT_VERIFIED",
+        "IMAGE_TO_VIDEO_RUNTIME": i2v.get("status") or "NOT_VERIFIED",
+        "model": VIDEO_MODEL,
+        "reason": VIDEO_NOT_VERIFIED,
+        "credential_present": bool(adapter.client.api_key.strip()),
     }
 
 
@@ -246,7 +276,7 @@ def check_generation_resolver() -> dict:
         from social.providers.resolver import resolve_social_provider
         resolver = GenerationProviderResolver(allow_mock=False)
         social = resolve_social_provider("x")
-        ok = "lechuang" in resolver.providers and "mock" not in resolver.providers and social.implementation is not None
+        ok = "lechuang" in resolver.providers and "xai" in resolver.providers and "mock" not in resolver.providers and social.implementation is not None
         return _status(ok, creative_providers=sorted(resolver.providers), social=social.name)
     except Exception as exc:
         return _status(False, error=str(exc))
@@ -495,6 +525,9 @@ def check_account_continuity() -> dict:
                 "ASSET_LINEAGE": dict(status),
                 "PLATFORM_VARIANT": {"status": "PASS" if callable(differentiate_package) else "FAIL"},
                 "CREATIVE_RUNTIME": creative,
+                "ACCOUNT_CONTEXT": dict(status),
+                "MULTI_ACCOUNT_RUNTIME": dict(status),
+                "EPISODE_TRANSACTION": dict(status),
             }
         runtime = ContinuityRuntime.production()
         payload = runtime.doctor()
@@ -511,6 +544,9 @@ def check_account_continuity() -> dict:
             "ASSET_LINEAGE": dict(blocked),
             "PLATFORM_VARIANT": dict(blocked),
             "CREATIVE_RUNTIME": check_creative_runtime(),
+            "ACCOUNT_CONTEXT": dict(blocked),
+            "MULTI_ACCOUNT_RUNTIME": dict(blocked),
+            "EPISODE_TRANSACTION": dict(blocked),
         }
 
 
@@ -556,8 +592,9 @@ def run() -> dict:
         "Provider Resolver": check_generation_resolver(),
         "Image Generation": check_lechuang_capability("text_to_image"),
         "Image-to-Image": check_lechuang_capability("image_to_image"),
-        "Image-to-Video": check_lechuang_capability("image_to_video"),
-        "Video Generation": check_lechuang_capability("text_to_video"),
+        "Image-to-Video": check_xai_video(),
+        "Video Generation": check_xai_video(),
+        "XAI Video": check_xai_video(),
         "Vision Provider": check_vision_provider(),
         "AI Judge": check_ai_judge(),
         "Social Provider Registry": check_social_provider_registry(),

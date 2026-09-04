@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from content.models import ACCOUNT_PLATFORMS, IsolationError, ResolvedTarget
+from content.models import ACCOUNT_PLATFORMS, AmbiguousTarget, IsolationError, ResolvedTarget
 from content.store import ContinuityStore
 
 
@@ -32,6 +32,7 @@ class IntentResolver:
 
     def resolve(self, text: str, *, platform: str | None = None, account_id: str | None = None) -> ResolvedTarget:
         request = (text or "").strip()
+        intent = classify_intent(request)
         detected_platforms = _detect_platforms(request)
         if platform:
             detected_platforms = [platform] + [item for item in detected_platforms if item != platform]
@@ -41,36 +42,33 @@ class IntentResolver:
                 raise IsolationError(f"unknown platform account: {account_id}")
             reason = "explicit_account"
         else:
-            account = None
-            if detected_platforms:
-                named = _detect_account_name(request)
-                candidates = self.store.list_accounts(platform=detected_platforms[0])
-                if named:
-                    account = next((item for item in candidates if _name_match(item.display_name, named) or _name_match(item.account_id, named)), None)
-                    reason = "named_account"
-                if account is None:
-                    account = self.store.active_account(platform=detected_platforms[0])
-                    reason = "active_account_context" if account else "platform_only"
-            else:
-                account = self.store.active_account()
-                reason = "active_account_context"
-            if account is None:
-                raise IsolationError("no platform account could be resolved; create or activate an account first")
+            account, reason = self._resolve_account(request, detected_platforms)
         series = None
         if account:
             series_name = _detect_series_name(request)
             series_list = self.store.list_series(account.account_id)
             if series_name:
-                series = next((item for item in series_list if series_name in item.name), None)
+                matches = [item for item in series_list if series_name in item.name]
+                if len(matches) > 1:
+                    raise AmbiguousTarget("multiple series match; name the series uniquely")
+                series = matches[0] if matches else None
             if series is None:
-                series = self.store.active_series(account.account_id)
+                active = [item for item in series_list if item.status == "ACTIVE"]
+                if len(active) == 1:
+                    series = active[0]
+                elif len(active) > 1 and intent in GENERATE_INTENTS:
+                    raise AmbiguousTarget("multiple active series; name the series")
+                elif len(active) == 0 and len(series_list) == 1:
+                    series = series_list[0]
         episode = self.store.latest_episode(series.series_id) if series else None
         extras: dict[str, Any] = {
             "continue": _is_continue(request),
             "video": _wants_video(request),
             "image": _wants_image(request),
-            "platforms": detected_platforms or [account.platform],
+            "platforms": detected_platforms or ([account.platform] if account else []),
             "remix": _is_remix(request),
+            "intent": intent,
+            "reuse_episode": intent in READ_INTENTS,
         }
         return ResolvedTarget(
             platform=account.platform,
@@ -83,6 +81,43 @@ class IntentResolver:
             request=request,
             extras=extras,
         )
+
+    def _resolve_account(self, request: str, detected_platforms: list[str]):
+        named = _detect_account_name(request)
+        if detected_platforms:
+            candidates = self.store.list_accounts(platform=detected_platforms[0])
+            if named:
+                matches = [item for item in candidates if _name_match(item.display_name, named) or _name_match(item.account_id, named)]
+                if len(matches) > 1:
+                    raise AmbiguousTarget("multiple accounts match the named account")
+                if matches:
+                    return matches[0], "named_account"
+            selected = self.store.current_account(platform=detected_platforms[0])
+            if selected is not None:
+                return selected, "current_selection"
+            active = [item for item in candidates if item.status == "ACTIVE"]
+            if len(active) == 1:
+                return active[0], "active_account"
+            if len(active) > 1:
+                raise AmbiguousTarget("multiple ACTIVE accounts on this platform; select a current account")
+            if len(candidates) == 1:
+                return candidates[0], "platform_only"
+            raise IsolationError("no platform account could be resolved; create or select an account first")
+        if named:
+            matches = [item for item in self.store.list_accounts() if _name_match(item.display_name, named) or _name_match(item.account_id, named)]
+            if len(matches) > 1:
+                raise AmbiguousTarget("multiple accounts match the named account")
+            if matches:
+                return matches[0], "named_account"
+        selected = self.store.current_account()
+        if selected is not None:
+            return selected, "current_selection"
+        active = [item for item in self.store.list_accounts() if item.status == "ACTIVE"]
+        if len(active) == 1:
+            return active[0], "active_account"
+        if len(active) > 1:
+            raise AmbiguousTarget("multiple ACTIVE accounts; select a current account")
+        raise IsolationError("no platform account could be resolved; create or select an account first")
 
     def resolve_many(self, text: str) -> list[ResolvedTarget]:
         platforms = _detect_platforms(text) or []
@@ -156,3 +191,28 @@ def _wants_image(text: str) -> bool:
 
 def _is_remix(text: str) -> bool:
     return any(token in text for token in ("也做一版", "版本", "不要和", "差异", "另一版"))
+
+
+READ_INTENTS = ("READ", "INSPECT", "HISTORY", "SEARCH", "ANALYTICS", "DOCTOR")
+GENERATE_INTENTS = ("GENERATE", "CONTINUE", "REMIX")
+
+
+def classify_intent(text: str) -> str:
+    lowered = (text or "").lower()
+    if any(token in lowered for token in ("doctor", "健康检查", "诊断")):
+        return "DOCTOR"
+    if any(token in lowered for token in ("analytics", "数据", "表现", "反馈")):
+        return "ANALYTICS"
+    if any(token in lowered for token in ("search", "检索", "查找")):
+        return "SEARCH"
+    if any(token in lowered for token in ("history", "历史", "记录")):
+        return "HISTORY"
+    if any(token in lowered for token in ("inspect", "查看", "看一下", "inspect")):
+        return "INSPECT"
+    if any(token in lowered for token in ("read", "读取")):
+        return "READ"
+    if _is_remix(text):
+        return "REMIX"
+    if _is_continue(text):
+        return "CONTINUE"
+    return "GENERATE"

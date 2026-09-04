@@ -90,9 +90,13 @@ class MediaAgent:
                 creative_context=task.get("creative_context"),
             )
         code = run.error_code or run.blocked_reason or ""
-        if run.status == "SUCCEEDED" or code in CREATIVE_MEMORY_CODES:
+        if (run.status == "SUCCEEDED" or code in CREATIVE_MEMORY_CODES) and requirement.get("account_id"):
             write_patterns({
                 "kind": "workflow",
+                "account_id": requirement.get("account_id"),
+                "platform": requirement.get("platform") or "",
+                "series_id": requirement.get("series_id"),
+                "episode_id": requirement.get("episode_id"),
                 "successful_pattern" if run.status == "SUCCEEDED" else "failed_pattern": {
                     "workflow_id": run.workflow_id,
                     "workflow_version": run.workflow_version,

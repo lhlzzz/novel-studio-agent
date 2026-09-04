@@ -82,8 +82,10 @@ def _print_capability(title: str, rows: list[tuple[str, dict]], ready_name: str,
 
 def run() -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
-    from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
+    from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED
     from creative.providers.lechuang.credentials import API_KEY_ENV, credential_status
+    from creative.providers.xai.adapter import XAIVideoAdapter
+    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
     from creative.providers.resolver import GenerationProviderResolver, load_capability_registry
     from creative.store import CreativeStore, schema_ready, sqlite_engine
     from creative.runtime.container import CreativeRuntime
@@ -104,6 +106,7 @@ def run() -> dict:
         "ugc-style-video-v1", "cinematic-video-v1", "product-optional-content-v1",
     }
     adapter = LechuangAdapter()
+    xai = XAIVideoAdapter()
     cred = credential_status(adapter.client.credential)
     capabilities = load_capability_registry()
     from creative.assets import AssetStore
@@ -164,10 +167,10 @@ def run() -> dict:
     video_audit = audit.get("video") or {}
     i2v_audit = audit.get("image_to_video") or {}
     resolver = GenerationProviderResolver(allow_mock=False)
-    resolver_ok = "lechuang" in resolver.providers and "mock" not in resolver.providers
+    resolver_ok = "lechuang" in resolver.providers and "xai" in resolver.providers and "mock" not in resolver.providers
     image_cap = adapter.capability_status("text_to_image")
-    video_cap = adapter.capability_status("text_to_video")
-    i2v_cap = adapter.capability_status("image_to_video")
+    video_cap = xai.capability_status("text_to_video")
+    i2v_cap = xai.capability_status("image_to_video")
 
     image_contract = _status(IMAGE_CONTRACT_VERIFIED, reason=adapter.client.contract_reason)
     image_generation = _status(_audit_pass(image_audit, "real_generation") and bool(image_audit.get("real_e2e")), reason=("ok" if image_audit.get("real_e2e") else "no real image generation evidence"))
