@@ -12,6 +12,7 @@ from content.models import (
     ASSET_ROLES,
     AssetFreshnessError,
     AssetLineage,
+    AssetReferenceSnapshot,
     ConfigurationBlocked,
     ContentPackage,
     ContentPackageAsset,
@@ -26,6 +27,7 @@ from content.models import (
     PRIMARY_ASSET_ROLES,
     PlatformAssetPool,
     ProductionEvidence,
+    ProductionRun,
     REUSE_INTENTS,
     utcnow,
 )
@@ -259,61 +261,33 @@ class PlatformAssetService:
         production_run_id: str | None = None,
         root: Path | None = None,
     ) -> dict[str, Any]:
-        if asset_role not in ASSET_ROLES:
-            raise ValueError(f"invalid asset_role: {asset_role}")
-        if asset_role in PRIMARY_ASSET_ROLES and not prompt_id and not no_prompt_reference:
-            raise ConfigurationBlocked(
-                "NO_PROMPT_REFERENCE",
-                "primary asset import requires prompt_id or explicit NO_PROMPT_REFERENCE",
-            )
-        account = self.store.get_account(account_id)
-        if account is None:
-            raise IsolationError(f"unknown platform account: {account_id}")
-        if account.platform != platform:
-            raise IsolationError(f"account {account_id} is {account.platform}, not {platform}")
-        episode = self.store.get_episode(episode_id, account_id=account_id)
-        if episode is None:
-            raise IsolationError(f"episode {episode_id} is not owned by {account_id}")
-        if asset_role in PRIMARY_ASSET_ROLES and not prompt_id and no_prompt_reference:
-            self.store.save_override(ManualOverride(
-                override_id=uuid4().hex,
-                account_id=account_id,
-                platform=platform,
-                target_kind="asset_import",
-                target_id=episode_id,
-                field_name="prompt_id",
-                old_value=None,
-                new_value="NO_PROMPT_REFERENCE",
-                changed_by=operator,
-                reason=no_prompt_reason or "explicit NO_PROMPT_REFERENCE",
-                source="USER_OVERRIDE",
-            ))
-        source = Path(path)
-        if not source.is_file():
-            raise FileNotFoundError(str(source))
-        digest = sha256_file(source)
-        existing = self.store.get_asset_by_sha256(digest)
-        if existing is not None:
-            raise ExistingAssetError("EXISTING_ASSET", self._existing_message(existing))
-        pool = self.ensure_pool(account_id=account_id, platform=platform, character_id=account.character_id, world_id=account.world_id)
-        kind = asset_type or _type_from_path(source)
-        parent = parent_asset_id or source_asset_id
-        if kind == "video" and (asset_role in PRIMARY_ASSET_ROLES) and source_asset_id:
-            source_asset = _load_asset(source_asset_id, store=self.store)
-            if source_asset is None:
-                raise AssetFreshnessError("MISSING_SOURCE_ASSET", "IMAGE_TO_VIDEO requires source_asset_id")
-            if source_asset.account_id not in {account_id, None} and (source_asset.scope_type or "").upper() != "GLOBAL":
-                if source_asset.platform and source_asset.platform != platform:
-                    parent = source_asset.asset_id
-                    reuse_mode = "DERIVED" if reuse_mode == "NONE" else reuse_mode
-        asset = persist_file(
-            source,
-            asset_type=kind,
+        prepared = self._prevalidate_import(
+            path,
             account_id=account_id,
-            series_id=episode.series_id,
-            episode_id=episode.episode_id,
-            character_id=account.character_id,
-            world_id=account.world_id,
+            platform=platform,
+            episode_id=episode_id,
+            asset_role=asset_role,
+            asset_type=asset_type,
+            reuse_mode=reuse_mode,
+            intent=intent,
+            parent_asset_id=parent_asset_id,
+            source_asset_id=source_asset_id,
+            reference_asset_ids=reference_asset_ids,
+            prompt_id=prompt_id,
+            model=model,
+            tool=tool,
+            generation_mode=generation_mode,
+            no_prompt_reference=no_prompt_reference,
+            production_run_id=production_run_id,
+        )
+        asset = persist_file(
+            prepared["source"],
+            asset_type=prepared["kind"],
+            account_id=account_id,
+            series_id=prepared["episode"].series_id,
+            episode_id=prepared["episode"].episode_id,
+            character_id=prepared["account"].character_id,
+            world_id=prepared["account"].world_id,
             provider="manual-lechuang" if generation_mode == "MANUAL_CREATIVE_TOOL" else generation_mode,
             model=model or "UNKNOWN",
             prompt_id=prompt_id,
@@ -326,92 +300,301 @@ class PlatformAssetService:
             scope_type="PLATFORM_ACCOUNT",
             asset_role=asset_role,
             lifecycle="IMPORTED",
-            pool_id=pool.pool_id,
-            parent_asset_id=parent,
-            source_asset_id=source_asset_id or parent,
+            pool_id=prepared["pool"].pool_id,
+            parent_asset_id=prepared["parent"],
+            source_asset_id=source_asset_id or prepared["parent"],
             generation_mode=generation_mode,
             tool=tool or "lechuang",
             **({"root": root} if root is not None else {}),
         )
-        previous = self.store.get_episode(episode.previous_episode_id, account_id=account_id) if episode.previous_episode_id else None
-        previous_asset = _load_asset(previous.primary_asset_id, store=self.store) if previous and previous.primary_asset_id else None
         if asset_role in PRIMARY_ASSET_ROLES:
             self.freshness.assert_fresh(
-                current_episode=episode,
+                current_episode=prepared["episode"],
                 candidate=asset,
-                previous_episode=previous,
-                previous_asset=previous_asset,
+                previous_episode=prepared["previous"],
+                previous_asset=prepared["previous_asset"],
                 platform=platform,
                 account_id=account_id,
                 intent=intent,
-                reuse_mode=reuse_mode,
+                reuse_mode=prepared["reuse_mode"],
                 store=self.store,
             )
-            if previous_asset and asset.platform != previous_asset.platform and reuse_mode not in {"REFERENCE", "DERIVED", "NONE"}:
-                raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
-        saved = self._persist_asset(asset)
-        qa = self.qa.inspect_video(saved) if saved.type == "video" else self.qa.inspect_image(saved)
-        lifecycle = "QA_PASSED" if qa.get("decision") == "pass" else "QA_FAILED"
+        qa = self.qa.inspect_video(asset) if asset.type == "video" else self.qa.inspect_image(asset)
+        if qa.get("decision") != "pass":
+            self._record_qa_failure(
+                account_id=account_id,
+                platform=platform,
+                episode=prepared["episode"],
+                prompt_id=prompt_id,
+                qa=qa,
+            )
+            raise ConfigurationBlocked("QA_FAILED", "technical QA failed; no successful production record")
         measured = {
-            "lifecycle": lifecycle,
-            "width": qa.get("width") if qa.get("width") else saved.width,
-            "height": qa.get("height") if qa.get("height") else saved.height,
-            "mime_type": qa.get("mime") or saved.mime_type,
-            "size": int(qa.get("filesize") or saved.size or 0),
-            "duration": qa.get("duration") if qa.get("duration") is not None else saved.duration,
-            "fps": qa.get("fps") if qa.get("fps") is not None else saved.fps,
+            "lifecycle": "QA_PASSED",
+            "width": qa.get("width") if qa.get("width") else asset.width,
+            "height": qa.get("height") if qa.get("height") else asset.height,
+            "mime_type": qa.get("mime") or asset.mime_type,
+            "size": int(qa.get("filesize") or asset.size or 0),
+            "duration": qa.get("duration") if qa.get("duration") is not None else asset.duration,
+            "fps": qa.get("fps") if qa.get("fps") is not None else asset.fps,
         }
-        saved = replace(saved, **measured)
-        saved = self._persist_asset(saved)
-        self.store.save_receipt(CreativeExecutionReceipt(
+        asset = replace(asset, **measured)
+        with self.store.transaction():
+            saved, lineage = self._commit_import(
+                asset=asset,
+                account=prepared["account"],
+                episode=prepared["episode"],
+                prompt_id=prompt_id,
+                parent=prepared["parent"],
+                source_asset_id=source_asset_id,
+                reference_asset_ids=tuple(reference_asset_ids),
+                reuse_mode=prepared["reuse_mode"],
+                origin_platform=prepared["origin_platform"],
+                origin_episode_id=prepared["origin_episode_id"],
+                tool=tool or "lechuang",
+                model=model or "UNKNOWN",
+                generation_mode=generation_mode,
+                generation_timestamp=generation_timestamp,
+                operator=operator,
+                production_run_id=prepared["run"].run_id if prepared["run"] else production_run_id,
+                qa=qa,
+                no_prompt_reference=no_prompt_reference,
+                no_prompt_reason=no_prompt_reason,
+            )
+        projection = self._project_import(saved, prepared["account"])
+        return {
+            "asset": saved,
+            "lineage": lineage,
+            "qa": qa,
+            "status": "IMPORTED",
+            "projection": projection,
+        }
+
+    def _prevalidate_import(
+        self,
+        path: str | Path,
+        *,
+        account_id: str,
+        platform: str,
+        episode_id: str,
+        asset_role: str,
+        asset_type: str | None,
+        reuse_mode: str,
+        intent: str,
+        parent_asset_id: str | None,
+        source_asset_id: str | None,
+        reference_asset_ids: tuple[str, ...],
+        prompt_id: str | None,
+        model: str,
+        tool: str,
+        generation_mode: str,
+        no_prompt_reference: bool,
+        production_run_id: str | None,
+    ) -> dict[str, Any]:
+        if asset_role not in ASSET_ROLES:
+            raise ValueError(f"invalid asset_role: {asset_role}")
+        if reuse_mode not in {"NONE", "REFERENCE", "DERIVED", "REUSE", "REPUBLISH", "REMIX_WITHOUT_NEW_MEDIA"}:
+            raise ConfigurationBlocked("INVALID_REUSE_MODE", f"illegal reuse_mode: {reuse_mode}")
+        if generation_mode not in {"MANUAL_CREATIVE_TOOL", "PROVIDER_API", "UNKNOWN"}:
+            raise ConfigurationBlocked("INVALID_GENERATION_MODE", f"illegal generation_mode: {generation_mode}")
+        if not (tool or "").strip():
+            raise ConfigurationBlocked("MISSING_TOOL", "import requires a creative tool")
+        if not (model or "").strip():
+            raise ConfigurationBlocked("MISSING_MODEL", "import requires a model")
+        if asset_role in PRIMARY_ASSET_ROLES and not prompt_id and not no_prompt_reference:
+            raise ConfigurationBlocked(
+                "NO_PROMPT_REFERENCE",
+                "primary asset import requires prompt_id or explicit NO_PROMPT_REFERENCE",
+            )
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}", code="ACCOUNT_NOT_FOUND")
+        if account.status != "ACTIVE":
+            raise IsolationError(f"account {account_id} is not ACTIVE", code="NO_VALID_CURRENT_ACCOUNT")
+        if account.platform != platform:
+            raise IsolationError(f"account {account_id} is {account.platform}, not {platform}", code="ACCOUNT_PLATFORM_MISMATCH")
+        episode = self.store.get_episode(episode_id, account_id=account_id)
+        if episode is None:
+            raise IsolationError(f"episode {episode_id} is not owned by {account_id}", code="EPISODE_NOT_FOUND")
+        series = self.store.get_series(episode.series_id, account_id=account_id)
+        if series is None or series.account_id != account_id:
+            raise IsolationError("episode series is not owned by account", code="SERIES_SCOPE_MISMATCH")
+        source = Path(path)
+        if not source.is_file():
+            raise FileNotFoundError(str(source))
+        digest = sha256_file(source)
+        existing = self.store.get_asset_by_sha256(digest)
+        if existing is not None:
+            raise ExistingAssetError("EXISTING_ASSET", self._existing_message(existing))
+        if prompt_id:
+            prompt = self.store.get_prompt(prompt_id)
+            if prompt is None:
+                raise ConfigurationBlocked("PROMPT_NOT_FOUND", f"prompt {prompt_id} is missing")
+            if prompt.account_id != account_id:
+                raise IsolationError("prompt is not owned by account", code="PROMPT_SCOPE_MISMATCH")
+            if prompt.episode_id and prompt.episode_id != episode_id:
+                raise IsolationError("prompt is not owned by episode", code="PROMPT_EPISODE_MISMATCH")
+        run = None
+        run_id = production_run_id or episode.production_run_id
+        if run_id:
+            run = self.store.get_production_run(run_id)
+            if run is None:
+                raise ConfigurationBlocked("PRODUCTION_RUN_NOT_FOUND", f"production run {run_id} is missing")
+            if run.account_id != account_id:
+                raise IsolationError("production run is not owned by account", code="PRODUCTION_RUN_SCOPE_MISMATCH")
+            if run.episode_id and run.episode_id != episode_id:
+                raise IsolationError("production run episode mismatch", code="PRODUCTION_RUN_EPISODE_MISMATCH")
+        parent = parent_asset_id or source_asset_id
+        origin_platform = ""
+        origin_episode_id = None
+        parent_asset = _load_asset(parent, store=self.store) if parent else None
+        if parent and parent_asset is None:
+            raise AssetFreshnessError("MISSING_PARENT_ASSET", "parent asset does not exist")
+        if parent_asset is not None:
+            origin_platform = parent_asset.platform or ""
+            origin_episode_id = parent_asset.episode_id
+            owned = parent_asset.account_id in {account_id, None} or (parent_asset.scope_type or "").upper() == "GLOBAL"
+            if not owned:
+                raise IsolationError("parent asset is not owned by account", code="PARENT_SCOPE_MISMATCH")
+            if origin_platform and origin_platform != platform and reuse_mode not in {"REFERENCE", "DERIVED"}:
+                raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
+        source_asset = _load_asset(source_asset_id, store=self.store) if source_asset_id else parent_asset
+        kind = asset_type or _type_from_path(source)
+        if kind == "video" and asset_role in PRIMARY_ASSET_ROLES and source_asset_id:
+            if source_asset is None:
+                raise AssetFreshnessError("MISSING_SOURCE_ASSET", "IMAGE_TO_VIDEO requires source_asset_id")
+            if source_asset.account_id not in {account_id, None} and (source_asset.scope_type or "").upper() != "GLOBAL":
+                if source_asset.platform and source_asset.platform != platform:
+                    parent = source_asset.asset_id
+                    reuse_mode = "DERIVED" if reuse_mode == "NONE" else reuse_mode
+        for ref_id in reference_asset_ids:
+            ref = self.references._owned_or_global(
+                ref_id,
+                account_id=account_id,
+                platform=platform,
+                allow_global=True,
+                allow_cross_platform_reference=True,
+            )
+            if ref is None:
+                raise IsolationError(f"reference {ref_id} is not eligible", code="REFERENCE_SCOPE_MISMATCH")
+            if (ref.asset_role or "").upper() in PRIMARY_ASSET_ROLES and ref.platform and ref.platform != platform:
+                raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
+        previous = self.store.get_episode(episode.previous_episode_id, account_id=account_id) if episode.previous_episode_id else None
+        previous_asset = _load_asset(previous.primary_asset_id, store=self.store) if previous and previous.primary_asset_id else None
+        pool = self.store.get_pool(account_id=account_id, platform=platform)
+        if pool is None:
+            pool = PlatformAssetPool(
+                pool_id=uuid4().hex,
+                account_id=account_id,
+                platform=platform,
+                character_id=account.character_id,
+                world_id=account.world_id,
+            )
+        return {
+            "account": account,
+            "episode": episode,
+            "source": source,
+            "kind": kind,
+            "parent": parent,
+            "reuse_mode": reuse_mode,
+            "origin_platform": origin_platform,
+            "origin_episode_id": origin_episode_id,
+            "previous": previous,
+            "previous_asset": previous_asset,
+            "pool": pool,
+            "run": run,
+            "digest": digest,
+        }
+
+    def _commit_import(
+        self,
+        *,
+        asset,
+        account,
+        episode,
+        prompt_id: str | None,
+        parent: str | None,
+        source_asset_id: str | None,
+        reference_asset_ids: tuple[str, ...],
+        reuse_mode: str,
+        origin_platform: str,
+        origin_episode_id: str | None,
+        tool: str,
+        model: str,
+        generation_mode: str,
+        generation_timestamp: str | None,
+        operator: str,
+        production_run_id: str | None,
+        qa: dict[str, Any],
+        no_prompt_reference: bool,
+        no_prompt_reason: str,
+    ) -> tuple[Any, AssetLineage]:
+        if self.store.get_pool(account_id=account.account_id, platform=account.platform) is None:
+            self.store.save_pool(PlatformAssetPool(
+                pool_id=asset.pool_id or uuid4().hex,
+                account_id=account.account_id,
+                platform=account.platform,
+                character_id=account.character_id,
+                world_id=account.world_id,
+            ))
+        if asset.asset_role in PRIMARY_ASSET_ROLES and not prompt_id and no_prompt_reference:
+            self.store.save_override(ManualOverride(
+                override_id=uuid4().hex,
+                account_id=account.account_id,
+                platform=account.platform,
+                target_kind="asset_import",
+                target_id=episode.episode_id,
+                field_name="prompt_id",
+                old_value=None,
+                new_value="NO_PROMPT_REFERENCE",
+                changed_by=operator,
+                reason=no_prompt_reason or "explicit NO_PROMPT_REFERENCE",
+                source="USER_OVERRIDE",
+            ))
+        saved = self.store.save_media_asset(asset)
+        receipt = self.store.save_receipt(CreativeExecutionReceipt(
             receipt_id=uuid4().hex,
             asset_id=saved.asset_id,
             prompt_id=prompt_id,
-            tool=tool or "lechuang",
-            model=model or "UNKNOWN",
+            tool=tool,
+            model=model,
             operator=operator,
             source_asset_id=source_asset_id or parent,
             generation_mode=generation_mode,
             production_run_id=production_run_id or episode.production_run_id,
         ))
+        if receipt is None or not receipt.receipt_id:
+            raise ConfigurationBlocked("RECEIPT_REQUIRED", "creative execution receipt is required")
         self.store.save_evidence(ProductionEvidence(
             evidence_id=uuid4().hex,
             kind=f"DAY_{episode.episode_no:03d}_REAL_ASSET_IMPORTED",
-            account_id=account_id,
-            platform=platform,
+            account_id=account.account_id,
+            platform=account.platform,
             episode_id=episode.episode_id,
             prompt_id=prompt_id,
             asset_id=saved.asset_id,
+            production_run_id=production_run_id or episode.production_run_id,
             source="lechuang",
-            detail={"sha256": saved.sha256, "qa": qa.get("decision"), "width": saved.width, "height": saved.height},
+            detail={"sha256": saved.sha256, "qa": qa.get("decision"), "width": saved.width, "height": saved.height, "receipt_id": receipt.receipt_id},
         ))
-        origin_platform = ""
-        origin_episode_id = None
-        if parent:
-            parent_asset = _load_asset(parent, store=self.store)
-            if parent_asset is not None:
-                origin_platform = parent_asset.platform or ""
-                origin_episode_id = parent_asset.episode_id
-                if origin_platform and origin_platform != platform and reuse_mode not in {"REFERENCE", "DERIVED"}:
-                    raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
         lineage = AssetLineage(
             lineage_id=uuid4().hex,
             asset_id=saved.asset_id,
-            account_id=account_id,
+            account_id=account.account_id,
             series_id=episode.series_id,
             episode_id=episode.episode_id,
             character_id=account.character_id,
             world_id=account.world_id,
             user_request="manual-import",
             generation_request={
-                "tool": tool or "lechuang",
-                "model": model or "UNKNOWN",
+                "tool": tool,
+                "model": model,
                 "prompt_id": prompt_id,
                 "generation_timestamp": generation_timestamp or utcnow(),
                 "generation_mode": generation_mode,
             },
             provider="manual-lechuang",
-            model=model or "UNKNOWN",
+            model=model,
             parent_asset_id=parent,
             source_asset_id=source_asset_id or parent,
             qa_decision=str(qa.get("decision") or ""),
@@ -419,21 +602,78 @@ class PlatformAssetService:
             origin_episode_id=origin_episode_id,
             target_episode_id=episode.episode_id,
             origin_platform=origin_platform,
-            target_platform=platform,
+            target_platform=account.platform,
             reuse_mode=reuse_mode if reuse_mode != "NONE" or not parent else "DERIVED",
             generation_mode=generation_mode,
-            tool=tool or "lechuang",
+            tool=tool,
             prompt_id=prompt_id,
         )
         saved_lineage = self.store.allocate_attempt(
-            account_id=account_id,
+            account_id=account.account_id,
             episode_id=episode.episode_id,
             parent_asset_id=parent,
             lineage=lineage,
         )
-        if asset_role in PRIMARY_ASSET_ROLES and lifecycle == "QA_PASSED":
-            self.store.save_episode(Episode(**{**episode.__dict__, "primary_asset_id": saved.asset_id, "content_status": "QA_PASSED", "updated_at": utcnow()}))
-        return {"asset": saved, "lineage": saved_lineage, "qa": qa, "status": "IMPORTED"}
+        if saved.asset_role in PRIMARY_ASSET_ROLES:
+            self.store.save_episode(Episode(**{
+                **episode.__dict__,
+                "primary_asset_id": saved.asset_id,
+                "content_status": "QA_PASSED",
+                "updated_at": utcnow(),
+            }))
+        run_id = production_run_id or episode.production_run_id
+        if run_id:
+            run = self.store.get_production_run(run_id)
+            if run is None:
+                raise ConfigurationBlocked("PRODUCTION_RUN_NOT_FOUND", f"production run {run_id} is missing")
+            self.store.save_production_run(replace(
+                run,
+                asset_id=saved.asset_id,
+                prompt_id=prompt_id or run.prompt_id,
+                status="QA_PASSED",
+                updated_at=utcnow(),
+            ))
+        for ref_id in reference_asset_ids:
+            self.store.save_reference_snapshot(AssetReferenceSnapshot(
+                snapshot_id=uuid4().hex,
+                prompt_id=prompt_id or saved.asset_id,
+                asset_id=ref_id,
+                role="SCENE_REFERENCE",
+                reason="explicit import reference",
+                prompt_influence="reference only; never primary",
+            ))
+        return saved, saved_lineage
+
+    def _record_qa_failure(self, *, account_id: str, platform: str, episode: Episode, prompt_id: str | None, qa: dict[str, Any]) -> None:
+        try:
+            self.store.save_evidence(ProductionEvidence(
+                evidence_id=uuid4().hex,
+                kind="QA_FAILED",
+                account_id=account_id,
+                platform=platform,
+                episode_id=episode.episode_id,
+                prompt_id=prompt_id,
+                status="FAIL",
+                source="lechuang",
+                detail={"qa": qa},
+            ))
+        except Exception:
+            return
+
+    def _project_import(self, asset, account) -> str:
+        try:
+            from memory.service import get_memory_service
+            get_memory_service().writeback({
+                "kind": "ASSET_IMPORTED",
+                "account_id": account.account_id,
+                "platform": account.platform,
+                "episode_id": asset.episode_id,
+                "asset_id": asset.asset_id,
+                "source": "lechuang",
+            })
+            return "PROJECTED"
+        except Exception:
+            return "PROJECTION_PENDING"
 
     def map_package_asset(self, package: ContentPackage, asset: MediaAsset, *, role: str, selected: bool = False) -> ContentPackageAsset:
         if role not in PACKAGE_ASSET_ROLES:

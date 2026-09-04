@@ -1644,6 +1644,7 @@ class ContentPackageAssetRecord(Base):
         UniqueConstraint("package_id", "asset_id", "role", name="uq_meiti_package_asset_role"),
         Index("idx_meiti_content_package_assets_package", "package_id"),
         Index("idx_meiti_content_package_assets_asset", "asset_id"),
+        CheckConstraint("role IN ('PRIMARY','COVER','THUMBNAIL','REFERENCE')", name="ck_meiti_package_asset_role"),
     )
 
 
@@ -1662,7 +1663,7 @@ class ProductionRunRecord(Base):
     analytics_id = Column(String(255))
     learning_id = Column(String(255))
     task_id = Column(String(255))
-    status = Column(String(40), nullable=False, default="OPEN")
+    status = Column(String(40), nullable=False, default="CREATED")
     request = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1670,6 +1671,14 @@ class ProductionRunRecord(Base):
     __table_args__ = (
         Index("idx_meiti_production_runs_account", "account_id"),
         Index("idx_meiti_production_runs_episode", "episode_id"),
+        CheckConstraint(
+            "status IN ("
+            "'CREATED','PROMPT_READY','CREATIVE_EXECUTION','ASSET_IMPORTED','QA_PASSED',"
+            "'PACKAGE_READY','HANDED_OFF','PUBLISHED','ANALYTICS_CAPTURED','LEARNING_VERIFIED',"
+            "'CLOSED','BLOCKED','OPEN','AWAITING_CREATIVE','IMPORTED','PACKAGED','LEARNED'"
+            ")",
+            name="ck_meiti_production_run_status",
+        ),
     )
 
 
@@ -1698,6 +1707,7 @@ class ProductionEvidenceRecord(Base):
         Index("idx_meiti_production_evidence_account", "account_id"),
         Index("idx_meiti_production_evidence_episode", "episode_id"),
         Index("idx_meiti_production_evidence_kind", "kind"),
+        Index("idx_meiti_production_evidence_run", "production_run_id"),
     )
 
 
@@ -1725,12 +1735,18 @@ class AnalyticsRecordRow(Base):
     cover = Column(Text, nullable=False, default="")
     prompt_pattern = Column(Text, nullable=False, default="")
     source = Column(String(40), nullable=False, default="manual")
+    origin = Column(String(40), nullable=False, default="MANUAL")
+    verification_status = Column(String(40), nullable=False, default="UNVERIFIED")
+    provider = Column(String(120), nullable=False, default="")
+    provider_payload = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
         Index("idx_meiti_analytics_records_account", "account_id"),
         Index("idx_meiti_analytics_records_episode", "episode_id"),
         Index("uq_meiti_analytics_observation", "publication_id", "observed_at", unique=True),
+        CheckConstraint("origin IN ('MANUAL','PROVIDER')", name="ck_meiti_analytics_origin"),
+        CheckConstraint("verification_status IN ('VERIFIED','UNVERIFIED')", name="ck_meiti_analytics_verification"),
     )
 
 
@@ -1765,6 +1781,10 @@ class LearningRecordRow(Base):
     __table_args__ = (
         Index("idx_meiti_learning_records_account", "account_id"),
         Index("idx_meiti_learning_records_platform", "platform"),
+        CheckConstraint(
+            "evidence_status IN ('VERIFIED','NOT_ENOUGH_EVIDENCE','NOT_VERIFIED')",
+            name="ck_meiti_learning_evidence_status",
+        ),
     )
 
 
@@ -1835,6 +1855,8 @@ class AssetReferenceSnapshotRecord(Base):
 
     __table_args__ = (
         Index("idx_meiti_asset_reference_snapshots_prompt", "prompt_id"),
+        Index("idx_meiti_asset_reference_snapshots_asset", "asset_id"),
+        UniqueConstraint("prompt_id", "asset_id", "role", name="uq_meiti_asset_reference_snapshot"),
     )
 
 

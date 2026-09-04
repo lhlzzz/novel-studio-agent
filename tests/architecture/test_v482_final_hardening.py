@@ -11,6 +11,7 @@ def test_v482_owners_and_migration_exist():
     assets = (ROOT / "content/assets.py").read_text(encoding="utf-8")
     runtime = (ROOT / "content/runtime.py").read_text(encoding="utf-8")
     migration = (ROOT / "migrations/versions/0016_v482_final_hardening.py").read_text(encoding="utf-8")
+    migration_v483 = (ROOT / "migrations/versions/0017_v483_production_integrity.py").read_text(encoding="utf-8")
     assert "ALLOWED_TASK_TRANSITIONS" in models
     assert "USER_OVERRIDE" in models
     assert "def reopen" in tasks
@@ -26,6 +27,8 @@ def test_v482_owners_and_migration_exist():
     assert runtime.count("class ContinuityRuntime") == 1
     assert 'revision = "0016_v482_final_hardening"' in migration
     assert 'down_revision = "0015_v481_production_ready_creator_os"' in migration
+    assert 'revision = "0017_v483_production_integrity"' in migration_v483
+    assert 'down_revision = "0016_v482_final_hardening"' in migration_v483
 
 
 def test_single_engines_and_no_forged_providers():
@@ -52,9 +55,11 @@ def test_cli_and_audit_keep_evidence_separate():
     readiness = (ROOT / "scripts/meiti_production_readiness.py").read_text(encoding="utf-8")
     smoke = (ROOT / "scripts/meiti_smoke_production.py").read_text(encoding="utf-8")
     assert "MEITI_V482_STATUS" in doctor
+    assert "MEITI_V483_STATUS" in doctor
     assert "SYSTEM_CAPABILITY" in doctor
     assert "ACCOUNT_CONFIGURATION" in doctor
-    assert "0016_v482_final_hardening" in audit or "SYSTEM_CAPABILITY" in audit
+    assert "0017_v483_production_integrity" in audit or "SYSTEM_CAPABILITY" in audit
+    assert not any(line.strip().startswith('"CORE_PRODUCTION_READY": True') for line in audit.splitlines())
     assert "SYSTEM_CAPABILITY is code/schema" in readiness
     assert "never real production PASS" in audit or "never real Day evidence" in audit
     assert "NOT_VERIFIED" in smoke

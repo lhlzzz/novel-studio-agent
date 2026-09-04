@@ -16,7 +16,7 @@ ACCOUNT_PLATFORMS = (
     "xianyu",
 )
 
-PLATFORM_ACCOUNT_STATES = ("DRAFT", "ACTIVE", "PAUSED", "ARCHIVED")
+PLATFORM_ACCOUNT_STATES = ("DRAFT", "ACTIVE", "PAUSED", "DISABLED", "ARCHIVED")
 CHARACTER_STATES = ("DRAFT", "ACTIVE", "ARCHIVED")
 WORLD_STATES = ("DRAFT", "ACTIVE", "ARCHIVED")
 SERIES_STATES = ("DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED")
@@ -632,6 +632,10 @@ class ContinuityError(ValueError):
 class IsolationError(PermissionError):
     """Raised when a cross-account or cross-platform read is not explicitly allowed."""
 
+    def __init__(self, message: str, code: str = "ISOLATION_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class AmbiguousTarget(IsolationError):
     """Raised when more than one account or series matches and guessing is forbidden."""
@@ -671,6 +675,16 @@ class ExistingAssetError(AssetFreshnessError):
 
 class CrossPlatformAssetReuse(IsolationError):
     """Raised when a primary asset is reused across platforms."""
+
+    def __init__(self, code: str = "CROSS_PLATFORM_ASSET_REUSE", message: str | None = None) -> None:
+        super().__init__(message or code, code=code)
+
+
+class CalendarSlotConflict(ConfigurationBlocked):
+    """Raised when a calendar slot already has a canonical entry."""
+
+    def __init__(self, message: str = "CALENDAR_SLOT_CONFLICT") -> None:
+        super().__init__("CALENDAR_SLOT_CONFLICT", message)
 
 
 @dataclass(frozen=True)
@@ -871,7 +885,28 @@ def with_status(package: ContentPackage, status: str) -> ContentPackage:
 
 
 PATTERN_PROMOTION_STATES = ("PLATFORM", "GLOBAL_CANDIDATE", "GLOBAL_PATTERN", "REJECTED")
-PRODUCTION_RUN_STATES = ("OPEN", "AWAITING_CREATIVE", "IMPORTED", "PACKAGED", "HANDED_OFF", "LEARNED", "CLOSED", "BLOCKED")
+PRODUCTION_RUN_STATES = (
+    "CREATED",
+    "PROMPT_READY",
+    "CREATIVE_EXECUTION",
+    "ASSET_IMPORTED",
+    "QA_PASSED",
+    "PACKAGE_READY",
+    "HANDED_OFF",
+    "PUBLISHED",
+    "ANALYTICS_CAPTURED",
+    "LEARNING_VERIFIED",
+    "CLOSED",
+    "BLOCKED",
+    "OPEN",
+    "AWAITING_CREATIVE",
+    "IMPORTED",
+    "PACKAGED",
+    "LEARNED",
+)
+ANALYTICS_ORIGINS = ("MANUAL", "PROVIDER")
+ANALYTICS_VERIFICATION_STATES = ("VERIFIED", "UNVERIFIED")
+PROJECTION_STATES = ("COMMITTED", "PROJECTION_PENDING", "PROJECTED")
 EVIDENCE_SOURCES = ("code", "operator", "lechuang", "analytics", "memory", "audit")
 KNOWLEDGE_SOURCES = (
     "USER_DEFINED",
@@ -981,7 +1016,7 @@ class ProductionRun:
     analytics_id: str | None = None
     learning_id: str | None = None
     task_id: str | None = None
-    status: str = "OPEN"
+    status: str = "CREATED"
     request: str = ""
     created_at: str | None = None
     updated_at: str | None = None
@@ -1053,9 +1088,31 @@ class AnalyticsRecord:
     cover: str = ""
     prompt_pattern: str = ""
     source: str = "manual"
+    origin: str = "MANUAL"
+    verification_status: str = "UNVERIFIED"
+    provider: str = ""
+    provider_payload: dict[str, Any] = field(default_factory=dict)
     created_at: str | None = None
 
     def __post_init__(self) -> None:
+        origin = (self.origin or self.source or "MANUAL").upper()
+        if origin in {"PROVIDER", "VERIFIED_PROVIDER"}:
+            origin = "PROVIDER"
+        elif origin in {"MANUAL", "OPERATOR"} or (self.source or "").lower() == "manual":
+            origin = "MANUAL"
+        if origin not in ANALYTICS_ORIGINS:
+            origin = "MANUAL"
+        object.__setattr__(self, "origin", origin)
+        verification = (self.verification_status or "UNVERIFIED").upper()
+        if origin != "PROVIDER":
+            verification = "UNVERIFIED"
+        if verification not in ANALYTICS_VERIFICATION_STATES:
+            verification = "UNVERIFIED"
+        if origin == "PROVIDER" and verification == "VERIFIED":
+            payload = dict(self.provider_payload or {})
+            if not self.publication_id or not payload:
+                verification = "UNVERIFIED"
+        object.__setattr__(self, "verification_status", verification)
         if self.followers_delta is None and self.followers_gained is not None:
             object.__setattr__(self, "followers_delta", self.followers_gained)
         if self.followers_gained is None and self.followers_delta is not None:

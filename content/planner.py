@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from content.models import ContentCalendarEntry, EpisodeConcept, IsolationError, utcnow
+from content.models import CalendarSlotConflict, ContentCalendarEntry, EpisodeConcept, IsolationError, utcnow
 from content.store import ContinuityStore
 from content.tasks import today_iso
 
@@ -37,7 +37,9 @@ class EpisodePlanner:
         learning_basis = tuple(
             item.next_recommendation or item.what_worked or item.reason
             for item in learning
-            if item.platform in {account.platform, "GLOBAL"} and (item.next_recommendation or item.what_worked or item.reason)
+            if item.evidence_status == "VERIFIED"
+            and item.platform in {account.platform, "GLOBAL"}
+            and (item.next_recommendation or item.what_worked or item.reason)
         )[:6]
         dna = self.store.get_creative_dna(account_id, account.platform)
         requested = (request or "").strip()
@@ -95,6 +97,14 @@ class EpisodePlanner:
         existing = [item for item in self.store.list_calendar(account_id=account_id, date=day) if item.slot == slot]
         if existing:
             current = existing[0]
+            if current.episode_id and episode_id and current.episode_id != episode_id:
+                raise CalendarSlotConflict(
+                    f"CALENDAR_SLOT_CONFLICT account={account_id} date={day} slot={slot}"
+                )
+            if current.episode_id and not episode_id:
+                raise CalendarSlotConflict(
+                    f"CALENDAR_SLOT_CONFLICT account={account_id} date={day} slot={slot}"
+                )
             return self.store.save_calendar_entry(ContentCalendarEntry(**{
                 **current.__dict__,
                 "topic": topic or current.topic,
@@ -128,7 +138,10 @@ class EpisodePlanner:
             entry = self.ensure_calendar(account_id=account_id, date=day, topic=concept.topic, format=concept.format, status="PLANNED")
             rows = [entry]
         entry = rows[0]
-        learning = self.store.list_learning(account_id=account_id, platform=account.platform)
+        learning = [
+            item for item in self.store.list_learning(account_id=account_id, platform=account.platform)
+            if item.evidence_status == "VERIFIED"
+        ]
         return {
             "date": day,
             "platform": account.platform,

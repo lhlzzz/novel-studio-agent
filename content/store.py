@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -53,6 +55,34 @@ from content.models import (
     WorldRevision,
     utcnow,
 )
+
+
+_ACTIVE_SESSION: ContextVar[Any] = ContextVar("meiti_continuity_session", default=None)
+
+
+class _JoinedSession:
+    """Reuse the outer production transaction without committing nested writes."""
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+    def __enter__(self) -> "_JoinedSession":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def commit(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 CONTINUITY_TABLE_NAMES = (
@@ -200,7 +230,28 @@ class ContinuityStore:
         return store
 
     def _session(self):
+        active = _ACTIVE_SESSION.get()
+        if active is not None:
+            return _JoinedSession(active)
         return self.Session()
+
+    @contextmanager
+    def transaction(self):
+        existing = _ACTIVE_SESSION.get()
+        if existing is not None:
+            yield existing
+            return
+        session = self.Session()
+        token = _ACTIVE_SESSION.set(session)
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            _ACTIVE_SESSION.reset(token)
+            session.close()
 
     def _upsert(self, model, key: str, value: str, fields: dict[str, Any]) -> None:
         with self._session() as session:
@@ -255,13 +306,8 @@ class ContinuityStore:
     def active_account(self, *, platform: str | None = None) -> PlatformAccount | None:
         selected = self.current_account(platform=platform)
         if selected is not None:
-            return selected
-        accounts = [item for item in self.list_accounts(platform=platform) if item.status == "ACTIVE"]
-        if not accounts:
-            return None
-        if len(accounts) > 1:
-            return None
-        return accounts[0]
+            return selected if selected.status == "ACTIVE" else None
+        return None
 
     def current_account(self, *, platform: str | None = None) -> PlatformAccount | None:
         from scripts.db.models import AccountSelectionRecord
@@ -1304,6 +1350,10 @@ class ContinuityStore:
             "cover": record.cover,
             "prompt_pattern": record.prompt_pattern,
             "source": record.source,
+            "origin": getattr(record, "origin", None) or "MANUAL",
+            "verification_status": getattr(record, "verification_status", None) or "UNVERIFIED",
+            "provider": getattr(record, "provider", None) or "",
+            "provider_payload": dict(getattr(record, "provider_payload", None) or {}),
         })
         return record
 
@@ -2272,6 +2322,10 @@ def _analytics_from_row(row) -> AnalyticsRecord:
         cover=row.cover or "",
         prompt_pattern=row.prompt_pattern or "",
         source=row.source or "manual",
+        origin=getattr(row, "origin", None) or "MANUAL",
+        verification_status=getattr(row, "verification_status", None) or "UNVERIFIED",
+        provider=getattr(row, "provider", None) or "",
+        provider_payload=_json(getattr(row, "provider_payload", None), {}),
         created_at=_iso(row.created_at),
     )
 

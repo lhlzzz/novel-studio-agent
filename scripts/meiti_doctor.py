@@ -79,9 +79,22 @@ def check_embedding() -> dict:
         with engine.connect() as conn:
             tables = set(inspect(conn).get_table_names())
             if "content_embeddings" not in tables:
-                return {"status": "BLOCKED", "error": "content_embeddings missing"}
+                return {
+                    "status": "NOT_CONFIGURED",
+                    "CAPABILITY": "FAIL",
+                    "HEALTH": "NOT_CONFIGURED",
+                    "REAL_EVIDENCE": "NOT_VERIFIED",
+                    "error": "content_embeddings missing",
+                }
             dim = conn.execute(text("SELECT dim FROM content_embeddings LIMIT 1")).scalar_one_or_none()
-        return {"status": "PASS", "sample_dim": dim}
+        return {
+            "status": "PASS",
+            "CAPABILITY": "PASS",
+            "HEALTH": "PASS",
+            "REAL_EVIDENCE": "NOT_VERIFIED" if dim is None else "NOT_VERIFIED",
+            "sample_dim": dim,
+            "note": "embedding table exists is CAPABILITY, not REAL_EMBEDDING_EVIDENCE",
+        }
     except Exception as exc:
         return {"status": "WARN", "error": str(exc)}
 
@@ -737,9 +750,9 @@ def _v48_status(default: str, existing: dict | None = None) -> dict:
         "EPISODE_PLANNER": "SERIES_RUNTIME",
         "PACKAGE": "CONTENT_PACKAGE_ASSET_MAPPING",
         "HANDOFF": "HANDOFF",
-        "CORE_PRODUCTION": "PROMPT_COMPILER",
-        "POST_PRODUCTION": "ANALYTICS_RUNTIME",
-        "FULL_LOOP": "LEARNING_RUNTIME",
+        "CORE_PRODUCTION": "CORE_PRODUCTION",
+        "POST_PRODUCTION": "POST_PRODUCTION",
+        "FULL_LOOP": "FULL_LOOP",
         "SYSTEM_CAPABILITY": "CONTINUITY_RUNTIME",
         "ACCOUNT_CONFIGURATION": "ACCOUNT_RUNTIME",
         "CONTENT_PLANNER": "EPISODE_PLANNER",
@@ -896,6 +909,15 @@ def main(argv: list[str] | None = None) -> int:
         if key in {"PRODUCTION_EVIDENCE", "ANALYTICS", "LEARNING", "VECTOR", "POST_PRODUCTION", "FULL_LOOP"} and status not in {"PASS", "READY"}:
             status = "NOT_VERIFIED"
         print(f"{key}={status}")
+    print("MEITI_V483_STATUS")
+    print(f"CAPABILITY={architecture}")
+    print(f"HEALTH={'PASS' if payload['architecture_ready'] else 'FAIL'}")
+    print("REAL_EVIDENCE=NOT_VERIFIED")
+    print("REAL_EMBEDDING_EVIDENCE=NOT_VERIFIED")
+    print("SUPPORTED=PASS" if payload["architecture_ready"] else "SUPPORTED=FAIL")
+    print("CONFIGURED=PASS" if payload["architecture_ready"] else "CONFIGURED=FAIL")
+    print("HEALTHY=PASS" if payload["architecture_ready"] else "HEALTHY=FAIL")
+    print("VERIFIED=NOT_VERIFIED")
     print(f"DOCTOR_RUNTIME={payload['checks'].get('DOCTOR_RUNTIME') or architecture}")
     write_e2e_audit(checks)
     print(json.dumps({

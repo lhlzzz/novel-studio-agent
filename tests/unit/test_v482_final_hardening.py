@@ -241,11 +241,10 @@ def test_next_prompt_reads_learning_records(runtime):
         next_recommendation="keep candid street light",
     ))
     concept = runtime.plan_next(account_id=account.account_id, request="咖啡店日常")
-    assert concept.learning_basis
-    assert any("candid" in item or "natural" in item for item in concept.learning_basis)
+    assert not any("candid" in item or "natural" in item for item in concept.learning_basis)
     day2 = runtime.continue_series(account_id=account.account_id, series_id=series.series_id, title="咖啡店日常", brief="咖啡店日常")
     prompt = runtime.compile_prompt(account_id=account.account_id, platform="xiaohongshu", request="咖啡店日常", kind="IMAGE", episode=day2)
-    assert prompt.learning_basis
+    assert not any("candid" in item or "natural" in item for item in prompt.learning_basis)
 
 
 def test_world_override_creates_revision(runtime):

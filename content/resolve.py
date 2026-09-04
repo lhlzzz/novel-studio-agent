@@ -39,7 +39,9 @@ class IntentResolver:
         if account_id:
             account = self.store.get_account(account_id)
             if account is None:
-                raise IsolationError(f"unknown platform account: {account_id}")
+                raise IsolationError(f"unknown platform account: {account_id}", code="ACCOUNT_NOT_FOUND")
+            if account.status != "ACTIVE":
+                raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
             reason = "explicit_account"
         else:
             account, reason = self._resolve_account(request, detected_platforms)
@@ -91,33 +93,39 @@ class IntentResolver:
                 if len(matches) > 1:
                     raise AmbiguousTarget("multiple accounts match the named account")
                 if matches:
+                    if matches[0].status != "ACTIVE":
+                        raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
                     return matches[0], "named_account"
             selected = self.store.current_account(platform=detected_platforms[0])
             if selected is not None:
+                if selected.status != "ACTIVE":
+                    raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
                 return selected, "current_selection"
             active = [item for item in candidates if item.status == "ACTIVE"]
             if len(active) == 1:
                 return active[0], "active_account"
             if len(active) > 1:
                 raise AmbiguousTarget("multiple ACTIVE accounts on this platform; select a current account")
-            if len(candidates) == 1:
-                return candidates[0], "platform_only"
-            raise IsolationError("no platform account could be resolved; create or select an account first")
+            raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
         if named:
             matches = [item for item in self.store.list_accounts() if _name_match(item.display_name, named) or _name_match(item.account_id, named)]
             if len(matches) > 1:
                 raise AmbiguousTarget("multiple accounts match the named account")
             if matches:
+                if matches[0].status != "ACTIVE":
+                    raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
                 return matches[0], "named_account"
         selected = self.store.current_account()
         if selected is not None:
+            if selected.status != "ACTIVE":
+                raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
             return selected, "current_selection"
         active = [item for item in self.store.list_accounts() if item.status == "ACTIVE"]
         if len(active) == 1:
             return active[0], "active_account"
         if len(active) > 1:
             raise AmbiguousTarget("multiple ACTIVE accounts; select a current account")
-        raise IsolationError("no platform account could be resolved; create or select an account first")
+        raise IsolationError("NO_VALID_CURRENT_ACCOUNT", code="NO_VALID_CURRENT_ACCOUNT")
 
     def resolve_many(self, text: str) -> list[ResolvedTarget]:
         platforms = _detect_platforms(text) or []

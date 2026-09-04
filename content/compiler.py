@@ -10,8 +10,11 @@ from content.models import (
     AccountWorld,
     AssetFreshnessError,
     ContentSeries,
+    CrossPlatformAssetReuse,
     Episode,
+    IsolationError,
     MemoryWritebackError,
+    PRIMARY_ASSET_ROLES,
     PlatformCreativeDNA,
     PromptPackage,
     PromptPattern,
@@ -74,7 +77,11 @@ class PromptCompiler:
         patterns = self.store.list_prompt_patterns(platform=platform, account_id=account_id)
         pattern_ids = tuple(item.pattern_id for item in patterns[:8])
         learning_basis = _learning_basis(learning or {}, platform=platform)
-        refs = tuple(_asset_id(item) for item in reference_assets if _asset_id(item))
+        refs = self._validate_references(
+            tuple(_asset_id(item) for item in reference_assets if _asset_id(item)),
+            account_id=account_id,
+            platform=platform,
+        )
         sources = tuple(_asset_id(item) for item in source_assets if _asset_id(item))
         if source_asset_id and source_asset_id not in sources:
             sources = (source_asset_id,) + sources
@@ -175,6 +182,31 @@ class PromptCompiler:
         self._project(saved)
         return saved
 
+    def _validate_references(self, refs: tuple[str, ...], *, account_id: str, platform: str) -> tuple[str, ...]:
+        from content.assets import ReferenceAssetResolver
+
+        resolver = ReferenceAssetResolver(self.store)
+        resolved = resolver.resolve(
+            account_id=account_id,
+            platform=platform,
+            explicit=refs,
+            allow_global=True,
+        )
+        by_id = {item.asset_id: item for item in resolved}
+        validated: list[str] = []
+        for asset_id in refs:
+            asset = by_id.get(asset_id)
+            if asset is None:
+                raise IsolationError(f"reference asset {asset_id} is not owned by {account_id}", code="REFERENCE_SCOPE_MISMATCH")
+            role = (asset.asset_role or "").upper()
+            if role in PRIMARY_ASSET_ROLES and asset.platform and asset.platform != platform:
+                raise CrossPlatformAssetReuse("CROSS_PLATFORM_ASSET_REUSE")
+            lifecycle = (asset.lifecycle or "").upper()
+            if lifecycle in {"ARCHIVED", "REJECTED", "QA_FAILED"}:
+                raise AssetFreshnessError("STALE_REFERENCE", f"reference asset {asset_id} lifecycle is {lifecycle}")
+            validated.append(asset.asset_id)
+        return tuple(validated)
+
     def _project(self, package: PromptPackage) -> None:
         try:
             from memory.service import get_memory_service
@@ -192,8 +224,8 @@ class PromptCompiler:
                 tags=("PROMPT", package.kind, package.platform),
                 document_id=f"prompt-{package.prompt_id}",
             )
-        except Exception as exc:
-            raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
+        except Exception:
+            return
 
 
 def _kind_from_policy(policy: dict[str, Any], request: str, source_asset_id: str | None) -> str:
@@ -246,6 +278,8 @@ def _learning_basis(learning: dict[str, Any], *, platform: str) -> tuple[str, ..
             rows.append(str(text))
     for item in learning.get("learning_records") or ():
         if not isinstance(item, dict):
+            continue
+        if item.get("evidence_status") and item.get("evidence_status") != "VERIFIED":
             continue
         if item.get("platform") and item.get("platform") not in {platform, "GLOBAL", ""}:
             continue

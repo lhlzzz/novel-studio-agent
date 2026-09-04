@@ -7,7 +7,7 @@ from typing import Any
 
 from analytics.normalizers.metrics import NormalizedMetrics, normalize_metrics
 from analytics.persistence import persist_metrics
-from content.models import ContentPackage
+from content.models import ContentPackage, IsolationError
 from governance.distribution_gate import admit_distribution_job
 from social.variants import build_platform_variant
 from governance.observability import new_request_id
@@ -141,6 +141,7 @@ class DistributionAgent:
         scheduled_at: str | None = None,
         request_id: str | None = None,
         account_id: str | None = None,
+        episode_id: str | None = None,
     ) -> DistributionJob:
         if account_id:
             account = self.manager.get_account(account_id)
@@ -149,6 +150,7 @@ class DistributionAgent:
                 raise RuntimeError(f"account {account_id} is not {sorted(allowed)}")
         else:
             account = self.select_provider(platform)
+        self._assert_job_scope(package, account=account, platform=platform, episode_id=episode_id)
         action = "publish"
         job = DistributionJob(
             job_id=job_id,
@@ -169,6 +171,23 @@ class DistributionAgent:
         self.store.save_content_package(package)
         self.store.save_account(account)
         return self.store.save_job(job)
+
+    def _assert_job_scope(self, package: ContentPackage, *, account, platform: str, episode_id: str | None = None) -> None:
+        account_platform = getattr(account, "platform", "") or getattr(account, "provider", "")
+        requested = platform or package.platform
+        aliases = {"xiaohongshu", "xhs"}
+        if account_platform and requested and account_platform != requested:
+            if not (account_platform in aliases and requested in aliases):
+                raise IsolationError("account platform does not match requested platform", code="ACCOUNT_PLATFORM_MISMATCH")
+        if package.account_id and package.account_id not in {account.account_id, getattr(account, "id", "")}:
+            raise IsolationError("package account does not match distribution account", code="PACKAGE_ACCOUNT_MISMATCH")
+        if package.platform and requested and package.platform != requested:
+            if not (package.platform in aliases and requested in aliases):
+                raise IsolationError("package platform does not match requested platform", code="PACKAGE_PLATFORM_MISMATCH")
+        if episode_id and package.episode_id and package.episode_id != episode_id:
+            raise IsolationError("package episode does not match requested episode", code="PACKAGE_EPISODE_MISMATCH")
+        if episode_id and not package.episode_id:
+            raise IsolationError("package episode does not match requested episode", code="PACKAGE_EPISODE_MISMATCH")
 
     def validate(self, job: DistributionJob) -> list[str]:
         if not job.provider:

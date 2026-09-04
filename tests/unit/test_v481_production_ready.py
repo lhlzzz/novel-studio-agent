@@ -272,7 +272,7 @@ def test_learning_requires_provenance_and_stays_isolated(runtime):
         reason="favorites high",
         next_recommendation="keep natural light",
     ))
-    assert learning.evidence_status == "VERIFIED"
+    assert learning.evidence_status == "NOT_ENOUGH_EVIDENCE"
     assert learning.source_episode_ids == (episode.episode_id,)
     assert runtime.store.list_learning(account_id=dy.account_id, platform="douyin") == []
 

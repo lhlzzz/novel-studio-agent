@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-AUDIT_PATH = ROOT / "docs/audits/meiti-v4.8.2-production-readiness.json"
+AUDIT_PATH = ROOT / "docs/audits/meiti-v4.8.3-production-integrity.json"
 
 
 def run() -> dict:
@@ -36,7 +36,7 @@ def run() -> dict:
             "PRODUCTION_EVIDENCE": "NOT_VERIFIED",
             "error": str(exc),
         }
-    payload["version"] = "4.8.2"
+    payload["version"] = "4.8.3"
     payload["note"] = (
         "SYSTEM_CAPABILITY is code/schema. ACCOUNT_CONFIGURATION is the selected account. "
         "CORE_PRODUCTION=READY means the human chain can start. "

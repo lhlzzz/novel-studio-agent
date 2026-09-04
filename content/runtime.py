@@ -398,26 +398,29 @@ class ContinuityRuntime:
                 world_id=account.world_id,
                 previous_episode=previous,
             )
-        learning = self.store.get_learning_profile(account_id, platform)
         records = self.store.list_learning(account_id=account_id, platform=platform)
-        learning_payload = dict(learning.__dict__) if learning else {}
-        if records:
-            learning_payload["learning_records"] = [
-                {
-                    "learning_id": item.learning_id,
-                    "platform": item.platform,
-                    "what_worked": item.what_worked,
-                    "next_recommendation": item.next_recommendation,
-                    "reason": item.reason,
-                    "source_episode_ids": list(item.source_episode_ids),
-                }
-                for item in records
-                if item.platform in {platform, "GLOBAL"}
-            ]
-            learning_payload["successful_patterns"] = tuple(
-                list(learning_payload.get("successful_patterns") or ())
-                + [item.next_recommendation or item.what_worked for item in records if item.what_worked or item.next_recommendation]
-            )
+        verified = [item for item in records if item.evidence_status == "VERIFIED" and item.platform in {platform, "GLOBAL"}]
+        learning_payload: dict[str, Any] = {}
+        if verified:
+            learning_payload = {
+                "learning_records": [
+                    {
+                        "learning_id": item.learning_id,
+                        "platform": item.platform,
+                        "what_worked": item.what_worked,
+                        "next_recommendation": item.next_recommendation,
+                        "reason": item.reason,
+                        "source_episode_ids": list(item.source_episode_ids),
+                        "evidence_status": item.evidence_status,
+                    }
+                    for item in verified
+                ],
+                "successful_patterns": tuple(
+                    item.next_recommendation or item.what_worked
+                    for item in verified
+                    if item.what_worked or item.next_recommendation
+                ),
+            }
         prompt = PromptCompiler(self.store).compile(
             account_id=account_id,
             platform=platform,
@@ -469,7 +472,7 @@ class ContinuityRuntime:
                 **run.__dict__,
                 "prompt_id": prompt.prompt_id,
                 "task_id": bound_task.task_id if bound_task else None,
-                "status": "AWAITING_CREATIVE",
+                "status": "PROMPT_READY",
                 "updated_at": utcnow(),
             }))
             if bound_task is not None:
@@ -487,6 +490,7 @@ class ContinuityRuntime:
                 episode_id=episode.episode_id,
                 task_id=current_task.task_id if current_task else None,
                 status="PRODUCING",
+                slot=episode.episode_id,
             )
             sync_operating_state(
                 self.store,
@@ -527,17 +531,6 @@ class ContinuityRuntime:
         qa = imported.get("qa") or {}
         asset_id = getattr(asset, "asset_id", None)
         episode = self.store.get_episode(episode_id, account_id=account_id) if episode_id and account_id else None
-        if episode and episode.production_run_id:
-            run = self.store.get_production_run(episode.production_run_id)
-            if run is not None:
-                if run.episode_id and episode_id and run.episode_id != episode_id:
-                    raise IsolationError("production run episode mismatch")
-                self.store.save_production_run(ProductionRun(**{
-                    **run.__dict__,
-                    "asset_id": asset_id,
-                    "prompt_id": fields.get("prompt_id") or run.prompt_id,
-                    "updated_at": utcnow(),
-                }))
         tasks = TaskOS(self.store)
         tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="CREATIVE_EXECUTION", asset_id=asset_id)
         tasks.complete_type(account_id=account_id, episode_id=episode_id, task_type="ASSET_IMPORT", asset_id=asset_id)
@@ -550,6 +543,7 @@ class ContinuityRuntime:
                 episode_id=episode_id,
                 prompt_id=fields.get("prompt_id"),
                 asset_id=asset_id,
+                production_run_id=episode.production_run_id if episode else None,
                 source="lechuang",
                 detail={"qa": qa.get("decision")},
             )
@@ -650,6 +644,7 @@ class ContinuityRuntime:
                             "package_id": package.package_id,
                             "asset_id": primary_ids[0] if primary_ids else run.asset_id,
                             "prompt_id": prompt_id or run.prompt_id,
+                            "status": "PACKAGE_READY",
                             "updated_at": utcnow(),
                         }))
                 current = TaskOS(self.store).get_next_action(account_id=context.account_id)
@@ -669,6 +664,7 @@ class ContinuityRuntime:
                     episode_id=context.episode_id,
                     task_id=current.task_id if current else None,
                     status="READY_TO_PUBLISH",
+                    slot=context.episode_id or "default",
                 )
         return package
 
@@ -728,28 +724,43 @@ class ContinuityRuntime:
         return self.store.save_lineage(lineage)
 
     def record_publication(self, *, package: ContentPackage, publication) -> ContinuityMemory:
-        if package.account_id:
-            self.store.save_memory(ContinuityMemory(
-                memory_id=uuid4().hex,
-                kind="episode",
-                account_id=package.account_id,
-                subject_id=package.episode_id or package.package_id,
-                key="published",
-                value={
-                    "published_at": getattr(publication, "published_at", None),
-                    "platform": getattr(publication, "platform", package.platform),
-                    "account": package.account_id,
-                    "content_package": package.package_id,
-                    "media_asset_ids": list(package.media_assets),
-                    "publication_id": getattr(publication, "publication_id", ""),
-                    "external_post_id": getattr(publication, "provider_post_id", ""),
-                    "publication_url": getattr(publication, "external_url", ""),
-                },
-            ))
+        publication_id = getattr(publication, "publication_id", "") or ""
+        if not package.account_id:
+            return ContinuityMemory(memory_id="none", kind="episode", account_id="", subject_id="", key="published", value={})
+        canonical = ContinuityMemory(
+            memory_id=uuid4().hex,
+            kind="episode",
+            account_id=package.account_id,
+            subject_id=package.episode_id or package.package_id,
+            key="published",
+            value={
+                "published_at": getattr(publication, "published_at", None),
+                "platform": getattr(publication, "platform", package.platform),
+                "account": package.account_id,
+                "content_package": package.package_id,
+                "media_asset_ids": list(package.media_assets),
+                "publication_id": publication_id,
+                "external_post_id": getattr(publication, "provider_post_id", ""),
+                "publication_url": getattr(publication, "external_url", ""),
+                "projection": "PROJECTION_PENDING",
+            },
+        )
+        with self.store.transaction():
+            self.store.save_memory(canonical)
             if package.episode_id:
                 episode = self.store.get_episode(package.episode_id, account_id=package.account_id)
                 if episode is not None:
                     self.store.save_episode(Episode(**{**episode.__dict__, "content_status": "PUBLISHED", "updated_at": utcnow()}))
+                    if episode.production_run_id:
+                        run = self.store.get_production_run(episode.production_run_id)
+                        if run is not None:
+                            self.store.save_production_run(ProductionRun(**{
+                                **run.__dict__,
+                                "publication_id": publication_id or run.publication_id,
+                                "package_id": package.package_id,
+                                "status": "PUBLISHED",
+                                "updated_at": utcnow(),
+                            }))
             selected = {str(item) for item in package.media_assets}
             for lineage in self.store.list_lineage(account_id=package.account_id, episode_id=package.episode_id):
                 chosen = (
@@ -768,28 +779,42 @@ class ContinuityRuntime:
                 lineage = self.store.get_lineage(asset_id, account_id=package.account_id)
                 if lineage is not None:
                     self.store.save_lineage(replace(lineage, published=True, selected_for_package=True, content_package_id=package.package_id))
-            try:
-                from memory.service import get_memory_service
-                get_memory_service().writeback({
-                    "kind": "PUBLICATION_LEARNING",
-                    "account_id": package.account_id,
-                    "platform": package.platform,
-                    "series_id": package.series_id,
-                    "episode_id": package.episode_id,
-                    "publication_id": getattr(publication, "publication_id", ""),
-                    "source": "publication",
-                    "content_pattern": {
-                        "package_id": package.package_id,
-                        "media_asset_ids": list(package.media_assets),
-                    },
-                })
-            except Exception as exc:
-                raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
-        memories = self.store.list_memories(account_id=package.account_id or "", kind="episode") if package.account_id else []
+            sync_operating_state(
+                self.store,
+                account_id=package.account_id,
+                platform=package.platform,
+                current_episode=package.episode_id,
+                last_published_episode=package.episode_id,
+                current_content_status="PUBLISHED",
+                next_action="ANALYTICS",
+            )
+        projection = "PROJECTED"
+        try:
+            from memory.service import get_memory_service
+            get_memory_service().writeback({
+                "kind": "PUBLICATION_LEARNING",
+                "account_id": package.account_id,
+                "platform": package.platform,
+                "series_id": package.series_id,
+                "episode_id": package.episode_id,
+                "publication_id": publication_id,
+                "source": "publication",
+                "content_pattern": {
+                    "package_id": package.package_id,
+                    "media_asset_ids": list(package.media_assets),
+                },
+            })
+        except Exception:
+            projection = "PROJECTION_PENDING"
+        memories = self.store.list_memories(account_id=package.account_id, kind="episode")
         published = [item for item in memories if item.key == "published"]
         if published:
-            return published[-1]
-        return ContinuityMemory(memory_id="none", kind="episode", account_id=package.account_id or "", subject_id="", key="published", value={})
+            latest = published[-1]
+            if projection == "PROJECTED":
+                latest = ContinuityMemory(**{**latest.__dict__, "value": {**dict(latest.value or {}), "projection": "PROJECTED"}})
+                self.store.save_memory(latest)
+            return latest
+        return ContinuityMemory(**{**canonical.__dict__, "value": {**dict(canonical.value or {}), "projection": projection}})
 
     def record_feedback(self, feedback: PerformanceFeedback) -> PerformanceFeedback:
         return self.store.save_feedback(feedback)
@@ -902,7 +927,7 @@ class ContinuityRuntime:
             platform=platform,
             episode_id=episode_id,
             request=request,
-            status="OPEN",
+            status="CREATED",
         )
         saved = self.store.save_production_run(run)
         if episode_id:
@@ -957,72 +982,84 @@ class ContinuityRuntime:
     def record_handoff(self, *, package: ContentPackage, handoff) -> ProductionEvidence:
         if not package.account_id:
             raise IsolationError("handoff requires account_id")
-        if package.episode_id:
-            self.transition_episode(package.episode_id, account_id=package.account_id, to_status="HANDOFF_READY")
         run = None
-        if package.episode_id:
-            episode = self.store.get_episode(package.episode_id, account_id=package.account_id)
-            if episode and episode.production_run_id:
-                run = self.store.get_production_run(episode.production_run_id)
-        if run is not None:
-            self.store.save_production_run(ProductionRun(**{
-                **run.__dict__,
-                "package_id": package.package_id,
-                "handoff_id": getattr(handoff, "handoff_id", None),
-                "status": "HANDED_OFF",
-                "updated_at": utcnow(),
-            }))
-        TaskOS(self.store).complete_type(
-            account_id=package.account_id,
-            episode_id=package.episode_id,
-            task_type="HANDOFF",
-            package_id=package.package_id,
-        )
-        current = TaskOS(self.store).get_next_action(account_id=package.account_id)
-        sync_operating_state(
-            self.store,
-            account_id=package.account_id,
-            platform=package.platform,
-            current_episode=package.episode_id,
-            current_task=current.task_id if current else None,
-            last_published_episode=package.episode_id,
-            current_content_status="HANDOFF_READY",
-            next_action=current.task_type if current else "ANALYTICS",
-        )
-        EpisodePlanner(self.store).ensure_calendar(
-            account_id=package.account_id,
-            date=today_iso(),
-            topic=package.title,
-            episode_id=package.episode_id,
-            task_id=current.task_id if current else None,
-            status="READY_TO_PUBLISH",
-        )
-        return self.record_evidence(
-            kind="XHS_HANDOFF" if package.platform == "xiaohongshu" else "HANDOFF",
-            account_id=package.account_id,
-            platform=package.platform,
-            episode_id=package.episode_id,
-            package_id=package.package_id,
-            prompt_id=package.prompt_id,
-            handoff_id=getattr(handoff, "handoff_id", None),
-            production_run_id=run.run_id if run else None,
-            source="operator",
-            detail={"kind": "handoff", "status": getattr(handoff, "status", "")},
-        )
+        with self.store.transaction():
+            if package.episode_id:
+                self.transition_episode(package.episode_id, account_id=package.account_id, to_status="HANDOFF_READY")
+                episode = self.store.get_episode(package.episode_id, account_id=package.account_id)
+                if episode and episode.production_run_id:
+                    run = self.store.get_production_run(episode.production_run_id)
+            if run is not None:
+                self.store.save_production_run(ProductionRun(**{
+                    **run.__dict__,
+                    "package_id": package.package_id,
+                    "handoff_id": getattr(handoff, "handoff_id", None),
+                    "status": "HANDED_OFF",
+                    "updated_at": utcnow(),
+                }))
+            TaskOS(self.store).complete_type(
+                account_id=package.account_id,
+                episode_id=package.episode_id,
+                task_type="HANDOFF",
+                package_id=package.package_id,
+            )
+            current = TaskOS(self.store).get_next_action(account_id=package.account_id)
+            sync_operating_state(
+                self.store,
+                account_id=package.account_id,
+                platform=package.platform,
+                current_episode=package.episode_id,
+                current_task=current.task_id if current else None,
+                current_content_status="HANDOFF_READY",
+                next_action=current.task_type if current else "ANALYTICS",
+            )
+            EpisodePlanner(self.store).ensure_calendar(
+                account_id=package.account_id,
+                date=today_iso(),
+                topic=package.title,
+                episode_id=package.episode_id,
+                task_id=current.task_id if current else None,
+                status="READY_TO_PUBLISH",
+                slot=package.episode_id or "default",
+            )
+            return self.record_evidence(
+                kind="XHS_HANDOFF" if package.platform == "xiaohongshu" else "HANDOFF",
+                account_id=package.account_id,
+                platform=package.platform,
+                episode_id=package.episode_id,
+                package_id=package.package_id,
+                prompt_id=package.prompt_id,
+                handoff_id=getattr(handoff, "handoff_id", None),
+                production_run_id=run.run_id if run else None,
+                source="operator",
+                detail={"kind": "handoff", "status": getattr(handoff, "status", ""), "published": False},
+            )
 
     def record_analytics(self, record: AnalyticsRecord) -> AnalyticsRecord:
         if not record.episode_id:
             raise ConfigurationBlocked("ANALYTICS_EPISODE_REQUIRED", "analytics must bind an episode")
         saved = self.store.save_analytics(record)
-        if saved.episode_id:
+        verified = saved.origin == "PROVIDER" and saved.verification_status == "VERIFIED"
+        kind = "ANALYTICS_IMPORTED" if verified else "MANUAL_ANALYTICS_OBSERVATION"
+        episode = self.store.get_episode(saved.episode_id, account_id=saved.account_id)
+        if episode is not None:
             self.transition_episode(saved.episode_id, account_id=saved.account_id, to_status="ANALYTICS_PENDING")
+            if episode.production_run_id:
+                run = self.store.get_production_run(episode.production_run_id)
+                if run is not None:
+                    self.store.save_production_run(ProductionRun(**{
+                        **run.__dict__,
+                        "analytics_id": saved.analytics_id,
+                        "status": "ANALYTICS_CAPTURED",
+                        "updated_at": utcnow(),
+                    }))
         TaskOS(self.store).complete_type(
             account_id=saved.account_id,
             episode_id=saved.episode_id,
             task_type="ANALYTICS",
         )
         self.record_evidence(
-            kind="ANALYTICS_IMPORTED",
+            kind=kind,
             account_id=saved.account_id,
             platform=saved.platform,
             episode_id=saved.episode_id,
@@ -1031,6 +1068,11 @@ class ContinuityRuntime:
             publication_id=saved.publication_id,
             analytics_id=saved.analytics_id,
             source="analytics",
+            detail={
+                "origin": saved.origin,
+                "verification_status": saved.verification_status,
+                "verified": verified,
+            },
         )
         current = TaskOS(self.store).get_next_action(account_id=saved.account_id)
         sync_operating_state(
@@ -1045,66 +1087,98 @@ class ContinuityRuntime:
         return saved
 
     def record_learning(self, record: LearningRecord) -> LearningRecord:
-        evidence_status = record.evidence_status
-        sources = tuple(item for item in (record.episode_id, record.analytics_id, record.prompt_id, record.asset_id) if item)
         source_episodes = record.source_episode_ids or ((record.episode_id,) if record.episode_id else ())
         analytics = self.store.get_analytics(record.analytics_id) if record.analytics_id else None
-        if evidence_status == "VERIFIED" and (analytics is None or not record.episode_id):
-            evidence_status = "NOT_ENOUGH_EVIDENCE"
-        elif evidence_status == "NOT_VERIFIED":
-            if analytics is not None and (record.episode_id or source_episodes):
-                evidence_status = "VERIFIED"
-            elif sources:
+        provider_verified = bool(
+            analytics is not None
+            and analytics.origin == "PROVIDER"
+            and analytics.verification_status == "VERIFIED"
+            and analytics.publication_id
+            and analytics.provider_payload
+        )
+        evidence_status = record.evidence_status
+        if evidence_status == "VERIFIED":
+            if analytics is None or not record.episode_id:
                 evidence_status = "NOT_ENOUGH_EVIDENCE"
+            elif not provider_verified:
+                evidence_status = "NOT_ENOUGH_EVIDENCE"
+        elif analytics is not None and not provider_verified and evidence_status == "NOT_VERIFIED":
+            evidence_status = "NOT_ENOUGH_EVIDENCE"
         saved = self.store.save_learning(LearningRecord(**{
             **record.__dict__,
             "evidence_status": evidence_status,
             "source_episode_ids": source_episodes,
         }))
-        profile = self.store.get_learning_profile(saved.account_id, saved.platform)
-        if profile is not None:
-            worked = tuple(dict.fromkeys(list(profile.successful_patterns) + ([saved.what_worked] if saved.what_worked else [])))
-            failed = tuple(dict.fromkeys(list(profile.failed_patterns) + ([saved.what_failed] if saved.what_failed else [])))
-            recs = tuple(dict.fromkeys(list(profile.prompt_patterns) + ([saved.next_recommendation] if saved.next_recommendation else [])))
-            self.store.save_learning_profile(PlatformLearningProfile(**{
-                **profile.__dict__,
-                "successful_patterns": worked,
-                "failed_patterns": failed,
-                "prompt_patterns": recs,
-                "updated_at": utcnow(),
-            }))
-        try:
-            from memory.service import get_memory_service
-            get_memory_service().writeback({
-                "kind": "LEARNING_RECORD",
-                "account_id": saved.account_id,
-                "platform": saved.platform,
-                "episode_id": saved.episode_id,
-                "source": "analytics",
-                "successful_pattern": {
-                    "what_worked": saved.what_worked,
-                    "visual_learning": saved.visual_learning,
-                    "prompt_learning": saved.prompt_learning,
-                    "reason": saved.reason,
-                    "next_recommendation": saved.next_recommendation,
-                    "source_episode_ids": list(saved.source_episode_ids),
-                },
-                "content_pattern": {
-                    "content_learning": saved.content_learning,
-                    "audience_learning": saved.audience_learning,
-                },
-            })
-        except Exception as exc:
-            raise MemoryWritebackError("MEMORY_WRITEBACK_FAILED", str(exc)) from exc
-        if saved.episode_id:
-            self.transition_episode(saved.episode_id, account_id=saved.account_id, to_status="LEARNED")
-        TaskOS(self.store).complete_type(
-            account_id=saved.account_id,
-            episode_id=saved.episode_id,
-            task_type="LEARNING",
-        )
+        verified = saved.evidence_status == "VERIFIED"
+        if verified:
+            profile = self.store.get_learning_profile(saved.account_id, saved.platform)
+            if profile is not None:
+                worked = tuple(dict.fromkeys(list(profile.successful_patterns) + ([saved.what_worked] if saved.what_worked else [])))
+                failed = tuple(dict.fromkeys(list(profile.failed_patterns) + ([saved.what_failed] if saved.what_failed else [])))
+                recs = tuple(dict.fromkeys(list(profile.prompt_patterns) + ([saved.next_recommendation] if saved.next_recommendation else [])))
+                self.store.save_learning_profile(PlatformLearningProfile(**{
+                    **profile.__dict__,
+                    "successful_patterns": worked,
+                    "failed_patterns": failed,
+                    "prompt_patterns": recs,
+                    "updated_at": utcnow(),
+                }))
+            projection = "PROJECTED"
+            try:
+                from memory.service import get_memory_service
+                get_memory_service().writeback({
+                    "kind": "LEARNING_RECORD",
+                    "account_id": saved.account_id,
+                    "platform": saved.platform,
+                    "episode_id": saved.episode_id,
+                    "source": "analytics",
+                    "evidence_status": saved.evidence_status,
+                    "successful_pattern": {
+                        "what_worked": saved.what_worked,
+                        "visual_learning": saved.visual_learning,
+                        "prompt_learning": saved.prompt_learning,
+                        "reason": saved.reason,
+                        "next_recommendation": saved.next_recommendation,
+                        "source_episode_ids": list(saved.source_episode_ids),
+                    },
+                    "content_pattern": {
+                        "content_learning": saved.content_learning,
+                        "audience_learning": saved.audience_learning,
+                    },
+                })
+            except Exception:
+                projection = "PROJECTION_PENDING"
+            if saved.episode_id:
+                self.transition_episode(saved.episode_id, account_id=saved.account_id, to_status="LEARNED")
+            TaskOS(self.store).complete_type(
+                account_id=saved.account_id,
+                episode_id=saved.episode_id,
+                task_type="LEARNING",
+            )
+            episode = self.store.get_episode(saved.episode_id, account_id=saved.account_id) if saved.episode_id else None
+            if episode and episode.production_run_id:
+                run = self.store.get_production_run(episode.production_run_id)
+                if run is not None:
+                    closed = bool(run.publication_id and run.analytics_id)
+                    self.store.save_production_run(ProductionRun(**{
+                        **run.__dict__,
+                        "learning_id": saved.learning_id,
+                        "status": "CLOSED" if closed else "LEARNING_VERIFIED",
+                        "updated_at": utcnow(),
+                    }))
+            sync_operating_state(
+                self.store,
+                account_id=saved.account_id,
+                platform=saved.platform,
+                last_learning=saved.learning_id,
+                learning_summary=saved.next_recommendation or saved.what_worked or saved.reason,
+                current_content_status="LEARNED",
+                next_action="CONTENT_PLAN",
+            )
+        else:
+            projection = "PENDING_OBSERVATION"
         self.record_evidence(
-            kind="LEARNING_WRITTEN",
+            kind="LEARNING_WRITTEN" if verified else "LEARNING_PENDING",
             account_id=saved.account_id,
             platform=saved.platform,
             episode_id=saved.episode_id,
@@ -1112,17 +1186,13 @@ class ContinuityRuntime:
             learning_id=saved.learning_id,
             prompt_id=saved.prompt_id,
             asset_id=saved.asset_id,
-            source="memory",
-            detail={"reason": saved.reason, "next_recommendation": saved.next_recommendation, "evidence_status": saved.evidence_status},
-        )
-        sync_operating_state(
-            self.store,
-            account_id=saved.account_id,
-            platform=saved.platform,
-            last_learning=saved.learning_id,
-            learning_summary=saved.next_recommendation or saved.what_worked or saved.reason,
-            current_content_status="LEARNED",
-            next_action="CONTENT_PLAN",
+            source="memory" if verified else "operator",
+            detail={
+                "reason": saved.reason,
+                "next_recommendation": saved.next_recommendation,
+                "evidence_status": saved.evidence_status,
+                "projection": projection,
+            },
         )
         return saved
 

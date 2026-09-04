@@ -92,6 +92,7 @@ def admit(
 ) -> AdmissionDecision:
     reasons: list[str] = []
     evidence: list[dict[str, Any]] = []
+    handoff_only = False
     account = account or _account_from(job, adapter=adapter, store=store)
     if account is None:
         reasons.append("account missing")
@@ -161,10 +162,14 @@ def admit(
     evidence.append(_evidence("evidence_valid", evidence_ok))
 
     media_ok, media_uploaded = _media_valid(job, adapter=adapter)
+    requires_upload = bool(job.variant.media) and not handoff_only
+    uploaded_ok = media_uploaded or not requires_upload
     evidence.append(_evidence("media_valid", media_ok))
-    evidence.append(_evidence("media_uploaded", media_uploaded or not job.variant.media))
+    evidence.append(_evidence("media_uploaded", uploaded_ok, required=requires_upload, handoff_only=handoff_only))
     if not media_ok:
         reasons.append("media invalid")
+    if requires_upload and not media_uploaded:
+        reasons.append("MEDIA_NOT_UPLOADED")
 
     approval_ok = _approval_valid(job, store=store)
     evidence.append(_evidence("approval_valid", approval_ok))

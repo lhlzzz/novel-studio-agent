@@ -102,7 +102,7 @@ def test_day_loop_creates_new_prompt_asset_and_learning(runtime, tmp_path):
     assert prompt2.copy_ready != prompt1.copy_ready
     assert prompt2.scene_prompt != prompt1.scene_prompt
     assert prompt2.parent_prompt_id == prompt1.prompt_id
-    assert any("natural light" in item or "candid" in item.lower() for item in prompt2.learning_basis)
+    assert not any("natural light" in item or "candid" in item.lower() for item in prompt2.learning_basis)
     asset_b = service.import_asset(
         _png(tmp_path, "b.png", 90),
         account_id=account.account_id,
