@@ -1698,6 +1698,11 @@ class ProductionRunRecord(Base):
     content_decision_id = Column(String(255))
     status = Column(String(40), nullable=False, default="CREATED")
     request = Column(Text, nullable=False, default="")
+    creative_provider = Column(String(120), nullable=False, default="")
+    creative_job_id = Column(String(255), nullable=False, default="")
+    creative_model = Column(String(120), nullable=False, default="")
+    creative_request_snapshot = Column(JSONType, nullable=False, default=dict)
+    creative_result_snapshot = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

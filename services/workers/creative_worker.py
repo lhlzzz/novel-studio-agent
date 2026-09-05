@@ -29,3 +29,10 @@ def run_once(*, engine: CreativeWorkflowEngine | None = None, worker_id: str | N
             if current.status in {"SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED", "WAITING_PROVIDER", "JUDGING", "QUEUED", "RUNNING"}:
                 engine.store.release_lease(run.run_id, worker)
     return resumed
+
+
+def reconcile_creator_jobs(*, continuity=None) -> list[dict]:
+    if continuity is None:
+        from content.runtime import ContinuityRuntime
+        continuity = ContinuityRuntime.production()
+    return continuity.reconcile_creative_jobs()

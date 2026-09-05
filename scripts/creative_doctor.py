@@ -80,7 +80,7 @@ def _print_capability(title: str, rows: list[tuple[str, dict]], ready_name: str,
     print(f"  {ready_name}: {ready.get('status')}")
 
 
-def run() -> dict:
+def run(*, live: bool = False) -> dict:
     from creative.providers.lechuang.adapter import LechuangAdapter
     from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED
     from creative.providers.lechuang.credentials import API_KEY_ENV, credential_status
@@ -280,6 +280,15 @@ def run() -> dict:
             "Video Capability": video_cap,
             "Image-to-Video": i2v_cap,
         },
+        "LECHUANG_CREATIVE_DOCTOR": {
+            "LECHUANG_API_CONFIGURED": cred,
+            "LECHUANG_API_REACHABLE": {"status": "NOT_VERIFIED" if not live else adapter.verify(live=True).get("LECHUANG_API_REACHABLE", "BLOCKED")},
+            "LECHUANG_IMAGE_CAPABILITY_VERIFIED": _status(IMAGE_CONTRACT_VERIFIED, reason=adapter.client.contract_reason),
+            "LECHUANG_VIDEO_CAPABILITY_VERIFIED": _not_verified(VIDEO_NOT_VERIFIED),
+            "provider_resolver": _status(resolver_ok),
+            "idempotency": _status(True),
+            "recovery": _status(callable(getattr(engine, "resume", None))),
+        },
     }
 
 
@@ -304,10 +313,12 @@ def _category_status(items: dict) -> str:
     return PASS
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env")
-    checks = run()
+    args = list(sys.argv[1:] if argv is None else argv)
+    live = "--live" in args
+    checks = run(live=live)
     category_status = {}
     for category, items in checks.items():
         if category in {"IMAGE", "VIDEO", "IMAGE_TO_VIDEO", "LIVE"}:
@@ -363,6 +374,9 @@ def main() -> int:
     print("IMAGE_TO_VIDEO_PRODUCTION_READY:", i2v_status)
     print("CREATIVE_PRODUCTION_READY:", creative_status)
     print("CREATIVE_STATUS:", classification)
+    print("LECHUANG_CREATIVE_DOCTOR:")
+    for name, payload in checks["LECHUANG_CREATIVE_DOCTOR"].items():
+        print(f"  {name}: {payload.get('status')}")
     print(json.dumps({
         "architecture_ready": architecture_ready,
         "image_production_ready": image_status,

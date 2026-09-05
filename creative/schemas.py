@@ -249,11 +249,13 @@ def map_task_status(status: str) -> str:
     lookup = {
         "queued": "QUEUED",
         "running": "RUNNING",
+        "submitted": "SUBMITTED",
         "succeeded": "SUCCEEDED",
         "success": "SUCCEEDED",
         "failed": "FAILED",
         "cancelled": "CANCELLED",
         "canceled": "CANCELLED",
+        "expired": "EXPIRED",
         "timeout": "TIMEOUT",
         "unknown": "UNKNOWN",
         "blocked": "BLOCKED",

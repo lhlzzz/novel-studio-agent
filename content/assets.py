@@ -288,7 +288,7 @@ class PlatformAssetService:
             episode_id=prepared["episode"].episode_id,
             character_id=prepared["account"].character_id,
             world_id=prepared["account"].world_id,
-            provider="manual-lechuang" if generation_mode == "MANUAL_CREATIVE_TOOL" else generation_mode,
+            provider=("lechuang" if generation_mode == "PROVIDER_API" else ("manual-lechuang" if generation_mode == "MANUAL_CREATIVE_TOOL" else generation_mode)),
             model=model or "UNKNOWN",
             prompt_id=prompt_id,
             metadata={
@@ -585,7 +585,7 @@ class PlatformAssetService:
             episode_id=episode.episode_id,
             character_id=account.character_id,
             world_id=account.world_id,
-            user_request="manual-import",
+            user_request="provider-import" if generation_mode == "PROVIDER_API" else "manual-import",
             generation_request={
                 "tool": tool,
                 "model": model,
@@ -593,7 +593,7 @@ class PlatformAssetService:
                 "generation_timestamp": generation_timestamp or utcnow(),
                 "generation_mode": generation_mode,
             },
-            provider="manual-lechuang",
+            provider="lechuang" if generation_mode == "PROVIDER_API" else "manual-lechuang",
             model=model,
             parent_asset_id=parent,
             source_asset_id=source_asset_id or parent,

@@ -42,6 +42,8 @@ def code_structure() -> dict:
         "migrations/versions/0016_v482_final_hardening.py": ('revision = "0016_v482_final_hardening"',),
         "migrations/versions/0017_v483_production_integrity.py": ('revision = "0017_v483_production_integrity"',),
         "migrations/versions/0018_v50_creator_os_unification.py": ('revision = "0018_v50_creator_os_unification"',),
+        "migrations/versions/0019_v51_lechuang_creative_jobs.py": ('revision = "0019_v51_lechuang_creative_jobs"',),
+        "docs/integrations/lechuang.md": ("Officially confirmed", "Currently supported by Meiti", "Not verified"),
         "docs/architecture/canonical-owner-map.md": ("Canonical Owner Map", "ONE canonical writer"),
         "scripts/meiti.py": ("compile-prompt", "import-asset", "cmd_analytics_record", "cmd_learning_record"),
     }

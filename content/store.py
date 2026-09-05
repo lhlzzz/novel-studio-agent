@@ -1325,6 +1325,11 @@ class ContinuityStore:
             "content_decision_id": run.content_decision_id,
             "status": run.status,
             "request": run.request,
+            "creative_provider": getattr(run, "creative_provider", "") or "",
+            "creative_job_id": getattr(run, "creative_job_id", "") or "",
+            "creative_model": getattr(run, "creative_model", "") or "",
+            "creative_request_snapshot": dict(getattr(run, "creative_request_snapshot", None) or {}),
+            "creative_result_snapshot": dict(getattr(run, "creative_result_snapshot", None) or {}),
             "updated_at": _now(),
         })
         return run
@@ -1334,6 +1339,29 @@ class ContinuityStore:
 
         with self._session() as session:
             row = session.get(ProductionRunRecord, run_id)
+            return _production_run_from_row(row) if row else None
+
+    def list_production_runs(self, *, account_id: str | None = None, status: str | None = None) -> list[ProductionRun]:
+        from scripts.db.models import ProductionRunRecord
+
+        with self._session() as session:
+            stmt = select(ProductionRunRecord)
+            if account_id:
+                stmt = stmt.where(ProductionRunRecord.account_id == account_id)
+            if status:
+                stmt = stmt.where(ProductionRunRecord.status == status)
+            rows = list(session.execute(stmt).scalars())
+        return [_production_run_from_row(row) for row in rows]
+
+    def get_production_run_by_job(self, job_id: str) -> ProductionRun | None:
+        from scripts.db.models import ProductionRunRecord
+
+        if not job_id:
+            return None
+        with self._session() as session:
+            row = session.execute(
+                select(ProductionRunRecord).where(ProductionRunRecord.creative_job_id == job_id)
+            ).scalar_one_or_none()
             return _production_run_from_row(row) if row else None
 
     def save_evidence(self, evidence: ProductionEvidence) -> ProductionEvidence:
@@ -2669,6 +2697,11 @@ def _production_run_from_row(row) -> ProductionRun:
         content_decision_id=getattr(row, "content_decision_id", None),
         status=row.status or "OPEN",
         request=row.request or "",
+        creative_provider=getattr(row, "creative_provider", "") or "",
+        creative_job_id=getattr(row, "creative_job_id", "") or "",
+        creative_model=getattr(row, "creative_model", "") or "",
+        creative_request_snapshot=_json(getattr(row, "creative_request_snapshot", None), {}),
+        creative_result_snapshot=_json(getattr(row, "creative_result_snapshot", None), {}),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )

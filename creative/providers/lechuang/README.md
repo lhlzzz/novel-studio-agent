@@ -24,3 +24,7 @@ OpenAI-compatible contract from `.agents/skills/media/xiaoleai-image-generation/
 Video generation, image-to-video, video extend, video edit, and image editing
 are not present in repository evidence. They stay `NOT_VERIFIED`. Do not guess
 those endpoints.
+
+The full contract ledger is `docs/integrations/lechuang.md`. That file
+separates official evidence, Meiti-supported capabilities, and unverified
+claims. Guessed support is never PASS.

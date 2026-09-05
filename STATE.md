@@ -1,7 +1,7 @@
 # Meiti V4.8.1 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
-Image / video execution: Lechuang is a manual creative execution tool unless a verified API adapter exists
+Image / video execution: Lechuang is the primary creative provider. Image API is verified. Video stays NOT_VERIFIED. Manual import is fallback only.
 Video API: unverified contracts stay NOT_VERIFIED; grok-4.6 is not a video model
 Postiz: REMOVED
 

@@ -16,3 +16,22 @@ class IdempotencyKey:
     @staticmethod
     def provider(run_id: str, node_id: str, attempt: int | str) -> str:
         return f"{run_id}:{node_id}:{attempt}"
+
+    @staticmethod
+    def creative_job(
+        creator_account_id: str,
+        episode_id: str,
+        prompt_id: str,
+        generation_spec: dict[str, Any] | None = None,
+    ) -> str:
+        payload = json.dumps(
+            {
+                "creator_account_id": creator_account_id,
+                "episode_id": episode_id,
+                "prompt_id": prompt_id,
+                "generation_spec": generation_spec or {},
+            },
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()

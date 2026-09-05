@@ -48,4 +48,7 @@ def test_v50_cli_and_doctor_keep_oauth_optional():
     assert "MEITI_V50_STATUS" in doctor
     assert "CORE_CONTENT_PRODUCTION" in doctor
     assert "0018_v50_creator_os_unification" in audit
+    assert "0019_v51_lechuang_creative_jobs" in audit
     assert not any(line.strip().startswith('"CORE_PRODUCTION_READY": True') for line in audit.splitlines())
+    assert "resolve_creative_provider" in (ROOT / "integrations/providers/resolver.py").read_text(encoding="utf-8")
+    assert "Officially confirmed" in (ROOT / "docs/integrations/lechuang.md").read_text(encoding="utf-8")

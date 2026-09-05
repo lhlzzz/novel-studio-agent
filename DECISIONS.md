@@ -53,6 +53,12 @@
   GENERATE episodes require a new primary asset; same sha256 is the same
   immutable asset (EXISTING_ASSET), not a new identity. Cross-platform primary
   reuse is forbidden; reference and derived lineage are allowed. PromptCompiler
-  outputs COPY READY packages for manual Lechuang execution. grok-4.6 is the
+  outputs COPY READY packages for Lechuang execution. grok-4.6 is the
   engineering agent, never a video generation model. Unverified video APIs stay
   NOT_VERIFIED. The system never fabricates external generation evidence.
+- **2026-09-05 V5.1:** Lechuang is the primary creative provider. XiaoleAI and
+  Lechuang share `XIAOLEAI_API_KEY`. Image `POST /images/generations` is the
+  verified contract. Video stays NOT_VERIFIED. Creator OS `today` / `continue`
+  compile a PromptPackage, submit a CreativeJob, and import through
+  `PlatformAssetService`. Manual import remains a fallback, not the default
+  image path. Social OAuth is not required for generation.

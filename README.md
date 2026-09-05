@@ -5,12 +5,14 @@ Meiti is prompt-first.
 Meiti is an AI Creator Operating System: Creator Brain + Prompt Compiler +
 Asset / Continuity / Learning System. External generation can be manual.
 Lechuang is a manual creative execution tool unless a verified API adapter
-exists. The system never fabricates external generation evidence. grok-4.6
-is the engineering agent for this repository, not a video generation model.
+exists. Image generation uses the verified Xiaole/Lechuang API adapter.
+Video stays NOT_VERIFIED. The system never fabricates external generation
+evidence. grok-4.6 is the engineering agent for this repository, not a
+video generation model.
 
 ```text
 Meiti = Creator Brain + Prompt Compiler + Asset/Continuity/Learning System
-Lechuang = manual image / video execution tool (API only when verified)
+Lechuang = primary creative provider (verified image API; video NOT_VERIFIED)
 Xiaohongshu = Handoff
 Douyin = Native API
 Kuaishou = Native API
@@ -19,16 +21,13 @@ Postiz = does not exist
 ```
 
 ```text
-User -> Intent -> AccountContext
--> Platform Character / World / Creative DNA / Learning DNA
--> PostgreSQL operational state
--> Obsidian knowledge brain
--> pgvector retrieval (account + platform + GLOBAL only)
+User -> Intent -> Creator Account / Creator State / Strategy
+-> Content Decision -> Episode
 -> PromptCompiler -> COPY READY PromptPackage
--> Human Lechuang execution
--> creative import-asset (EXISTING_ASSET / lineage / QA)
--> MediaAsset -> Technical QA -> ContentPackage
--> Publish Gate -> DistributionJob
+-> CreativeJob -> Lechuang (verified image API)
+-> download / hash / PlatformAssetService.import_asset
+-> MediaAsset -> Technical QA -> ProductionRun -> Production Memory
+-> ContentPackage -> Publish Gate -> DistributionJob
 -> CN Social Provider Resolver
 -> XHS Handoff / Douyin Publication / Kuaishou Publication / Xianyu Listing
 -> Reconciliation -> Analytics -> MemoryService writeback

@@ -1,4 +1,4 @@
-"""PromptCompiler is the human-execution creative bridge."""
+"""PromptCompiler is the unique prompt owner. It decides what to generate."""
 
 from __future__ import annotations
 
@@ -117,8 +117,9 @@ class PromptCompiler:
         negative = "; ".join(part for part in (NEGATIVE_BASE, prompt_dna.get("negative"), *(world.taboos if world else ())) if part)
         ratio = str(policy.get("aspect_ratio") or ("3:4" if kind == "IMAGE" else "9:16"))
         duration = "0" if kind == "IMAGE" else str((dna.prompt_dna or {}).get("duration") or "6")
-        model = "gpt-image-2" if kind == "IMAGE" else "lechuang-manual-video"
+        model = "gpt-image-2" if kind == "IMAGE" else "lechuang-unverified-video"
         size = "2K" if kind == "IMAGE" else ""
+        execution_mode = "api" if kind == "IMAGE" else "manual"
         copy_ready = _copy_ready(
             kind=kind,
             character_lock=character_lock,
@@ -190,11 +191,14 @@ class PromptCompiler:
             version=(previous_prompt.version + 1) if previous_prompt else 1,
             lechuang_parameters={
                 "tool": "lechuang",
-                "mode": "manual",
+                "provider": "lechuang",
+                "mode": execution_mode,
                 "model": model,
                 "size": size,
+                "image_size": size,
                 "aspect_ratio": ratio,
                 "duration": duration,
+                "generation_type": kind.lower(),
             },
         )
         if previous_prompt and intent not in {"REUSE", "REPUBLISH"}:
@@ -211,6 +215,44 @@ class PromptCompiler:
             }))
         self._project(saved)
         return saved
+
+    def to_generation_request(self, package: PromptPackage, *, production_run_id: str | None = None, idempotency_key: str | None = None):
+        from integrations.contracts.creative import CreativeGenerationRequest
+
+        prompt = "\n".join(
+            part for part in (
+                package.character_lock,
+                package.world_lock,
+                package.scene_prompt,
+                package.composition,
+                package.camera,
+                package.lighting,
+                package.visual_style,
+                package.authenticity,
+            ) if part
+        )
+        params = dict(package.lechuang_parameters or {})
+        return CreativeGenerationRequest(
+            creator_account_id=package.account_id,
+            episode_id=package.episode_id,
+            platform=package.platform,
+            generation_type=str(params.get("generation_type") or package.kind or "image").lower(),
+            model=package.recommended_model or str(params.get("model") or ""),
+            prompt=prompt,
+            negative_prompt=package.negative_prompt,
+            aspect_ratio=package.aspect_ratio or package.recommended_ratio,
+            resolution=package.recommended_size or str(params.get("image_size") or params.get("size") or ""),
+            duration=package.duration or package.recommended_duration,
+            references=tuple(package.reference_assets or ()),
+            prompt_id=package.prompt_id,
+            production_run_id=production_run_id,
+            idempotency_key=idempotency_key,
+            metadata={
+                "kind": package.kind,
+                "source_asset_id": package.source_asset_id,
+                "mode": params.get("mode") or ("api" if package.kind == "IMAGE" else "manual"),
+            },
+        )
 
     def _validate_references(self, refs: tuple[str, ...], *, account_id: str, platform: str) -> tuple[str, ...]:
         from content.assets import ReferenceAssetResolver
@@ -532,7 +574,8 @@ def _copy_ready(
             "END STATE",
             "end on a new frame",
         ])
-    lines.extend(["", "NEGATIVE PROMPT", negative, "", "LECHUANG PARAMETERS", f"tool=lechuang mode=manual aspect_ratio={ratio} duration={duration}"])
+    mode = "api" if kind == "IMAGE" else "manual"
+    lines.extend(["", "NEGATIVE PROMPT", negative, "", "LECHUANG PARAMETERS", f"tool=lechuang provider=lechuang mode={mode} aspect_ratio={ratio} duration={duration}"])
     if references:
         lines.extend(["", "REFERENCE ASSETS", ", ".join(references)])
     if strategy_basis:

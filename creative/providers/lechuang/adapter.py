@@ -7,9 +7,10 @@ from typing import Any
 from creative.errors import ProviderBlocked, UnsupportedCapability
 from creative.providers.base import CapabilityMixin
 from creative.providers.lechuang.capabilities import claimed_capabilities, load_models
-from creative.providers.lechuang.client import IMAGE_KINDS, VIDEO_NOT_VERIFIED, LechuangClient
+from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, IMAGE_KINDS, VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED, LechuangClient
 from creative.providers.lechuang.credentials import API_KEY_ENV
 from creative.schemas import ProviderQuote, ProviderTask
+from integrations.contracts.creative import CreativeArtifact
 
 METHOD_TO_CAPABILITY = {
     "generate_text": "text_to_text",
@@ -120,6 +121,67 @@ class LechuangAdapter(CapabilityMixin):
 
     def upload_asset(self, payload: dict[str, Any]) -> ProviderTask:
         raise UnsupportedCapability("upload_asset", provider="lechuang")
+
+    def download_artifact(self, task: ProviderTask) -> CreativeArtifact:
+        result = dict(task.result or {})
+        asset = result.get("asset")
+        path = str(getattr(asset, "path", None) or result.get("path") or "")
+        sha256 = str(getattr(asset, "sha256", None) or result.get("sha256") or "")
+        if not path or not sha256:
+            raise ProviderBlocked("lechuang", "artifact path/sha256 missing")
+        return CreativeArtifact(
+            provider_artifact_id=str(result.get("provider_artifact_id") or task.provider_task_id or ""),
+            source_url=str(result.get("source_url") or ""),
+            path=path,
+            sha256=sha256,
+            mime_type=str(getattr(asset, "mime_type", None) or result.get("mime_type") or ""),
+            byte_size=int(getattr(asset, "size", None) or result.get("byte_size") or 0),
+            width=getattr(asset, "width", None) if asset is not None else result.get("width"),
+            height=getattr(asset, "height", None) if asset is not None else result.get("height"),
+            duration=getattr(asset, "duration", None) if asset is not None else result.get("duration"),
+            asset_id=str(getattr(asset, "asset_id", None) or result.get("asset_id") or "") or None,
+        )
+
+    def verify(self, *, live: bool = False) -> dict[str, Any]:
+        ready, reason = self.live_ready()
+        configured = bool(self.client.credential.present)
+        image_status = "VERIFIED" if IMAGE_CONTRACT_VERIFIED and ready else ("CONFIGURED" if configured else "BLOCKED")
+        if configured and not ready:
+            image_status = "BLOCKED"
+        if not IMAGE_CONTRACT_VERIFIED:
+            image_status = "UNVERIFIED"
+        payload = {
+            "LECHUANG_API_CONFIGURED": "PASS" if configured else "BLOCKED",
+            "LECHUANG_API_REACHABLE": "UNVERIFIED" if not live else ("PASS" if ready else "BLOCKED"),
+            "LECHUANG_IMAGE_CAPABILITY_VERIFIED": "VERIFIED" if IMAGE_CONTRACT_VERIFIED else "NOT_VERIFIED",
+            "LECHUANG_VIDEO_CAPABILITY_VERIFIED": "VERIFIED" if VIDEO_CONTRACT_VERIFIED else "NOT_VERIFIED",
+            "status": "VERIFIED" if ready and IMAGE_CONTRACT_VERIFIED else image_status,
+            "reason": reason,
+            "live": bool(live),
+        }
+        if live and ready:
+            try:
+                task = self.generate_image({
+                    "prompt": "Meiti live doctor probe: one empty room, no text, no watermark.",
+                    "model": "gpt-image-2",
+                    "image_size": "512",
+                    "aspect_ratio": "1:1",
+                    "n": 1,
+                    "idempotency_key": "lechuang-doctor-live-image",
+                })
+                artifact = self.download_artifact(task)
+                payload["LECHUANG_API_REACHABLE"] = "PASS"
+                payload["live_image"] = {
+                    "status": task.status,
+                    "provider_task_id": task.provider_task_id,
+                    "sha256": artifact.sha256,
+                    "path": artifact.path,
+                }
+            except Exception as exc:
+                payload["LECHUANG_API_REACHABLE"] = "ERROR"
+                payload["status"] = "ERROR"
+                payload["reason"] = str(exc)
+        return payload
 
     def capability_status(self, name: str) -> dict[str, Any]:
         ready, reason = self.live_ready()

@@ -343,9 +343,10 @@ def cmd_credentials_put(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_creative_doctor(_args: argparse.Namespace) -> int:
+def cmd_creative_doctor(args: argparse.Namespace) -> int:
     from scripts.creative_doctor import main
-    return main()
+    argv = ["--live"] if getattr(args, "live", False) else []
+    return main(argv)
 
 
 def cmd_creative_generate_image(args: argparse.Namespace) -> int:
@@ -623,6 +624,12 @@ def cmd_creator_continue(args: argparse.Namespace) -> int:
     prompt = planned["prompt"]
     decision = planned["decision"]
     _print_json({
+        "Today": decision.selected_topic,
+        "Why": decision.reasoning,
+        "Platform": account.platform,
+        "Provider": planned.get("creative_provider") or "lechuang",
+        "Model": planned.get("model") or prompt.recommended_model,
+        "Status": planned.get("job_status") or "SUBMITTED",
         "episode_id": episode.episode_id,
         "episode_no": episode.episode_no,
         "title": episode.title,
@@ -633,6 +640,8 @@ def cmd_creator_continue(args: argparse.Namespace) -> int:
         "reason": decision.reasoning,
         "freshness": planned["freshness"],
         "copy_ready": bool(prompt.copy_ready),
+        "job_id": planned.get("job_id"),
+        "asset_id": planned.get("asset_id"),
     })
     return 0
 
@@ -767,6 +776,113 @@ def cmd_account_override(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_creative_providers(_args: argparse.Namespace) -> int:
+    from creative.providers.resolver import GenerationProviderResolver
+
+    resolver = GenerationProviderResolver(allow_mock=False)
+    names = sorted(resolver.providers)
+    lechuang = resolver.providers.get("lechuang")
+    _print_json({
+        "creative_providers": names,
+        "primary": "lechuang",
+        "social_providers_excluded": True,
+        "capabilities": getattr(lechuang, "capabilities", lambda: {})(),
+        "ready": getattr(lechuang, "live_ready", lambda: (False, ""))(),
+    })
+    return 0
+
+
+def cmd_creative_models(_args: argparse.Namespace) -> int:
+    from creative.providers.lechuang.capabilities import load_models
+    from creative.providers.resolver import load_capability_registry
+
+    models = load_models()
+    registry = [
+        {
+            "provider": item.provider,
+            "model": item.model,
+            "verified": item.verified,
+            "capabilities": list(item.capabilities),
+        }
+        for item in load_capability_registry()
+    ]
+    _print_json({"contract": models.get("contract") or {}, "registry": registry})
+    return 0
+
+
+def cmd_creative_generate(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print(json.dumps({"status": "FAIL", "reason": "no platform account"}))
+        return 1
+    planned = runtime.produce_today(
+        account_id=account.account_id,
+        request=args.prompt or "今天做什么",
+        intent="GENERATE",
+        kind=args.kind,
+    )
+    _print_json({
+        "status": planned.get("job_status") or planned.get("status"),
+        "provider": planned.get("creative_provider") or "lechuang",
+        "model": planned.get("model"),
+        "job_id": planned.get("job_id"),
+        "episode_id": planned["episode"].episode_id if planned.get("episode") else None,
+        "prompt_id": planned["prompt"].prompt_id if planned.get("prompt") else None,
+        "asset_id": planned.get("asset_id"),
+    })
+    return 0 if planned.get("job_status") in {"SUBMITTED", "SUCCEEDED", "COPY_READY"} else 1
+
+
+def cmd_creative_status(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    run = runtime.store.get_production_run_by_job(args.job_id)
+    if run is None:
+        print(json.dumps({"status": "UNKNOWN", "reason": "job not found"}))
+        return 1
+    snapshot = dict(run.creative_result_snapshot or {})
+    _print_json({
+        "job_id": run.creative_job_id,
+        "status": snapshot.get("status") or run.status,
+        "provider": run.creative_provider,
+        "model": run.creative_model,
+        "asset_id": run.asset_id,
+        "episode_id": run.episode_id,
+        "error": snapshot.get("error_message") or snapshot.get("error"),
+    })
+    return 0
+
+
+def cmd_creative_retry(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    run = runtime.store.get_production_run_by_job(args.job_id)
+    if run is None or not run.prompt_id or not run.episode_id:
+        print(json.dumps({"status": "FAIL", "reason": "job not found"}))
+        return 1
+    snapshot = dict(run.creative_result_snapshot or {})
+    if snapshot.get("retryable") is False:
+        print(json.dumps({"status": "FAILED", "reason": "not retryable", "error": snapshot.get("error_message")}))
+        return 1
+    prompt = runtime.store.get_prompt(run.prompt_id)
+    result = runtime.submit_generation(account_id=run.account_id, episode_id=run.episode_id, prompt=prompt, request=run.request)
+    _print_json(result)
+    return 0 if result.get("job_status") in {"SUBMITTED", "SUCCEEDED"} else 1
+
+
+def cmd_creative_cancel(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    run = runtime.store.get_production_run_by_job(args.job_id)
+    if run is None:
+        print(json.dumps({"status": "FAIL", "reason": "job not found"}))
+        return 1
+    from content.models import ProductionRun, utcnow
+    snapshot = dict(run.creative_result_snapshot or {})
+    snapshot["status"] = "CANCELLED"
+    runtime.store.save_production_run(ProductionRun(**{**run.__dict__, "status": "CLOSED", "creative_result_snapshot": snapshot, "updated_at": utcnow()}))
+    _print_json({"job_id": args.job_id, "status": "CANCELLED"})
+    return 0
+
+
 def cmd_creative_continue(args: argparse.Namespace) -> int:
     from content.models import AssetFreshnessError, IsolationError
     from creative.errors import SchemaNotReady
@@ -811,8 +927,16 @@ def cmd_creative_continue(args: argparse.Namespace) -> int:
                 "episode_id": context.episode_id,
             })
             continue
+        generated = None
+        if episode is not None:
+            generated = runtime.submit_generation(
+                account_id=context.account_id,
+                episode_id=episode.episode_id,
+                prompt=prompt,
+                request=text,
+            )
         results.append({
-            "status": "COPY_READY",
+            "status": (generated or {}).get("job_status") or "COPY_READY",
             "prompt_id": prompt.prompt_id,
             "kind": prompt.kind,
             "platform": prompt.platform,
@@ -826,7 +950,10 @@ def cmd_creative_continue(args: argparse.Namespace) -> int:
             "recommended_model": prompt.recommended_model,
             "isolation": prepared["isolation"],
             "character_qa": prepared["character_qa"],
-            "execution": "manual-lechuang",
+            "execution": "lechuang" if prompt.kind == "IMAGE" else "manual-lechuang",
+            "job_id": (generated or {}).get("job_id"),
+            "provider": (generated or {}).get("creative_provider") or "lechuang",
+            "asset_id": (generated or {}).get("asset_id"),
         })
     _print_json(results[0] if len(results) == 1 else results)
     return overall
@@ -864,7 +991,7 @@ def cmd_creative_compile_prompt(args: argparse.Namespace) -> int:
         "account_id": prompt.account_id,
         "platform": prompt.platform,
         "episode_id": prompt.episode_id,
-        "execution": "manual-lechuang",
+        "execution": "lechuang" if prompt.kind == "IMAGE" else "manual-lechuang",
     })
     return 0
 
@@ -1174,7 +1301,26 @@ def main() -> int:
     put.set_defaults(func=cmd_credentials_put)
     creative = sub.add_parser("creative")
     creative_sub = creative.add_subparsers(dest="command", required=True)
-    creative_sub.add_parser("doctor").set_defaults(func=cmd_creative_doctor)
+    doctor_cmd = creative_sub.add_parser("doctor")
+    doctor_cmd.add_argument("--live", action="store_true")
+    doctor_cmd.set_defaults(func=cmd_creative_doctor)
+    creative_sub.add_parser("providers").set_defaults(func=cmd_creative_providers)
+    creative_sub.add_parser("models").set_defaults(func=cmd_creative_models)
+    gen = creative_sub.add_parser("generate")
+    gen.add_argument("--prompt")
+    gen.add_argument("--account-id")
+    gen.add_argument("--platform")
+    gen.add_argument("--kind", choices=("IMAGE", "VIDEO", "IMAGE_TO_VIDEO"), default="IMAGE")
+    gen.set_defaults(func=cmd_creative_generate)
+    status_cmd = creative_sub.add_parser("status")
+    status_cmd.add_argument("job_id")
+    status_cmd.set_defaults(func=cmd_creative_status)
+    retry_cmd = creative_sub.add_parser("retry")
+    retry_cmd.add_argument("job_id")
+    retry_cmd.set_defaults(func=cmd_creative_retry)
+    cancel_cmd = creative_sub.add_parser("cancel")
+    cancel_cmd.add_argument("job_id")
+    cancel_cmd.set_defaults(func=cmd_creative_cancel)
     gen_image = creative_sub.add_parser("generate-image")
     gen_image.add_argument("--prompt", required=True)
     gen_image.add_argument("--model", default="gpt-image-2")
@@ -1447,6 +1593,9 @@ def main() -> int:
     production_ready = production_sub.add_parser("readiness")
     production_ready.add_argument("--account-id")
     production_ready.set_defaults(func=cmd_production_readiness)
+    production_status = production_sub.add_parser("status")
+    production_status.add_argument("--account-id")
+    production_status.set_defaults(func=cmd_production_readiness)
     dash = sub.add_parser("dashboard")
     dash.add_argument("--account-id")
     dash.add_argument("--platform")

@@ -21,6 +21,8 @@ ONE canonical writer per responsibility.
 | Series | `ContentSeries` | `ContinuityStore.save_series` | Calendar |
 | Episode | `Episode` | `ContinuityStore.save_episode` | Operating state |
 | Prompt | `PromptPackage` | `PromptCompiler.compile` | Memory writeback |
+| Creative provider | `CreativeProvider` | `resolve_creative_provider` | Doctor / capability matrix |
+| Creative job | `ProductionRun.creative_job_id` | `ContinuityRuntime.submit_generation` | CreativeTask / dashboard |
 | Asset | `MediaAsset` | `PlatformAssetService.import_asset` | Memory writeback |
 | Asset lineage | `AssetLineage` | `ContinuityStore.allocate_attempt` | None |
 | Production | `ProductionRun` | `ContinuityRuntime` | Dashboard |

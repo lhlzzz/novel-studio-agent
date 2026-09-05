@@ -1320,6 +1320,11 @@ class ProductionRun:
     content_decision_id: str | None = None
     status: str = "CREATED"
     request: str = ""
+    creative_provider: str = ""
+    creative_job_id: str = ""
+    creative_model: str = ""
+    creative_request_snapshot: dict[str, Any] = field(default_factory=dict)
+    creative_result_snapshot: dict[str, Any] = field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
 

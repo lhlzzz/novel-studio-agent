@@ -308,6 +308,7 @@ class LechuangClient:
         if mime != MIME_BY_SUFFIX.get(suffix, mime):
             mime = MIME_BY_SUFFIX.get(suffix, mime)
         request_id = str(body.get("request_id") or body.get("id") or "")
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
         asset = persist_bytes(
             image_bytes,
             asset_type="image",
@@ -330,6 +331,8 @@ class LechuangClient:
             provider="xiaole-lechuang",
             provider_task_id=request_id,
             model=str(body.get("model") or model),
+            generation_mode="PROVIDER_API",
+            tool="lechuang",
             metadata={
                 "provider": "xiaole",
                 "service": "lechuang",
@@ -338,11 +341,13 @@ class LechuangClient:
                 "image_size": image_size,
                 "aspect_ratio": aspect_ratio,
                 "source": "xiaole-lechuang",
+                "source_url": "",
                 "created_at": utcnow(),
                 "account_id": (payload or {}).get("account_id"),
                 "series_id": (payload or {}).get("series_id"),
                 "episode_id": (payload or {}).get("episode_id"),
                 "creative_context_id": (payload or {}).get("creative_context_id"),
+                "usage": usage,
             },
         )
         qa = TechnicalQA().inspect_image(asset)
@@ -352,10 +357,19 @@ class LechuangClient:
         result = {
             "asset": asset,
             "asset_id": asset.asset_id,
-            "credits_actual": 1.0,
+            "path": asset.path,
+            "sha256": asset.sha256,
+            "mime_type": mime,
+            "byte_size": asset.size,
+            "width": width,
+            "height": height,
+            "provider_artifact_id": request_id,
+            "source_url": "",
             "request_id": request_id,
             "qa": qa,
             "model": str(body.get("model") or model),
+            "cost_status": "UNKNOWN",
+            "cost_snapshot": {"status": "UNKNOWN", "usage": usage, "resolution": image_size, "aspect_ratio": aspect_ratio},
         }
         if key:
             result["idempotency_key"] = key
