@@ -4,6 +4,21 @@ Meiti is an AI Creator Operating System. Meiti owns Intelligence, Strategy,
 Content, Media, Creative Workflow, Memory, Analytics, Commerce, Distribution,
 Governance, and native Social account management.
 
+Meiti V5.0 Creator OS:
+
+```text
+Meiti = Creator Identity + Creator Brain + Creator Strategy + Creator State
+      + Content + Continuity + Production + Memory + Learning
+```
+
+Canonical identity is `CreatorAccount` (`PlatformAccount` table). `SocialAccount`
+and `PlatformConnection` are optional external connections. Missing OAuth must
+never make CreatorAccount or CORE_CONTENT_PRODUCTION NOT_READY.
+
+Creator Brain owners: `CreatorStrategyService`, `ContentNoveltyService`,
+`ProductionMemoryService`, `CreatorBrain` in `content/planner.py`. ContinuityRuntime
+is the unique composition root. PromptCompiler never depends on OAuth.
+
 `Platform is an integration. Platform is not an agent. Platform is not a workspace.`
 
 `CreativeWorkflow is the canonical media production abstraction.`

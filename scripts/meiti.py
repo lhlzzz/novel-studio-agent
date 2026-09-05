@@ -602,6 +602,68 @@ def cmd_content_calendar(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_creator_today(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    _print_json(runtime.today(account_id=account.account_id, request=args.request or "今天做什么"))
+    return 0
+
+
+def cmd_creator_continue(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    planned = runtime.continue_yesterday(account_id=account.account_id, request=args.request or "继续昨天")
+    episode = planned["episode"]
+    prompt = planned["prompt"]
+    decision = planned["decision"]
+    _print_json({
+        "episode_id": episode.episode_id,
+        "episode_no": episode.episode_no,
+        "title": episode.title,
+        "prompt_id": prompt.prompt_id,
+        "decision_id": decision.decision_id,
+        "topic": decision.selected_topic,
+        "scene": decision.selected_scene,
+        "reason": decision.reasoning,
+        "freshness": planned["freshness"],
+        "copy_ready": bool(prompt.copy_ready),
+    })
+    return 0
+
+
+def cmd_creator_idea(args: argparse.Namespace) -> int:
+    runtime = _continuity()
+    account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
+    if account is None:
+        print("no platform account")
+        return 1
+    request = " ".join(getattr(args, "text", None) or ()) or args.request or ""
+    if not request:
+        print("idea is required")
+        return 1
+    planned = runtime.produce_today(account_id=account.account_id, request=request, intent="GENERATE")
+    decision = planned["decision"]
+    episode = planned.get("episode")
+    prompt = planned.get("prompt")
+    _print_json({
+        "idea_decision": decision.idea_decision,
+        "topic": decision.selected_topic,
+        "scene": decision.selected_scene,
+        "angle": decision.selected_angle,
+        "reason": decision.reasoning,
+        "episode_id": episode.episode_id if episode else None,
+        "prompt_id": prompt.prompt_id if prompt else None,
+        "copy_ready": bool(prompt.copy_ready) if prompt else False,
+    })
+    return 0 if decision.idea_decision != "REJECT" else 1
+
+
 def cmd_content_tomorrow(args: argparse.Namespace) -> int:
     runtime = _continuity()
     account = runtime.store.get_account(args.account_id) if args.account_id else runtime.store.active_account(platform=args.platform)
@@ -1247,6 +1309,24 @@ def main() -> int:
     account_override.add_argument("--reason", required=True)
     account_override.add_argument("--changed-by", default="operator")
     account_override.set_defaults(func=cmd_account_override)
+    creator = sub.add_parser("creator")
+    creator_sub = creator.add_subparsers(dest="command", required=True)
+    creator_today = creator_sub.add_parser("today")
+    creator_today.add_argument("--account-id")
+    creator_today.add_argument("--platform")
+    creator_today.add_argument("--request", default="今天做什么")
+    creator_today.set_defaults(func=cmd_creator_today)
+    creator_continue = creator_sub.add_parser("continue")
+    creator_continue.add_argument("--account-id")
+    creator_continue.add_argument("--platform")
+    creator_continue.add_argument("--request", default="继续昨天")
+    creator_continue.set_defaults(func=cmd_creator_continue)
+    creator_idea = creator_sub.add_parser("idea")
+    creator_idea.add_argument("text", nargs="*")
+    creator_idea.add_argument("--account-id")
+    creator_idea.add_argument("--platform")
+    creator_idea.add_argument("--request")
+    creator_idea.set_defaults(func=cmd_creator_idea)
     content = sub.add_parser("content")
     content_sub = content.add_subparsers(dest="command", required=True)
     calendar_cmd = content_sub.add_parser("calendar")

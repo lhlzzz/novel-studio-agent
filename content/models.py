@@ -17,6 +17,88 @@ ACCOUNT_PLATFORMS = (
 )
 
 PLATFORM_ACCOUNT_STATES = ("DRAFT", "ACTIVE", "PAUSED", "DISABLED", "ARCHIVED")
+CONNECTION_STATES = (
+    "NOT_CONNECTED",
+    "CONNECTING",
+    "CONNECTED",
+    "VERIFIED",
+    "DEGRADED",
+    "EXPIRED",
+    "REVOKED",
+    "BLOCKED",
+)
+STRATEGY_STATES = ("DRAFT", "ACTIVE", "SUPERSEDED", "ARCHIVED")
+MEMORY_LIFECYCLE_STATES = ("CURRENT", "HISTORICAL", "SUPERSEDED", "EXPIRED", "PENDING", "VERIFIED")
+NOVELTY_VERDICTS = ("NOVEL", "LOW_NOVELTY", "SATURATED", "DUPLICATE")
+SATURATION_ACTIONS = ("avoid", "reduce", "continue", "increase")
+IDEA_DECISIONS = ("ACCEPT", "MODIFY", "REJECT")
+KNOWLEDGE_CERTAINTY = ("UNKNOWN", "KNOWN", "INFERRED", "RECOMMENDED", "CONFIRMED")
+KNOWLEDGE_PRECEDENCE = (
+    "USER_OVERRIDE",
+    "USER_DEFINED",
+    "VERIFIED_LEARNING",
+    "SYSTEM_DERIVED",
+    "SYSTEM_RECOMMENDED",
+    "DEFAULT",
+    "UNKNOWN",
+)
+CREATOR_KNOWLEDGE_FIELDS = (
+    "account_subject",
+    "account_type",
+    "account_category",
+    "description",
+    "positioning",
+    "core_promise",
+    "differentiation",
+    "target_audience",
+    "audience_profile",
+    "audience_age_range",
+    "audience_gender",
+    "audience_location",
+    "audience_interests",
+    "content_pillars",
+    "content_direction",
+    "growth_objective",
+    "commercial_direction",
+    "persona",
+    "personality",
+    "values",
+    "tone",
+    "speaking_style",
+    "behavior",
+    "emotional_style",
+    "audience_relationship",
+    "taboos",
+    "visual_identity",
+    "visual_language",
+    "color_system",
+    "photography_style",
+    "camera_style",
+    "lighting_style",
+    "composition_style",
+    "clothing_style",
+    "environment_style",
+    "retouching_policy",
+    "visual_forbidden_rules",
+    "title_rules",
+    "hook_rules",
+    "caption_rules",
+    "body_rules",
+    "image_rules",
+    "video_rules",
+    "hashtag_rules",
+    "topic_rules",
+    "forbidden_topics",
+    "forbidden_phrases",
+    "posting_frequency",
+    "preferred_publish_windows",
+    "content_mix",
+    "content_ratio",
+    "series_strategy",
+    "continuity_strategy",
+    "platform_strategy",
+    "quality_bar",
+)
 CHARACTER_STATES = ("DRAFT", "ACTIVE", "ARCHIVED")
 WORLD_STATES = ("DRAFT", "ACTIVE", "ARCHIVED")
 SERIES_STATES = ("DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "ARCHIVED")
@@ -113,10 +195,86 @@ PROMPT_KINDS = ("IMAGE", "VIDEO", "IMAGE_TO_VIDEO")
 PRIMARY_ASSET_ROLES = frozenset({"GENERATED_PRIMARY", "PUBLISHED"})
 FRESHNESS_INTENTS = frozenset({"CREATE", "CONTINUE", "GENERATE", "REMIX"})
 REUSE_INTENTS = frozenset({"REUSE", "REPUBLISH", "REMIX_WITHOUT_NEW_MEDIA"})
+KNOWLEDGE_SOURCES = (
+    "USER_OVERRIDE",
+    "USER_DEFINED",
+    "VERIFIED_LEARNING",
+    "SYSTEM_DERIVED",
+    "SYSTEM_RECOMMENDED",
+    "DEFAULT",
+    "LEARNED",
+    "TEMPORARY",
+    "UNKNOWN",
+)
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class KnowledgeField:
+    value: Any = None
+    source: str = "UNKNOWN"
+    reason: str = ""
+    changed_by: str = ""
+    changed_at: str | None = None
+    certainty: str = ""
+
+    def __post_init__(self) -> None:
+        if self.source not in KNOWLEDGE_SOURCES:
+            raise ValueError(f"invalid knowledge source: {self.source}")
+        if self.certainty and self.certainty not in KNOWLEDGE_CERTAINTY:
+            raise ValueError(f"invalid knowledge certainty: {self.certainty}")
+        if not self.certainty:
+            if self.source in {"UNKNOWN"} or self.value in (None, "", (), []):
+                object.__setattr__(self, "certainty", "UNKNOWN")
+            elif self.source in {"USER_OVERRIDE", "USER_DEFINED"}:
+                object.__setattr__(self, "certainty", "CONFIRMED")
+            elif self.source in {"VERIFIED_LEARNING", "LEARNED"}:
+                object.__setattr__(self, "certainty", "KNOWN")
+            elif self.source in {"SYSTEM_DERIVED"}:
+                object.__setattr__(self, "certainty", "INFERRED")
+            elif self.source in {"SYSTEM_RECOMMENDED", "DEFAULT"}:
+                object.__setattr__(self, "certainty", "RECOMMENDED")
+            else:
+                object.__setattr__(self, "certainty", "UNKNOWN")
+        if not self.changed_at and self.value not in (None, "", (), []):
+            object.__setattr__(self, "changed_at", utcnow())
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "value": self.value,
+            "source": self.source,
+            "reason": self.reason,
+            "changed_by": self.changed_by,
+            "changed_at": self.changed_at,
+            "certainty": self.certainty,
+        }
+
+    def known(self) -> bool:
+        return self.certainty not in {"UNKNOWN", "RECOMMENDED"} and self.value not in (None, "", (), [])
+
+
+def knowledge_field(
+    value: Any = None,
+    *,
+    source: str = "UNKNOWN",
+    reason: str = "",
+    changed_by: str = "",
+    changed_at: str | None = None,
+    certainty: str = "",
+) -> KnowledgeField:
+    if isinstance(value, KnowledgeField):
+        return value
+    return KnowledgeField(
+        value=value,
+        source=source,
+        reason=reason,
+        changed_by=changed_by,
+        changed_at=changed_at,
+        certainty=certainty,
+    )
 
 
 @dataclass(frozen=True)
@@ -180,18 +338,43 @@ class ContentPackage:
     primary_assets: tuple[str, ...] = ()
     published_assets: tuple[str, ...] = ()
     prompt_id: str | None = None
+    content_decision_id: str | None = None
 
     @property
     def id(self) -> str:
         return self.package_id
 
 
+def _coerce_knowledge(value: Any, *, default_source: str = "UNKNOWN") -> "KnowledgeField":
+    if isinstance(value, KnowledgeField):
+        return value
+    if isinstance(value, dict) and ("source" in value or "value" in value):
+        return KnowledgeField(
+            value=value.get("value"),
+            source=value.get("source") or default_source,
+            reason=value.get("reason") or "",
+            changed_by=value.get("changed_by") or "",
+            changed_at=value.get("changed_at"),
+            certainty=value.get("certainty") or "",
+        )
+    if value in (None, "", (), []):
+        return KnowledgeField(value=None, source="UNKNOWN")
+    return KnowledgeField(value=value, source=default_source)
+
+
 @dataclass(frozen=True)
 class PlatformAccount:
+    """Canonical Creator Identity. Table remains platform_accounts for FK stability.
+
+    credential_ref / social_account_id / external_account_id are optional connection
+    pointers. They never decide whether this Creator is READY.
+    """
+
     account_id: str
     platform: str
     external_account_id: str = ""
     display_name: str = ""
+    account_name: str = ""
     status: str = "DRAFT"
     credential_ref: str = ""
     character_id: str | None = None
@@ -202,12 +385,78 @@ class PlatformAccount:
     activated_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    account_subject: KnowledgeField = field(default_factory=KnowledgeField)
+    account_type: KnowledgeField = field(default_factory=KnowledgeField)
+    account_category: KnowledgeField = field(default_factory=KnowledgeField)
+    description: KnowledgeField = field(default_factory=KnowledgeField)
+    positioning: KnowledgeField = field(default_factory=KnowledgeField)
+    core_promise: KnowledgeField = field(default_factory=KnowledgeField)
+    differentiation: KnowledgeField = field(default_factory=KnowledgeField)
+    target_audience: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_profile: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_age_range: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_gender: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_location: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_interests: KnowledgeField = field(default_factory=KnowledgeField)
+    content_pillars: KnowledgeField = field(default_factory=KnowledgeField)
+    content_direction: KnowledgeField = field(default_factory=KnowledgeField)
+    growth_objective: KnowledgeField = field(default_factory=KnowledgeField)
+    commercial_direction: KnowledgeField = field(default_factory=KnowledgeField)
+    persona: KnowledgeField = field(default_factory=KnowledgeField)
+    personality: KnowledgeField = field(default_factory=KnowledgeField)
+    values: KnowledgeField = field(default_factory=KnowledgeField)
+    tone: KnowledgeField = field(default_factory=KnowledgeField)
+    speaking_style: KnowledgeField = field(default_factory=KnowledgeField)
+    behavior: KnowledgeField = field(default_factory=KnowledgeField)
+    emotional_style: KnowledgeField = field(default_factory=KnowledgeField)
+    audience_relationship: KnowledgeField = field(default_factory=KnowledgeField)
+    taboos: KnowledgeField = field(default_factory=KnowledgeField)
+    visual_identity: KnowledgeField = field(default_factory=KnowledgeField)
+    visual_language: KnowledgeField = field(default_factory=KnowledgeField)
+    color_system: KnowledgeField = field(default_factory=KnowledgeField)
+    photography_style: KnowledgeField = field(default_factory=KnowledgeField)
+    camera_style: KnowledgeField = field(default_factory=KnowledgeField)
+    lighting_style: KnowledgeField = field(default_factory=KnowledgeField)
+    composition_style: KnowledgeField = field(default_factory=KnowledgeField)
+    clothing_style: KnowledgeField = field(default_factory=KnowledgeField)
+    environment_style: KnowledgeField = field(default_factory=KnowledgeField)
+    retouching_policy: KnowledgeField = field(default_factory=KnowledgeField)
+    visual_forbidden_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    title_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    hook_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    caption_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    body_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    image_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    video_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    hashtag_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    topic_rules: KnowledgeField = field(default_factory=KnowledgeField)
+    forbidden_topics: KnowledgeField = field(default_factory=KnowledgeField)
+    forbidden_phrases: KnowledgeField = field(default_factory=KnowledgeField)
+    posting_frequency: KnowledgeField = field(default_factory=KnowledgeField)
+    preferred_publish_windows: KnowledgeField = field(default_factory=KnowledgeField)
+    content_mix: KnowledgeField = field(default_factory=KnowledgeField)
+    content_ratio: KnowledgeField = field(default_factory=KnowledgeField)
+    series_strategy: KnowledgeField = field(default_factory=KnowledgeField)
+    continuity_strategy: KnowledgeField = field(default_factory=KnowledgeField)
+    platform_strategy: KnowledgeField = field(default_factory=KnowledgeField)
+    quality_bar: KnowledgeField = field(default_factory=KnowledgeField)
+    current_strategy_id: str | None = None
+    current_strategy_version: int | None = None
+    current_episode_id: str | None = None
+    current_phase: str = ""
+    current_objective: str = ""
+    current_next_action: str = ""
+    identity_payload: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.platform not in ACCOUNT_PLATFORMS:
             raise ValueError(f"unsupported platform: {self.platform}")
         if self.status not in PLATFORM_ACCOUNT_STATES:
             raise ValueError(f"invalid platform account status: {self.status}")
+        if not self.account_name:
+            object.__setattr__(self, "account_name", self.display_name or self.account_id)
+        for name in CREATOR_KNOWLEDGE_FIELDS:
+            object.__setattr__(self, name, _coerce_knowledge(getattr(self, name)))
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
         if not self.updated_at:
@@ -217,8 +466,42 @@ class PlatformAccount:
     def id(self) -> str:
         return self.account_id
 
+    @property
+    def current_character_id(self) -> str | None:
+        return self.character_id
+
+    @property
+    def current_world_id(self) -> str | None:
+        return self.world_id
+
+    @property
+    def current_series_id(self) -> str | None:
+        return self.series_id
+
     def label(self) -> str:
-        return f"{self.platform} / {self.display_name or self.account_id}"
+        return f"{self.platform} / {self.display_name or self.account_name or self.account_id}"
+
+    def field_value(self, name: str) -> Any:
+        field_obj = getattr(self, name)
+        if isinstance(field_obj, KnowledgeField):
+            return field_obj.value
+        return field_obj
+
+    def known(self, name: str) -> bool:
+        field_obj = getattr(self, name)
+        if isinstance(field_obj, KnowledgeField):
+            return field_obj.source not in {"UNKNOWN", "DEFAULT"} and field_obj.value not in (None, "", (), [])
+        return bool(field_obj)
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = dict(self.__dict__)
+        for name in CREATOR_KNOWLEDGE_FIELDS:
+            value = getattr(self, name)
+            payload[name] = value.as_dict() if isinstance(value, KnowledgeField) else value
+        return payload
+
+
+CreatorAccount = PlatformAccount
 
 
 @dataclass(frozen=True)
@@ -329,6 +612,13 @@ class ContentSeries:
     start_date: str | None = None
     end_date: str | None = None
     current_episode_no: int = 0
+    series_goal: str = ""
+    series_theme: str = ""
+    series_arc: str = ""
+    current_phase: str = ""
+    phase_goal: str = ""
+    next_direction_candidates: tuple[str, ...] = ()
+    completion_condition: str = ""
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -369,6 +659,13 @@ class Episode:
     character_revision: int | None = None
     world_revision: int | None = None
     production_run_id: str | None = None
+    strategy_id: str | None = None
+    strategy_version: int | None = None
+    creator_state_id: str | None = None
+    content_decision_id: str | None = None
+    creator_state_snapshot: dict[str, Any] = field(default_factory=dict)
+    novelty_snapshot: dict[str, Any] = field(default_factory=dict)
+    portfolio_snapshot: dict[str, Any] = field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -779,6 +1076,10 @@ class PromptPackage:
     recommended_ratio: str = ""
     recommended_duration: str = ""
     learning_basis: tuple[str, ...] = ()
+    strategy_basis: tuple[str, ...] = ()
+    decision_basis: tuple[str, ...] = ()
+    novelty_basis: tuple[str, ...] = ()
+    continuity_basis: tuple[str, ...] = ()
     prompt_patterns: tuple[str, ...] = ()
     lechuang_parameters: dict[str, Any] = field(default_factory=dict)
     prompt_hash: str = ""
@@ -908,16 +1209,6 @@ ANALYTICS_ORIGINS = ("MANUAL", "PROVIDER")
 ANALYTICS_VERIFICATION_STATES = ("VERIFIED", "UNVERIFIED")
 PROJECTION_STATES = ("COMMITTED", "PROJECTION_PENDING", "PROJECTED")
 EVIDENCE_SOURCES = ("code", "operator", "lechuang", "analytics", "memory", "audit")
-KNOWLEDGE_SOURCES = (
-    "USER_DEFINED",
-    "SYSTEM_DERIVED",
-    "SYSTEM_RECOMMENDED",
-    "LEARNED",
-    "TEMPORARY",
-    "UNKNOWN",
-    "USER_OVERRIDE",
-    "DEFAULT",
-)
 TASK_TYPES = (
     "ACCOUNT_SETUP",
     "ACCOUNT_MAINTENANCE",
@@ -998,7 +1289,15 @@ CALENDAR_STATES = (
     "CANCELLED",
 )
 READINESS_STATES = ("READY", "PARTIAL", "BLOCKED", "NOT_CONFIGURED", "PASS", "FAIL", "NOT_VERIFIED", "BLOCKED_EXTERNAL", "NEEDS_MORE_EVIDENCE", "UNKNOWN")
-LEARNING_EVIDENCE_STATES = ("VERIFIED", "NOT_ENOUGH_EVIDENCE", "NOT_VERIFIED")
+LEARNING_EVIDENCE_STATES = (
+    "OBSERVATION",
+    "PENDING",
+    "VERIFIED",
+    "REJECTED",
+    "SUPERSEDED",
+    "NOT_ENOUGH_EVIDENCE",
+    "NOT_VERIFIED",
+)
 CANONICAL_ANALYTICS_STORE = "content.models.AnalyticsRecord"
 
 
@@ -1016,6 +1315,9 @@ class ProductionRun:
     analytics_id: str | None = None
     learning_id: str | None = None
     task_id: str | None = None
+    strategy_id: str | None = None
+    creator_state_id: str | None = None
+    content_decision_id: str | None = None
     status: str = "CREATED"
     request: str = ""
     created_at: str | None = None
@@ -1096,9 +1398,9 @@ class AnalyticsRecord:
 
     def __post_init__(self) -> None:
         origin = (self.origin or self.source or "MANUAL").upper()
-        if origin in {"PROVIDER", "VERIFIED_PROVIDER"}:
+        if origin in {"PROVIDER", "VERIFIED_PROVIDER", "PROVIDER_OBSERVED"}:
             origin = "PROVIDER"
-        elif origin in {"MANUAL", "OPERATOR"} or (self.source or "").lower() == "manual":
+        elif origin in {"MANUAL", "OPERATOR", "MANUAL_OBSERVATION"} or (self.source or "").lower() == "manual":
             origin = "MANUAL"
         if origin not in ANALYTICS_ORIGINS:
             origin = "MANUAL"
@@ -1147,6 +1449,7 @@ class LearningRecord:
     reason: str = ""
     source_episode_ids: tuple[str, ...] = ()
     evidence_status: str = "NOT_VERIFIED"
+    learning_status: str = ""
     failure_type: str = ""
     diagnosis: str = ""
     root_cause: str = ""
@@ -1157,6 +1460,8 @@ class LearningRecord:
     def __post_init__(self) -> None:
         if self.evidence_status not in LEARNING_EVIDENCE_STATES:
             raise ValueError(f"invalid learning evidence status: {self.evidence_status}")
+        if not self.learning_status:
+            object.__setattr__(self, "learning_status", self.evidence_status)
         if not self.created_at:
             object.__setattr__(self, "created_at", utcnow())
 
@@ -1297,37 +1602,9 @@ class LifecycleTransition:
 
 
 @dataclass(frozen=True)
-class KnowledgeField:
-    value: Any = None
-    source: str = "UNKNOWN"
-    reason: str = ""
-    changed_by: str = ""
-    changed_at: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.source not in KNOWLEDGE_SOURCES:
-            raise ValueError(f"invalid knowledge source: {self.source}")
-        if not self.changed_at and self.value not in (None, "", (), []):
-            object.__setattr__(self, "changed_at", utcnow())
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "value": self.value,
-            "source": self.source,
-            "reason": self.reason,
-            "changed_by": self.changed_by,
-            "changed_at": self.changed_at,
-        }
-
-
-def knowledge_field(value: Any = None, *, source: str = "UNKNOWN", reason: str = "", changed_by: str = "", changed_at: str | None = None) -> KnowledgeField:
-    if isinstance(value, KnowledgeField):
-        return value
-    return KnowledgeField(value=value, source=source, reason=reason, changed_by=changed_by, changed_at=changed_at)
-
-
-@dataclass(frozen=True)
 class AccountProfile:
+    """Projection of CreatorAccount identity/profile fields. Not an identity owner."""
+
     account_id: str
     platform: str
     display_name: str = ""
@@ -1380,6 +1657,35 @@ class AccountProfile:
         if isinstance(field_obj, KnowledgeField):
             return field_obj.value
         return field_obj
+
+    @classmethod
+    def from_account(cls, account: "PlatformAccount") -> "AccountProfile":
+        objective = account.growth_objective
+        if not account.known("growth_objective") and account.current_objective:
+            objective = knowledge_field(account.current_objective, source="SYSTEM_DERIVED")
+        return cls(
+            account_id=account.account_id,
+            platform=account.platform,
+            display_name=account.display_name,
+            external_account_id=account.external_account_id,
+            status=account.status,
+            character_id=account.character_id,
+            world_id=account.world_id,
+            series_id=account.series_id,
+            account_objective=objective,
+            target_audience=account.target_audience,
+            positioning=account.positioning,
+            content_pillars=account.content_pillars,
+            brand_voice=account.tone if account.known("tone") else account.persona,
+            visual_style=account.visual_identity if account.known("visual_identity") else account.visual_language,
+            content_frequency=account.posting_frequency,
+            preferred_publish_windows=account.preferred_publish_windows,
+            content_formats=account.content_mix,
+            operating_rules=account.platform_strategy,
+            forbidden_rules=account.forbidden_topics if account.known("forbidden_topics") else account.taboos,
+            created_at=account.created_at,
+            updated_at=account.updated_at,
+        )
 
 
 @dataclass(frozen=True)
@@ -1564,3 +1870,421 @@ class ProductionReadinessRecord:
     @property
     def id(self) -> str:
         return self.record_id
+
+
+@dataclass(frozen=True)
+class PlatformConnection:
+    """External platform connection. Never Creator Identity."""
+
+    connection_id: str
+    creator_account_id: str
+    platform: str
+    provider: str = ""
+    external_account_id: str = ""
+    connection_status: str = "NOT_CONNECTED"
+    credential_ref: str = ""
+    social_account_id: str | None = None
+    verified_capabilities: tuple[str, ...] = ()
+    last_verified_at: str | None = None
+    blocked_reason: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.platform not in ACCOUNT_PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if self.connection_status not in CONNECTION_STATES:
+            raise ValueError(f"invalid connection status: {self.connection_status}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.connection_id
+
+    @property
+    def connected(self) -> bool:
+        return self.connection_status in {"CONNECTED", "VERIFIED", "DEGRADED"}
+
+
+@dataclass(frozen=True)
+class CreatorStrategy:
+    strategy_id: str
+    creator_account_id: str
+    version: int = 1
+    objective: str = ""
+    positioning: str = ""
+    audience: str = ""
+    content_pillars: tuple[str, ...] = ()
+    pillar_weights: dict[str, float] = field(default_factory=dict)
+    content_mix: dict[str, float] = field(default_factory=dict)
+    growth_goal: str = ""
+    commercial_goal: str = ""
+    experimentation_policy: str = ""
+    continuity_policy: str = ""
+    visual_policy: str = ""
+    copy_policy: str = ""
+    quality_bar: str = ""
+    status: str = "ACTIVE"
+    reason: str = ""
+    effective_from: str | None = None
+    effective_until: str | None = None
+    supersedes_strategy_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in STRATEGY_STATES:
+            raise ValueError(f"invalid strategy status: {self.status}")
+        if not self.effective_from:
+            object.__setattr__(self, "effective_from", utcnow())
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+        if not self.pillar_weights and self.content_pillars:
+            share = round(1.0 / len(self.content_pillars), 4)
+            object.__setattr__(self, "pillar_weights", {name: share for name in self.content_pillars})
+        if not self.content_mix and self.pillar_weights:
+            mix = dict(self.pillar_weights)
+            if "experiment" not in {key.lower() for key in mix}:
+                mix["Experiment"] = 0.1
+            object.__setattr__(self, "content_mix", mix)
+
+    @property
+    def id(self) -> str:
+        return self.strategy_id
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "strategy_id": self.strategy_id,
+            "version": self.version,
+            "objective": self.objective,
+            "positioning": self.positioning,
+            "audience": self.audience,
+            "content_pillars": list(self.content_pillars),
+            "pillar_weights": dict(self.pillar_weights),
+            "content_mix": dict(self.content_mix),
+            "growth_goal": self.growth_goal,
+            "commercial_goal": self.commercial_goal,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class StrategyRevision:
+    revision_id: str
+    strategy_id: str
+    creator_account_id: str
+    version: int
+    why_changed: str
+    old_strategy: dict[str, Any] = field(default_factory=dict)
+    new_strategy: dict[str, Any] = field(default_factory=dict)
+    changed_by: str = "operator"
+    supersedes_strategy_id: str | None = None
+    effective_from: str | None = None
+    changed_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.changed_at:
+            object.__setattr__(self, "changed_at", utcnow())
+        if not self.effective_from:
+            object.__setattr__(self, "effective_from", self.changed_at)
+
+    @property
+    def id(self) -> str:
+        return self.revision_id
+
+
+@dataclass(frozen=True)
+class CreatorState:
+    state_id: str
+    creator_account_id: str
+    current_phase: str = ""
+    current_objective: str = ""
+    current_focus: str = ""
+    current_series: str | None = None
+    current_episode: str | None = None
+    current_content_mix: dict[str, Any] = field(default_factory=dict)
+    recent_topics: tuple[str, ...] = ()
+    saturated_topics: tuple[str, ...] = ()
+    underused_topics: tuple[str, ...] = ()
+    current_strategy_id: str | None = None
+    current_strategy_version: int | None = None
+    current_character_version: int | None = None
+    current_world_version: int | None = None
+    last_production_at: str | None = None
+    last_production_episode_id: str | None = None
+    next_recommended_direction: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.state_id
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "state_id": self.state_id,
+            "creator_account_id": self.creator_account_id,
+            "current_phase": self.current_phase,
+            "current_objective": self.current_objective,
+            "current_focus": self.current_focus,
+            "current_series": self.current_series,
+            "current_episode": self.current_episode,
+            "current_content_mix": dict(self.current_content_mix),
+            "recent_topics": list(self.recent_topics),
+            "saturated_topics": list(self.saturated_topics),
+            "underused_topics": list(self.underused_topics),
+            "current_strategy_id": self.current_strategy_id,
+            "current_strategy_version": self.current_strategy_version,
+            "next_recommended_direction": self.next_recommended_direction,
+            "last_production_episode_id": self.last_production_episode_id,
+        }
+
+
+@dataclass(frozen=True)
+class ContentDecision:
+    decision_id: str
+    account_id: str
+    platform: str
+    strategy_id: str | None = None
+    creator_state_id: str | None = None
+    previous_episode_id: str | None = None
+    selected_pillar: str = ""
+    selected_topic: str = ""
+    selected_angle: str = ""
+    selected_format: str = "image"
+    selected_scene: str = ""
+    selected_emotion: str = ""
+    selected_hook: str = ""
+    idea_decision: str = "ACCEPT"
+    reasoning: str = ""
+    constraints: tuple[str, ...] = ()
+    avoids: tuple[str, ...] = ()
+    expected_effect: str = ""
+    confidence: float = 0.5
+    user_request: str = ""
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.idea_decision not in IDEA_DECISIONS:
+            raise ValueError(f"invalid idea decision: {self.idea_decision}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    @property
+    def id(self) -> str:
+        return self.decision_id
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "decision_id": self.decision_id,
+            "account_id": self.account_id,
+            "platform": self.platform,
+            "strategy_id": self.strategy_id,
+            "selected_pillar": self.selected_pillar,
+            "selected_topic": self.selected_topic,
+            "selected_angle": self.selected_angle,
+            "selected_format": self.selected_format,
+            "selected_scene": self.selected_scene,
+            "idea_decision": self.idea_decision,
+            "reasoning": self.reasoning,
+            "avoids": list(self.avoids),
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ContentPortfolioItem:
+    item_id: str
+    account_id: str
+    pillar: str = ""
+    topic: str = ""
+    format: str = "image"
+    scene: str = ""
+    emotion: str = ""
+    angle: str = ""
+    hook: str = ""
+    series_id: str | None = None
+    episode_id: str | None = None
+    date: str = ""
+    status: str = "IDEA"
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.date:
+            object.__setattr__(self, "date", (self.created_at or utcnow())[:10])
+
+    @property
+    def id(self) -> str:
+        return self.item_id
+
+
+@dataclass(frozen=True)
+class ContentPortfolio:
+    account_id: str
+    platform: str
+    items: tuple[ContentPortfolioItem, ...] = ()
+    last_7_days: dict[str, int] = field(default_factory=dict)
+    last_14_days: dict[str, int] = field(default_factory=dict)
+    last_30_days: dict[str, int] = field(default_factory=dict)
+    mix: dict[str, float] = field(default_factory=dict)
+    created_at: str | None = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "account_id": self.account_id,
+            "platform": self.platform,
+            "last_7_days": dict(self.last_7_days),
+            "last_14_days": dict(self.last_14_days),
+            "last_30_days": dict(self.last_30_days),
+            "mix": dict(self.mix),
+            "count": len(self.items),
+        }
+
+
+@dataclass(frozen=True)
+class ContentSaturation:
+    account_id: str
+    topic: str = ""
+    scene: str = ""
+    angle: str = ""
+    emotion: str = ""
+    hook: str = ""
+    topic_count: int = 0
+    scene_count: int = 0
+    angle_count: int = 0
+    emotion_count: int = 0
+    hook_count: int = 0
+    action: str = "continue"
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in SATURATION_ACTIONS:
+            raise ValueError(f"invalid saturation action: {self.action}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "topic": self.topic,
+            "scene": self.scene,
+            "angle": self.angle,
+            "emotion": self.emotion,
+            "action": self.action,
+            "topic_count": self.topic_count,
+            "scene_count": self.scene_count,
+            "angle_count": self.angle_count,
+        }
+
+
+@dataclass(frozen=True)
+class ContentNovelty:
+    account_id: str
+    verdict: str = "NOVEL"
+    topic: str = "NOVEL"
+    angle: str = "NOVEL"
+    scene: str = "NOVEL"
+    visual: str = "NOVEL"
+    emotional: str = "NOVEL"
+    narrative: str = "NOVEL"
+    format: str = "NOVEL"
+    hook: str = "NOVEL"
+    reason: str = ""
+    created_at: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("verdict", "topic", "angle", "scene", "visual", "emotional", "narrative", "format", "hook"):
+            value = getattr(self, name)
+            if value not in NOVELTY_VERDICTS:
+                raise ValueError(f"invalid novelty verdict for {name}: {value}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "topic": self.topic,
+            "angle": self.angle,
+            "scene": self.scene,
+            "visual": self.visual,
+            "emotional": self.emotional,
+            "narrative": self.narrative,
+            "format": self.format,
+            "hook": self.hook,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ProductionMemory:
+    memory_id: str
+    account_id: str
+    platform: str
+    status: str = "CURRENT"
+    strategy_id: str | None = None
+    creator_state_id: str | None = None
+    episode_id: str | None = None
+    decision_id: str | None = None
+    prompt_id: str | None = None
+    character_id: str | None = None
+    world_id: str | None = None
+    series_id: str | None = None
+    scene: str = ""
+    asset_id: str | None = None
+    visual_direction: str = ""
+    copy_direction: str = ""
+    what_was_produced: str = ""
+    what_changed: str = ""
+    what_worked: str = ""
+    what_failed: str = ""
+    what_should_continue: str = ""
+    what_should_not_repeat: str = ""
+    next_direction: str = ""
+    confidence: float = 0.5
+    importance: float = 0.5
+    effective_from: str | None = None
+    expires_at: str | None = None
+    supersedes_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in MEMORY_LIFECYCLE_STATES:
+            raise ValueError(f"invalid production memory status: {self.status}")
+        if not self.created_at:
+            object.__setattr__(self, "created_at", utcnow())
+        if not self.updated_at:
+            object.__setattr__(self, "updated_at", self.created_at)
+        if not self.effective_from:
+            object.__setattr__(self, "effective_from", self.created_at)
+
+    @property
+    def id(self) -> str:
+        return self.memory_id
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "memory_id": self.memory_id,
+            "account_id": self.account_id,
+            "episode_id": self.episode_id,
+            "decision_id": self.decision_id,
+            "status": self.status,
+            "what_was_produced": self.what_was_produced,
+            "what_changed": self.what_changed,
+            "what_should_continue": self.what_should_continue,
+            "what_should_not_repeat": self.what_should_not_repeat,
+            "next_direction": self.next_direction,
+        }

@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from content.models import (
     ACCOUNT_PLATFORMS,
+    CREATOR_KNOWLEDGE_FIELDS,
     AccountOperatingState,
     AccountProfile,
     AccountWorld,
@@ -24,13 +25,17 @@ from content.models import (
     AssetReferenceSnapshot,
     CharacterRevision,
     ContentCalendarEntry,
+    ContentDecision,
     ContentPackage,
     ContentPackageAsset,
+    ContentPortfolioItem,
     ContentRevision,
     ContentSeries,
     ContinuityMemory,
     CreativeContext,
     CreativeExecutionReceipt,
+    CreatorState,
+    CreatorStrategy,
     CreatorTask,
     Episode,
     EpisodeConflict,
@@ -44,13 +49,16 @@ from content.models import (
     PerformanceFeedback,
     PlatformAccount,
     PlatformAssetPool,
+    PlatformConnection,
     PlatformCreativeDNA,
     PlatformLearningProfile,
     ProductionEvidence,
+    ProductionMemory,
     ProductionReadinessRecord,
     ProductionRun,
     PromptPackage,
     PromptPattern,
+    StrategyRevision,
     VirtualCharacter,
     WorldRevision,
     utcnow,
@@ -76,9 +84,6 @@ class _JoinedSession:
         return False
 
     def commit(self) -> None:
-        return None
-
-    def close(self) -> None:
         return None
 
     def close(self) -> None:
@@ -126,6 +131,13 @@ CONTINUITY_TABLE_NAMES = (
     "creator_tasks",
     "content_calendar",
     "production_readiness_records",
+    "platform_connections",
+    "creator_strategies",
+    "strategy_revisions",
+    "creator_states",
+    "content_decisions",
+    "content_portfolio_items",
+    "production_memories",
 )
 
 
@@ -272,6 +284,7 @@ class ContinuityStore:
             "platform": account.platform,
             "external_account_id": account.external_account_id,
             "display_name": account.display_name,
+            "account_name": account.account_name or account.display_name,
             "status": account.status,
             "credential_ref": account.credential_ref,
             "character_id": account.character_id,
@@ -279,6 +292,13 @@ class ContinuityStore:
             "series_id": account.series_id,
             "default_style_profile_id": account.default_style_profile_id,
             "social_account_id": account.social_account_id,
+            "current_strategy_id": account.current_strategy_id,
+            "current_strategy_version": account.current_strategy_version,
+            "current_episode_id": account.current_episode_id,
+            "current_phase": account.current_phase,
+            "current_objective": account.current_objective,
+            "current_next_action": account.current_next_action,
+            "identity_payload": _identity_payload(account),
             "activated_at": _parse_dt(account.activated_at),
             "updated_at": _now(),
         })
@@ -487,6 +507,13 @@ class ContinuityStore:
             "start_date": series.start_date,
             "end_date": series.end_date,
             "current_episode_no": series.current_episode_no,
+            "series_goal": series.series_goal,
+            "series_theme": series.series_theme,
+            "series_arc": series.series_arc,
+            "current_phase": series.current_phase,
+            "phase_goal": series.phase_goal,
+            "next_direction_candidates": list(series.next_direction_candidates),
+            "completion_condition": series.completion_condition,
             "updated_at": _now(),
         })
         return series
@@ -549,6 +576,13 @@ class ContinuityStore:
             "character_revision": episode.character_revision,
             "world_revision": episode.world_revision,
             "production_run_id": episode.production_run_id,
+            "strategy_id": episode.strategy_id,
+            "strategy_version": episode.strategy_version,
+            "creator_state_id": episode.creator_state_id,
+            "content_decision_id": episode.content_decision_id,
+            "creator_state_snapshot": dict(episode.creator_state_snapshot),
+            "novelty_snapshot": dict(episode.novelty_snapshot),
+            "portfolio_snapshot": dict(episode.portfolio_snapshot),
             "updated_at": _now(),
         })
         return episode
@@ -830,6 +864,13 @@ class ContinuityStore:
                 character_revision=episode.character_revision,
                 world_revision=episode.world_revision,
                 production_run_id=episode.production_run_id,
+                strategy_id=episode.strategy_id,
+                strategy_version=episode.strategy_version,
+                creator_state_id=episode.creator_state_id,
+                content_decision_id=episode.content_decision_id,
+                creator_state_snapshot=dict(episode.creator_state_snapshot),
+                novelty_snapshot=dict(episode.novelty_snapshot),
+                portfolio_snapshot=dict(episode.portfolio_snapshot),
                 created_at=now,
                 updated_at=now,
             ))
@@ -882,6 +923,7 @@ class ContinuityStore:
             "primary_assets": list(package.primary_assets),
             "published_assets": list(package.published_assets),
             "prompt_id": package.prompt_id,
+            "content_decision_id": package.content_decision_id,
             "updated_at": _now(),
         })
         return package
@@ -1025,6 +1067,10 @@ class ContinuityStore:
             "recommended_ratio": package.recommended_ratio,
             "recommended_duration": package.recommended_duration,
             "learning_basis": list(package.learning_basis),
+            "strategy_basis": list(package.strategy_basis),
+            "decision_basis": list(package.decision_basis),
+            "novelty_basis": list(package.novelty_basis),
+            "continuity_basis": list(package.continuity_basis),
             "prompt_patterns": list(package.prompt_patterns),
             "lechuang_parameters": dict(package.lechuang_parameters),
             "prompt_hash": package.prompt_hash,
@@ -1274,6 +1320,9 @@ class ContinuityStore:
             "analytics_id": run.analytics_id,
             "learning_id": run.learning_id,
             "task_id": run.task_id,
+            "strategy_id": run.strategy_id,
+            "creator_state_id": run.creator_state_id,
+            "content_decision_id": run.content_decision_id,
             "status": run.status,
             "request": run.request,
             "updated_at": _now(),
@@ -1458,6 +1507,7 @@ class ContinuityStore:
             "reason": record.reason,
             "source_episode_ids": list(record.source_episode_ids),
             "evidence_status": record.evidence_status,
+            "learning_status": record.learning_status or record.evidence_status,
             "failure_type": record.failure_type,
             "diagnosis": record.diagnosis,
             "root_cause": record.root_cause,
@@ -1811,6 +1861,308 @@ class ContinuityStore:
         })
         return record
 
+    def save_platform_connection(self, connection: PlatformConnection) -> PlatformConnection:
+        from scripts.db.models import PlatformConnectionRecord
+
+        self._require_account(connection.creator_account_id)
+        self._upsert(PlatformConnectionRecord, "connection_id", connection.connection_id, {
+            "creator_account_id": connection.creator_account_id,
+            "platform": connection.platform,
+            "provider": connection.provider,
+            "external_account_id": connection.external_account_id,
+            "connection_status": connection.connection_status,
+            "credential_ref": connection.credential_ref,
+            "social_account_id": connection.social_account_id,
+            "verified_capabilities": list(connection.verified_capabilities),
+            "last_verified_at": _parse_dt(connection.last_verified_at),
+            "blocked_reason": connection.blocked_reason,
+            "updated_at": _now(),
+        })
+        return connection
+
+    def get_platform_connection(self, creator_account_id: str, platform: str) -> PlatformConnection | None:
+        from scripts.db.models import PlatformConnectionRecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(PlatformConnectionRecord).where(
+                    PlatformConnectionRecord.creator_account_id == creator_account_id,
+                    PlatformConnectionRecord.platform == platform,
+                )
+            ).scalar_one_or_none()
+            return _connection_from_row(row) if row else None
+
+    def list_platform_connections(self, creator_account_id: str) -> list[PlatformConnection]:
+        from scripts.db.models import PlatformConnectionRecord
+
+        with self._session() as session:
+            rows = session.execute(
+                select(PlatformConnectionRecord).where(PlatformConnectionRecord.creator_account_id == creator_account_id)
+            ).scalars()
+            return [_connection_from_row(row) for row in rows]
+
+    def save_strategy(self, strategy: CreatorStrategy) -> CreatorStrategy:
+        from scripts.db.models import CreatorStrategyRecord
+
+        self._require_account(strategy.creator_account_id)
+        self._upsert(CreatorStrategyRecord, "strategy_id", strategy.strategy_id, {
+            "creator_account_id": strategy.creator_account_id,
+            "version": int(strategy.version or 1),
+            "objective": strategy.objective,
+            "positioning": strategy.positioning,
+            "audience": strategy.audience,
+            "content_pillars": list(strategy.content_pillars),
+            "pillar_weights": dict(strategy.pillar_weights),
+            "content_mix": dict(strategy.content_mix),
+            "growth_goal": strategy.growth_goal,
+            "commercial_goal": strategy.commercial_goal,
+            "experimentation_policy": strategy.experimentation_policy,
+            "continuity_policy": strategy.continuity_policy,
+            "visual_policy": strategy.visual_policy,
+            "copy_policy": strategy.copy_policy,
+            "quality_bar": strategy.quality_bar,
+            "status": strategy.status,
+            "reason": strategy.reason,
+            "effective_from": strategy.effective_from,
+            "effective_until": strategy.effective_until,
+            "supersedes_strategy_id": strategy.supersedes_strategy_id,
+            "updated_at": _now(),
+        })
+        return strategy
+
+    def get_strategy(self, strategy_id: str) -> CreatorStrategy | None:
+        from scripts.db.models import CreatorStrategyRecord
+
+        with self._session() as session:
+            row = session.get(CreatorStrategyRecord, strategy_id)
+            return _strategy_from_row(row) if row else None
+
+    def current_strategy(self, creator_account_id: str) -> CreatorStrategy | None:
+        from scripts.db.models import CreatorStrategyRecord
+
+        with self._session() as session:
+            rows = list(session.execute(
+                select(CreatorStrategyRecord).where(
+                    CreatorStrategyRecord.creator_account_id == creator_account_id,
+                    CreatorStrategyRecord.status == "ACTIVE",
+                )
+            ).scalars())
+        if not rows:
+            return None
+        rows.sort(key=lambda item: int(item.version or 1), reverse=True)
+        return _strategy_from_row(rows[0])
+
+    def list_strategies(self, creator_account_id: str) -> list[CreatorStrategy]:
+        from scripts.db.models import CreatorStrategyRecord
+
+        with self._session() as session:
+            rows = list(session.execute(
+                select(CreatorStrategyRecord).where(CreatorStrategyRecord.creator_account_id == creator_account_id)
+            ).scalars())
+        items = [_strategy_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.version)
+        return items
+
+    def save_strategy_revision(self, revision: StrategyRevision) -> StrategyRevision:
+        from scripts.db.models import StrategyRevisionRecord
+
+        self._require_account(revision.creator_account_id)
+        self._upsert(StrategyRevisionRecord, "revision_id", revision.revision_id, {
+            "strategy_id": revision.strategy_id,
+            "creator_account_id": revision.creator_account_id,
+            "version": int(revision.version or 1),
+            "why_changed": revision.why_changed,
+            "old_strategy": dict(revision.old_strategy),
+            "new_strategy": dict(revision.new_strategy),
+            "changed_by": revision.changed_by,
+            "supersedes_strategy_id": revision.supersedes_strategy_id,
+            "effective_from": revision.effective_from,
+            "changed_at": _parse_dt(revision.changed_at) or _now(),
+        })
+        return revision
+
+    def list_strategy_revisions(self, creator_account_id: str) -> list[StrategyRevision]:
+        from scripts.db.models import StrategyRevisionRecord
+
+        with self._session() as session:
+            rows = list(session.execute(
+                select(StrategyRevisionRecord).where(StrategyRevisionRecord.creator_account_id == creator_account_id)
+            ).scalars())
+        items = [_strategy_revision_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.version)
+        return items
+
+    def save_creator_state(self, state: CreatorState) -> CreatorState:
+        from scripts.db.models import CreatorStateRecord
+
+        self._require_account(state.creator_account_id)
+        existing = self.get_creator_state(state.creator_account_id)
+        state_id = existing.state_id if existing else state.state_id
+        self._upsert(CreatorStateRecord, "state_id", state_id, {
+            "creator_account_id": state.creator_account_id,
+            "current_phase": state.current_phase,
+            "current_objective": state.current_objective,
+            "current_focus": state.current_focus,
+            "current_series": state.current_series,
+            "current_episode": state.current_episode,
+            "current_content_mix": dict(state.current_content_mix),
+            "recent_topics": list(state.recent_topics),
+            "saturated_topics": list(state.saturated_topics),
+            "underused_topics": list(state.underused_topics),
+            "current_strategy_id": state.current_strategy_id,
+            "current_strategy_version": state.current_strategy_version,
+            "current_character_version": state.current_character_version,
+            "current_world_version": state.current_world_version,
+            "last_production_at": state.last_production_at,
+            "last_production_episode_id": state.last_production_episode_id,
+            "next_recommended_direction": state.next_recommended_direction,
+            "updated_at": _now(),
+        })
+        return CreatorState(**{**state.__dict__, "state_id": state_id})
+
+    def get_creator_state(self, creator_account_id: str) -> CreatorState | None:
+        from scripts.db.models import CreatorStateRecord
+
+        with self._session() as session:
+            row = session.execute(
+                select(CreatorStateRecord).where(CreatorStateRecord.creator_account_id == creator_account_id)
+            ).scalar_one_or_none()
+            return _creator_state_from_row(row) if row else None
+
+    def save_content_decision(self, decision: ContentDecision) -> ContentDecision:
+        from scripts.db.models import ContentDecisionRecord
+
+        self._require_account(decision.account_id)
+        self._upsert(ContentDecisionRecord, "decision_id", decision.decision_id, {
+            "account_id": decision.account_id,
+            "platform": decision.platform,
+            "strategy_id": decision.strategy_id,
+            "creator_state_id": decision.creator_state_id,
+            "previous_episode_id": decision.previous_episode_id,
+            "selected_pillar": decision.selected_pillar,
+            "selected_topic": decision.selected_topic,
+            "selected_angle": decision.selected_angle,
+            "selected_format": decision.selected_format,
+            "selected_scene": decision.selected_scene,
+            "selected_emotion": decision.selected_emotion,
+            "selected_hook": decision.selected_hook,
+            "idea_decision": decision.idea_decision,
+            "reasoning": decision.reasoning,
+            "constraints": list(decision.constraints),
+            "avoids": list(decision.avoids),
+            "expected_effect": decision.expected_effect,
+            "confidence": decision.confidence,
+            "user_request": decision.user_request,
+        })
+        return decision
+
+    def get_content_decision(self, decision_id: str) -> ContentDecision | None:
+        from scripts.db.models import ContentDecisionRecord
+
+        with self._session() as session:
+            row = session.get(ContentDecisionRecord, decision_id)
+            return _decision_from_row(row) if row else None
+
+    def list_content_decisions(self, account_id: str) -> list[ContentDecision]:
+        from scripts.db.models import ContentDecisionRecord
+
+        with self._session() as session:
+            rows = list(session.execute(
+                select(ContentDecisionRecord).where(ContentDecisionRecord.account_id == account_id)
+            ).scalars())
+        items = [_decision_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.created_at or "")
+        return items
+
+    def save_portfolio_item(self, item: ContentPortfolioItem) -> ContentPortfolioItem:
+        from scripts.db.models import ContentPortfolioItemRecord
+
+        self._require_account(item.account_id)
+        self._upsert(ContentPortfolioItemRecord, "item_id", item.item_id, {
+            "account_id": item.account_id,
+            "pillar": item.pillar,
+            "topic": item.topic,
+            "format": item.format,
+            "scene": item.scene,
+            "emotion": item.emotion,
+            "angle": item.angle,
+            "hook": item.hook,
+            "series_id": item.series_id,
+            "episode_id": item.episode_id,
+            "date": item.date,
+            "status": item.status,
+        })
+        return item
+
+    def list_portfolio_items(self, account_id: str) -> list[ContentPortfolioItem]:
+        from scripts.db.models import ContentPortfolioItemRecord
+
+        with self._session() as session:
+            rows = list(session.execute(
+                select(ContentPortfolioItemRecord).where(ContentPortfolioItemRecord.account_id == account_id)
+            ).scalars())
+        items = [_portfolio_item_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.date or item.created_at or "")
+        return items
+
+    def save_production_memory(self, memory: ProductionMemory) -> ProductionMemory:
+        from scripts.db.models import ProductionMemoryRecord
+
+        self._require_account(memory.account_id)
+        self._upsert(ProductionMemoryRecord, "memory_id", memory.memory_id, {
+            "account_id": memory.account_id,
+            "platform": memory.platform,
+            "status": memory.status,
+            "strategy_id": memory.strategy_id,
+            "creator_state_id": memory.creator_state_id,
+            "episode_id": memory.episode_id,
+            "decision_id": memory.decision_id,
+            "prompt_id": memory.prompt_id,
+            "character_id": memory.character_id,
+            "world_id": memory.world_id,
+            "series_id": memory.series_id,
+            "scene": memory.scene,
+            "asset_id": memory.asset_id,
+            "visual_direction": memory.visual_direction,
+            "copy_direction": memory.copy_direction,
+            "what_was_produced": memory.what_was_produced,
+            "what_changed": memory.what_changed,
+            "what_worked": memory.what_worked,
+            "what_failed": memory.what_failed,
+            "what_should_continue": memory.what_should_continue,
+            "what_should_not_repeat": memory.what_should_not_repeat,
+            "next_direction": memory.next_direction,
+            "confidence": memory.confidence,
+            "importance": memory.importance,
+            "effective_from": memory.effective_from,
+            "expires_at": memory.expires_at,
+            "supersedes_id": memory.supersedes_id,
+            "updated_at": _now(),
+        })
+        return memory
+
+    def list_production_memories(self, account_id: str, *, status: str | None = None) -> list[ProductionMemory]:
+        from scripts.db.models import ProductionMemoryRecord
+
+        with self._session() as session:
+            stmt = select(ProductionMemoryRecord).where(ProductionMemoryRecord.account_id == account_id)
+            if status:
+                stmt = stmt.where(ProductionMemoryRecord.status == status)
+            rows = list(session.execute(stmt).scalars())
+        items = [_production_memory_from_row(row) for row in rows]
+        items.sort(key=lambda item: item.created_at or "")
+        return items
+
+    def latest_production_memory(self, account_id: str) -> ProductionMemory | None:
+        current = self.list_production_memories(account_id, status="CURRENT")
+        if current:
+            return current[-1]
+        rows = [
+            item for item in self.list_production_memories(account_id)
+            if item.status in {"CURRENT", "VERIFIED", "HISTORICAL"}
+        ]
+        return rows[-1] if rows else None
+
     def _require_account(self, account_id: str) -> PlatformAccount:
         account = self.get_account(account_id)
         if account is None:
@@ -1818,12 +2170,27 @@ class ContinuityStore:
         return account
 
 
+def _identity_payload(account: PlatformAccount) -> dict[str, Any]:
+    payload = dict(account.identity_payload or {})
+    for name in CREATOR_KNOWLEDGE_FIELDS:
+        value = getattr(account, name)
+        payload[name] = value.as_dict() if isinstance(value, KnowledgeField) else value
+    return payload
+
+
 def _account_from_row(row) -> PlatformAccount:
+    payload = _json(getattr(row, "identity_payload", None), {})
+    fields = {
+        name: _knowledge_from_payload(payload.get(name))
+        for name in CREATOR_KNOWLEDGE_FIELDS
+        if name in payload
+    }
     return PlatformAccount(
         account_id=row.account_id,
         platform=row.platform,
         external_account_id=row.external_account_id or "",
         display_name=row.display_name or "",
+        account_name=getattr(row, "account_name", "") or "",
         status=row.status,
         credential_ref=row.credential_ref or "",
         character_id=row.character_id,
@@ -1831,9 +2198,17 @@ def _account_from_row(row) -> PlatformAccount:
         series_id=getattr(row, "series_id", None),
         default_style_profile_id=row.default_style_profile_id,
         social_account_id=row.social_account_id,
+        current_strategy_id=getattr(row, "current_strategy_id", None),
+        current_strategy_version=getattr(row, "current_strategy_version", None),
+        current_episode_id=getattr(row, "current_episode_id", None),
+        current_phase=getattr(row, "current_phase", "") or "",
+        current_objective=getattr(row, "current_objective", "") or "",
+        current_next_action=getattr(row, "current_next_action", "") or "",
+        identity_payload=payload,
         activated_at=_iso(row.activated_at),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        **fields,
     )
 
 
@@ -1923,6 +2298,13 @@ def _series_from_row(row) -> ContentSeries:
         start_date=row.start_date,
         end_date=row.end_date,
         current_episode_no=int(row.current_episode_no or 0),
+        series_goal=getattr(row, "series_goal", "") or "",
+        series_theme=getattr(row, "series_theme", "") or "",
+        series_arc=getattr(row, "series_arc", "") or "",
+        current_phase=getattr(row, "current_phase", "") or "",
+        phase_goal=getattr(row, "phase_goal", "") or "",
+        next_direction_candidates=_tuple(getattr(row, "next_direction_candidates", None)),
+        completion_condition=getattr(row, "completion_condition", "") or "",
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )
@@ -1952,6 +2334,13 @@ def _episode_from_row(row) -> Episode:
         character_revision=getattr(row, "character_revision", None),
         world_revision=getattr(row, "world_revision", None),
         production_run_id=getattr(row, "production_run_id", None),
+        strategy_id=getattr(row, "strategy_id", None),
+        strategy_version=getattr(row, "strategy_version", None),
+        creator_state_id=getattr(row, "creator_state_id", None),
+        content_decision_id=getattr(row, "content_decision_id", None),
+        creator_state_snapshot=_json(getattr(row, "creator_state_snapshot", None), {}),
+        novelty_snapshot=_json(getattr(row, "novelty_snapshot", None), {}),
+        portfolio_snapshot=_json(getattr(row, "portfolio_snapshot", None), {}),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
     )
@@ -2161,6 +2550,10 @@ def _prompt_from_row(row) -> PromptPackage:
         recommended_ratio=row.recommended_ratio or "",
         recommended_duration=row.recommended_duration or "",
         learning_basis=_tuple(row.learning_basis),
+        strategy_basis=_tuple(getattr(row, "strategy_basis", None)),
+        decision_basis=_tuple(getattr(row, "decision_basis", None)),
+        novelty_basis=_tuple(getattr(row, "novelty_basis", None)),
+        continuity_basis=_tuple(getattr(row, "continuity_basis", None)),
         prompt_patterns=_tuple(row.prompt_patterns),
         lechuang_parameters=_json(row.lechuang_parameters, {}),
         prompt_hash=getattr(row, "prompt_hash", "") or "",
@@ -2253,6 +2646,7 @@ def _content_package_from_row(row) -> ContentPackage:
         primary_assets=_tuple(getattr(row, "primary_assets", None)),
         published_assets=_tuple(getattr(row, "published_assets", None)),
         prompt_id=getattr(row, "prompt_id", None),
+        content_decision_id=getattr(row, "content_decision_id", None),
     )
 
 
@@ -2270,6 +2664,9 @@ def _production_run_from_row(row) -> ProductionRun:
         analytics_id=row.analytics_id,
         learning_id=row.learning_id,
         task_id=getattr(row, "task_id", None),
+        strategy_id=getattr(row, "strategy_id", None),
+        creator_state_id=getattr(row, "creator_state_id", None),
+        content_decision_id=getattr(row, "content_decision_id", None),
         status=row.status or "OPEN",
         request=row.request or "",
         created_at=_iso(row.created_at),
@@ -2350,6 +2747,7 @@ def _learning_record_from_row(row) -> LearningRecord:
         reason=row.reason or "",
         source_episode_ids=_tuple(row.source_episode_ids),
         evidence_status=getattr(row, "evidence_status", None) or "NOT_VERIFIED",
+        learning_status=getattr(row, "learning_status", "") or getattr(row, "evidence_status", None) or "NOT_VERIFIED",
         failure_type=getattr(row, "failure_type", "") or "",
         diagnosis=getattr(row, "diagnosis", "") or "",
         root_cause=getattr(row, "root_cause", "") or "",
@@ -2369,8 +2767,176 @@ def _knowledge_from_payload(value: Any) -> KnowledgeField:
             reason=value.get("reason") or "",
             changed_by=value.get("changed_by") or "",
             changed_at=value.get("changed_at"),
+            certainty=value.get("certainty") or "",
         )
     return KnowledgeField(value=value, source="UNKNOWN")
+
+
+def _connection_from_row(row) -> PlatformConnection:
+    return PlatformConnection(
+        connection_id=row.connection_id,
+        creator_account_id=row.creator_account_id,
+        platform=row.platform,
+        provider=row.provider or "",
+        external_account_id=row.external_account_id or "",
+        connection_status=row.connection_status or "NOT_CONNECTED",
+        credential_ref=row.credential_ref or "",
+        social_account_id=row.social_account_id,
+        verified_capabilities=_tuple(row.verified_capabilities),
+        last_verified_at=_iso(row.last_verified_at),
+        blocked_reason=row.blocked_reason or "",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _strategy_from_row(row) -> CreatorStrategy:
+    return CreatorStrategy(
+        strategy_id=row.strategy_id,
+        creator_account_id=row.creator_account_id,
+        version=int(row.version or 1),
+        objective=row.objective or "",
+        positioning=row.positioning or "",
+        audience=row.audience or "",
+        content_pillars=_tuple(row.content_pillars),
+        pillar_weights=_json(row.pillar_weights, {}),
+        content_mix=_json(row.content_mix, {}),
+        growth_goal=row.growth_goal or "",
+        commercial_goal=row.commercial_goal or "",
+        experimentation_policy=row.experimentation_policy or "",
+        continuity_policy=row.continuity_policy or "",
+        visual_policy=row.visual_policy or "",
+        copy_policy=row.copy_policy or "",
+        quality_bar=row.quality_bar or "",
+        status=row.status or "ACTIVE",
+        reason=row.reason or "",
+        effective_from=row.effective_from,
+        effective_until=row.effective_until,
+        supersedes_strategy_id=row.supersedes_strategy_id,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _strategy_revision_from_row(row) -> StrategyRevision:
+    return StrategyRevision(
+        revision_id=row.revision_id,
+        strategy_id=row.strategy_id,
+        creator_account_id=row.creator_account_id,
+        version=int(row.version or 1),
+        why_changed=row.why_changed or "",
+        old_strategy=_json(row.old_strategy, {}),
+        new_strategy=_json(row.new_strategy, {}),
+        changed_by=row.changed_by or "operator",
+        supersedes_strategy_id=row.supersedes_strategy_id,
+        effective_from=row.effective_from,
+        changed_at=_iso(row.changed_at),
+    )
+
+
+def _creator_state_from_row(row) -> CreatorState:
+    return CreatorState(
+        state_id=row.state_id,
+        creator_account_id=row.creator_account_id,
+        current_phase=row.current_phase or "",
+        current_objective=row.current_objective or "",
+        current_focus=row.current_focus or "",
+        current_series=row.current_series,
+        current_episode=row.current_episode,
+        current_content_mix=_json(row.current_content_mix, {}),
+        recent_topics=_tuple(row.recent_topics),
+        saturated_topics=_tuple(row.saturated_topics),
+        underused_topics=_tuple(row.underused_topics),
+        current_strategy_id=row.current_strategy_id,
+        current_strategy_version=row.current_strategy_version,
+        current_character_version=row.current_character_version,
+        current_world_version=row.current_world_version,
+        last_production_at=row.last_production_at,
+        last_production_episode_id=row.last_production_episode_id,
+        next_recommended_direction=row.next_recommended_direction or "",
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+def _decision_from_row(row) -> ContentDecision:
+    return ContentDecision(
+        decision_id=row.decision_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        strategy_id=row.strategy_id,
+        creator_state_id=row.creator_state_id,
+        previous_episode_id=row.previous_episode_id,
+        selected_pillar=row.selected_pillar or "",
+        selected_topic=row.selected_topic or "",
+        selected_angle=row.selected_angle or "",
+        selected_format=row.selected_format or "image",
+        selected_scene=row.selected_scene or "",
+        selected_emotion=row.selected_emotion or "",
+        selected_hook=row.selected_hook or "",
+        idea_decision=row.idea_decision or "ACCEPT",
+        reasoning=row.reasoning or "",
+        constraints=_tuple(row.constraints),
+        avoids=_tuple(row.avoids),
+        expected_effect=row.expected_effect or "",
+        confidence=float(row.confidence or 0.5),
+        user_request=row.user_request or "",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _portfolio_item_from_row(row) -> ContentPortfolioItem:
+    return ContentPortfolioItem(
+        item_id=row.item_id,
+        account_id=row.account_id,
+        pillar=row.pillar or "",
+        topic=row.topic or "",
+        format=row.format or "image",
+        scene=row.scene or "",
+        emotion=row.emotion or "",
+        angle=row.angle or "",
+        hook=row.hook or "",
+        series_id=row.series_id,
+        episode_id=row.episode_id,
+        date=row.date or "",
+        status=row.status or "IDEA",
+        created_at=_iso(row.created_at),
+    )
+
+
+def _production_memory_from_row(row) -> ProductionMemory:
+    return ProductionMemory(
+        memory_id=row.memory_id,
+        account_id=row.account_id,
+        platform=row.platform,
+        status=row.status or "CURRENT",
+        strategy_id=row.strategy_id,
+        creator_state_id=row.creator_state_id,
+        episode_id=row.episode_id,
+        decision_id=row.decision_id,
+        prompt_id=row.prompt_id,
+        character_id=row.character_id,
+        world_id=row.world_id,
+        series_id=row.series_id,
+        scene=row.scene or "",
+        asset_id=row.asset_id,
+        visual_direction=row.visual_direction or "",
+        copy_direction=row.copy_direction or "",
+        what_was_produced=row.what_was_produced or "",
+        what_changed=row.what_changed or "",
+        what_worked=row.what_worked or "",
+        what_failed=row.what_failed or "",
+        what_should_continue=row.what_should_continue or "",
+        what_should_not_repeat=row.what_should_not_repeat or "",
+        next_direction=row.next_direction or "",
+        confidence=float(row.confidence or 0.5),
+        importance=float(row.importance or 0.5),
+        effective_from=row.effective_from,
+        expires_at=row.expires_at,
+        supersedes_id=row.supersedes_id,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
 
 
 def _account_profile_from_row(row) -> AccountProfile:

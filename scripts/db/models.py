@@ -426,6 +426,7 @@ class ContentPackageRecord(Base):
     primary_assets = Column(JSONType, nullable=False, default=list)
     published_assets = Column(JSONType, nullable=False, default=list)
     prompt_id = Column(String(255))
+    content_decision_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1069,6 +1070,7 @@ class PlatformAccountRecord(Base):
     platform = Column(String(120), nullable=False)
     external_account_id = Column(String(255), nullable=False, default="")
     display_name = Column(Text, nullable=False, default="")
+    account_name = Column(Text, nullable=False, default="")
     status = Column(String(40), nullable=False, default="DRAFT")
     credential_ref = Column(String(255), nullable=False, default="")
     character_id = Column(String(255))
@@ -1076,16 +1078,26 @@ class PlatformAccountRecord(Base):
     series_id = Column(String(255))
     default_style_profile_id = Column(String(255))
     social_account_id = Column(String(255))
+    current_strategy_id = Column(String(255))
+    current_strategy_version = Column(Integer)
+    current_episode_id = Column(String(255))
+    current_phase = Column(Text, nullable=False, default="")
+    current_objective = Column(Text, nullable=False, default="")
+    current_next_action = Column(Text, nullable=False, default="")
+    identity_payload = Column(JSONType, nullable=False, default=dict)
     activated_at = Column(DateTime)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
         CheckConstraint("platform IN ('xiaohongshu','douyin','kuaishou','weixin_video','xianyu')", name="ck_meiti_platform_account_platform"),
-        CheckConstraint("status IN ('DRAFT','ACTIVE','PAUSED','ARCHIVED')", name="ck_meiti_platform_account_status"),
+        CheckConstraint("status IN ('DRAFT','ACTIVE','PAUSED','DISABLED','ARCHIVED')", name="ck_meiti_platform_account_status"),
         Index("idx_meiti_platform_accounts_platform", "platform"),
         Index("idx_meiti_platform_accounts_status", "status"),
     )
+
+
+CreatorAccountRecord = PlatformAccountRecord
 
 
 class VirtualCharacterRecord(Base):
@@ -1183,6 +1195,13 @@ class ContentSeriesRecord(Base):
     start_date = Column(String(40))
     end_date = Column(String(40))
     current_episode_no = Column(Integer, nullable=False, default=0)
+    series_goal = Column(Text, nullable=False, default="")
+    series_theme = Column(Text, nullable=False, default="")
+    series_arc = Column(Text, nullable=False, default="")
+    current_phase = Column(Text, nullable=False, default="")
+    phase_goal = Column(Text, nullable=False, default="")
+    next_direction_candidates = Column(JSONType, nullable=False, default=list)
+    completion_condition = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1216,6 +1235,13 @@ class EpisodeRecord(Base):
     character_revision = Column(Integer)
     world_revision = Column(Integer)
     production_run_id = Column(String(255))
+    strategy_id = Column(String(255))
+    strategy_version = Column(Integer)
+    creator_state_id = Column(String(255))
+    content_decision_id = Column(String(255))
+    creator_state_snapshot = Column(JSONType, nullable=False, default=dict)
+    novelty_snapshot = Column(JSONType, nullable=False, default=dict)
+    portfolio_snapshot = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1568,6 +1594,10 @@ class PromptPackageRecord(Base):
     recommended_ratio = Column(Text, nullable=False, default="")
     recommended_duration = Column(Text, nullable=False, default="")
     learning_basis = Column(JSONType, nullable=False, default=list)
+    strategy_basis = Column(JSONType, nullable=False, default=list)
+    decision_basis = Column(JSONType, nullable=False, default=list)
+    novelty_basis = Column(JSONType, nullable=False, default=list)
+    continuity_basis = Column(JSONType, nullable=False, default=list)
     prompt_patterns = Column(JSONType, nullable=False, default=list)
     lechuang_parameters = Column(JSONType, nullable=False, default=dict)
     prompt_hash = Column(String(64), nullable=False, default="")
@@ -1663,6 +1693,9 @@ class ProductionRunRecord(Base):
     analytics_id = Column(String(255))
     learning_id = Column(String(255))
     task_id = Column(String(255))
+    strategy_id = Column(String(255))
+    creator_state_id = Column(String(255))
+    content_decision_id = Column(String(255))
     status = Column(String(40), nullable=False, default="CREATED")
     request = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1771,6 +1804,7 @@ class LearningRecordRow(Base):
     reason = Column(Text, nullable=False, default="")
     source_episode_ids = Column(JSONType, nullable=False, default=list)
     evidence_status = Column(String(40), nullable=False, default="NOT_VERIFIED")
+    learning_status = Column(String(40), nullable=False, default="")
     failure_type = Column(Text, nullable=False, default="")
     diagnosis = Column(Text, nullable=False, default="")
     root_cause = Column(Text, nullable=False, default="")
@@ -1782,7 +1816,7 @@ class LearningRecordRow(Base):
         Index("idx_meiti_learning_records_account", "account_id"),
         Index("idx_meiti_learning_records_platform", "platform"),
         CheckConstraint(
-            "evidence_status IN ('VERIFIED','NOT_ENOUGH_EVIDENCE','NOT_VERIFIED')",
+            "evidence_status IN ('OBSERVATION','PENDING','VERIFIED','REJECTED','SUPERSEDED','NOT_ENOUGH_EVIDENCE','NOT_VERIFIED')",
             name="ck_meiti_learning_evidence_status",
         ),
     )
@@ -2073,5 +2107,221 @@ class ProductionReadinessRecordRow(Base):
 
     __table_args__ = (
         Index("idx_meiti_production_readiness_account", "account_id"),
+    )
+
+
+class PlatformConnectionRecord(Base):
+    __tablename__ = "platform_connections"
+
+    connection_id = Column(String(255), primary_key=True)
+    creator_account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    provider = Column(String(120), nullable=False, default="")
+    external_account_id = Column(String(255), nullable=False, default="")
+    connection_status = Column(String(40), nullable=False, default="NOT_CONNECTED")
+    credential_ref = Column(String(255), nullable=False, default="")
+    social_account_id = Column(String(255))
+    verified_capabilities = Column(JSONType, nullable=False, default=list)
+    last_verified_at = Column(DateTime)
+    blocked_reason = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("creator_account_id", "platform", name="uq_meiti_platform_connection"),
+        CheckConstraint(
+            "connection_status IN ('NOT_CONNECTED','CONNECTING','CONNECTED','VERIFIED','DEGRADED','EXPIRED','REVOKED','BLOCKED')",
+            name="ck_meiti_platform_connection_status",
+        ),
+        Index("idx_meiti_platform_connections_account", "creator_account_id"),
+        Index("idx_meiti_platform_connections_platform", "platform"),
+    )
+
+
+class CreatorStrategyRecord(Base):
+    __tablename__ = "creator_strategies"
+
+    strategy_id = Column(String(255), primary_key=True)
+    creator_account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    objective = Column(Text, nullable=False, default="")
+    positioning = Column(Text, nullable=False, default="")
+    audience = Column(Text, nullable=False, default="")
+    content_pillars = Column(JSONType, nullable=False, default=list)
+    pillar_weights = Column(JSONType, nullable=False, default=dict)
+    content_mix = Column(JSONType, nullable=False, default=dict)
+    growth_goal = Column(Text, nullable=False, default="")
+    commercial_goal = Column(Text, nullable=False, default="")
+    experimentation_policy = Column(Text, nullable=False, default="")
+    continuity_policy = Column(Text, nullable=False, default="")
+    visual_policy = Column(Text, nullable=False, default="")
+    copy_policy = Column(Text, nullable=False, default="")
+    quality_bar = Column(Text, nullable=False, default="")
+    status = Column(String(40), nullable=False, default="ACTIVE")
+    reason = Column(Text, nullable=False, default="")
+    effective_from = Column(String(80))
+    effective_until = Column(String(80))
+    supersedes_strategy_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("creator_account_id", "version", name="uq_meiti_creator_strategy_version"),
+        CheckConstraint("status IN ('DRAFT','ACTIVE','SUPERSEDED','ARCHIVED')", name="ck_meiti_creator_strategy_status"),
+        Index("idx_meiti_creator_strategies_account", "creator_account_id"),
+        Index("idx_meiti_creator_strategies_status", "status"),
+    )
+
+
+class StrategyRevisionRecord(Base):
+    __tablename__ = "strategy_revisions"
+
+    revision_id = Column(String(255), primary_key=True)
+    strategy_id = Column(String(255), nullable=False)
+    creator_account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    why_changed = Column(Text, nullable=False, default="")
+    old_strategy = Column(JSONType, nullable=False, default=dict)
+    new_strategy = Column(JSONType, nullable=False, default=dict)
+    changed_by = Column(String(120), nullable=False, default="operator")
+    supersedes_strategy_id = Column(String(255))
+    effective_from = Column(String(80))
+    changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_strategy_revisions_account", "creator_account_id"),
+        Index("idx_meiti_strategy_revisions_strategy", "strategy_id"),
+    )
+
+
+class CreatorStateRecord(Base):
+    __tablename__ = "creator_states"
+
+    state_id = Column(String(255), primary_key=True)
+    creator_account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    current_phase = Column(Text, nullable=False, default="")
+    current_objective = Column(Text, nullable=False, default="")
+    current_focus = Column(Text, nullable=False, default="")
+    current_series = Column(String(255))
+    current_episode = Column(String(255))
+    current_content_mix = Column(JSONType, nullable=False, default=dict)
+    recent_topics = Column(JSONType, nullable=False, default=list)
+    saturated_topics = Column(JSONType, nullable=False, default=list)
+    underused_topics = Column(JSONType, nullable=False, default=list)
+    current_strategy_id = Column(String(255))
+    current_strategy_version = Column(Integer)
+    current_character_version = Column(Integer)
+    current_world_version = Column(Integer)
+    last_production_at = Column(String(80))
+    last_production_episode_id = Column(String(255))
+    next_recommended_direction = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("creator_account_id", name="uq_meiti_creator_state_account"),
+        Index("idx_meiti_creator_states_account", "creator_account_id"),
+    )
+
+
+class ContentDecisionRecord(Base):
+    __tablename__ = "content_decisions"
+
+    decision_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    strategy_id = Column(String(255))
+    creator_state_id = Column(String(255))
+    previous_episode_id = Column(String(255))
+    selected_pillar = Column(Text, nullable=False, default="")
+    selected_topic = Column(Text, nullable=False, default="")
+    selected_angle = Column(Text, nullable=False, default="")
+    selected_format = Column(String(40), nullable=False, default="image")
+    selected_scene = Column(Text, nullable=False, default="")
+    selected_emotion = Column(Text, nullable=False, default="")
+    selected_hook = Column(Text, nullable=False, default="")
+    idea_decision = Column(String(20), nullable=False, default="ACCEPT")
+    reasoning = Column(Text, nullable=False, default="")
+    constraints = Column(JSONType, nullable=False, default=list)
+    avoids = Column(JSONType, nullable=False, default=list)
+    expected_effect = Column(Text, nullable=False, default="")
+    confidence = Column(Numeric(18, 6), nullable=False, default=0.5)
+    user_request = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint("idea_decision IN ('ACCEPT','MODIFY','REJECT')", name="ck_meiti_content_decision_idea"),
+        Index("idx_meiti_content_decisions_account", "account_id"),
+        Index("idx_meiti_content_decisions_strategy", "strategy_id"),
+    )
+
+
+class ContentPortfolioItemRecord(Base):
+    __tablename__ = "content_portfolio_items"
+
+    item_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    pillar = Column(Text, nullable=False, default="")
+    topic = Column(Text, nullable=False, default="")
+    format = Column(String(40), nullable=False, default="image")
+    scene = Column(Text, nullable=False, default="")
+    emotion = Column(Text, nullable=False, default="")
+    angle = Column(Text, nullable=False, default="")
+    hook = Column(Text, nullable=False, default="")
+    series_id = Column(String(255))
+    episode_id = Column(String(255))
+    date = Column(String(40), nullable=False, default="")
+    status = Column(String(40), nullable=False, default="IDEA")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_meiti_content_portfolio_account", "account_id"),
+        Index("idx_meiti_content_portfolio_date", "date"),
+        Index("idx_meiti_content_portfolio_episode", "episode_id"),
+    )
+
+
+class ProductionMemoryRecord(Base):
+    __tablename__ = "production_memories"
+
+    memory_id = Column(String(255), primary_key=True)
+    account_id = Column(String(255), ForeignKey("platform_accounts.account_id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(120), nullable=False)
+    status = Column(String(40), nullable=False, default="CURRENT")
+    strategy_id = Column(String(255))
+    creator_state_id = Column(String(255))
+    episode_id = Column(String(255))
+    decision_id = Column(String(255))
+    prompt_id = Column(String(255))
+    character_id = Column(String(255))
+    world_id = Column(String(255))
+    series_id = Column(String(255))
+    scene = Column(Text, nullable=False, default="")
+    asset_id = Column(String(255))
+    visual_direction = Column(Text, nullable=False, default="")
+    copy_direction = Column(Text, nullable=False, default="")
+    what_was_produced = Column(Text, nullable=False, default="")
+    what_changed = Column(Text, nullable=False, default="")
+    what_worked = Column(Text, nullable=False, default="")
+    what_failed = Column(Text, nullable=False, default="")
+    what_should_continue = Column(Text, nullable=False, default="")
+    what_should_not_repeat = Column(Text, nullable=False, default="")
+    next_direction = Column(Text, nullable=False, default="")
+    confidence = Column(Numeric(18, 6), nullable=False, default=0.5)
+    importance = Column(Numeric(18, 6), nullable=False, default=0.5)
+    effective_from = Column(String(80))
+    expires_at = Column(String(80))
+    supersedes_id = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('CURRENT','HISTORICAL','SUPERSEDED','EXPIRED','PENDING','VERIFIED')",
+            name="ck_meiti_production_memory_status",
+        ),
+        Index("idx_meiti_production_memories_account", "account_id"),
+        Index("idx_meiti_production_memories_episode", "episode_id"),
+        Index("idx_meiti_production_memories_status", "status"),
     )
 

@@ -35,12 +35,13 @@ def code_structure() -> dict:
         "content/assets.py": ("def _prevalidate_import", "def _commit_import", "class PlatformAssetService"),
         "content/compiler.py": ("COPY READY", "DUPLICATE_CONTENT", "class PromptCompiler", "def _validate_references"),
         "content/tasks.py": ("class TaskOS", "PRODUCTION_CHAIN"),
-        "content/planner.py": ("class EpisodePlanner", "CALENDAR_SLOT_CONFLICT"),
+        "content/planner.py": ("class EpisodePlanner", "CALENDAR_SLOT_CONFLICT", "class CreatorBrain", "class ContentNoveltyService"),
         "content/readiness.py": ("class ProductionReadinessService", "CORE_PRODUCTION", "PACKAGE_MISSING", "CHARACTER_NOT_FOUND"),
         "content/store.py": ("def transaction", "NO nested"),
         "migrations/versions/0015_v481_production_ready_creator_os.py": ('revision = "0015_v481_production_ready_creator_os"',),
         "migrations/versions/0016_v482_final_hardening.py": ('revision = "0016_v482_final_hardening"',),
         "migrations/versions/0017_v483_production_integrity.py": ('revision = "0017_v483_production_integrity"',),
+        "migrations/versions/0018_v50_creator_os_unification.py": ('revision = "0018_v50_creator_os_unification"',),
         "docs/architecture/canonical-owner-map.md": ("Canonical Owner Map", "ONE canonical writer"),
         "scripts/meiti.py": ("compile-prompt", "import-asset", "cmd_analytics_record", "cmd_learning_record"),
     }
@@ -165,7 +166,7 @@ def run() -> dict:
     if evidence.get("status") != "PASS":
         post = "NOT_VERIFIED"
     payload = {
-        "version": "4.8.3",
+        "version": "5.0",
         "CODE_STRUCTURE": structure,
         "SEMANTIC_INVARIANTS": invariants,
         "REAL_PRODUCTION_EVIDENCE": evidence,
@@ -178,6 +179,7 @@ def run() -> dict:
         "PUBLICATION": {"status": "NOT_VERIFIED", "lane": "PRODUCTION_EVIDENCE", "note": "HANDOFF is not PUBLICATION"},
         "CODE_COMPLETE": structure["status"] == "PASS" and invariants["status"] == "PASS",
         "CORE_PRODUCTION": core,
+        "CORE_CONTENT_PRODUCTION": core,
         "CORE_PRODUCTION_READY": core == "READY",
         "POST_PRODUCTION": post,
         "POST_PRODUCTION_READY": post == "PASS",
@@ -198,6 +200,7 @@ def main() -> int:
     _print_status("SEMANTIC_INVARIANTS", payload["SEMANTIC_INVARIANTS"]["status"])
     _print_status("REAL_PRODUCTION_EVIDENCE", payload["REAL_PRODUCTION_EVIDENCE"]["status"])
     _print_status("CORE_PRODUCTION", payload["CORE_PRODUCTION"])
+    _print_status("CORE_CONTENT_PRODUCTION", payload["CORE_CONTENT_PRODUCTION"])
     _print_status("POST_PRODUCTION", payload["POST_PRODUCTION"])
     _print_status("REAL_DAY_1", payload["REAL_DAY_1"]["status"])
     _print_status("REAL_DAY_2", payload["REAL_DAY_2"]["status"])

@@ -7,7 +7,15 @@ ONE canonical writer per responsibility.
 
 | Responsibility | Canonical owner | Canonical writer | Projection |
 | --- | --- | --- | --- |
+| Creator Identity | `CreatorAccount` (`PlatformAccount`) | `ContinuityStore.save_account` | AccountProfile / operating state |
 | Account | `PlatformAccount` | `ContinuityStore.save_account` | Memory / operating state |
+| Platform connection | `PlatformConnection` | `ContinuityStore.save_platform_connection` | SocialAccount |
+| Creator strategy | `CreatorStrategy` | `CreatorStrategyService` | Account current_strategy_id |
+| Creator state | `CreatorState` | `ContinuityStore.save_creator_state` | AccountOperatingState |
+| Content decision | `ContentDecision` | `CreatorBrain.decide` | Episode snapshot |
+| Content novelty | `ContentNovelty` | `ContentNoveltyService` | Episode novelty_snapshot |
+| Content portfolio | `ContentPortfolio` | `ContentNoveltyService` | content_portfolio_items |
+| Production memory | `ProductionMemory` | `ProductionMemoryService` | ContinuityMemory / MemoryService |
 | Character | `VirtualCharacter` | `ContinuityStore.save_character` | Character revision |
 | World | `AccountWorld` | `ContinuityStore.save_world` | World revision |
 | Series | `ContentSeries` | `ContinuityStore.save_series` | Calendar |

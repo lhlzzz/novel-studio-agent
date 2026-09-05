@@ -11,6 +11,7 @@ from content.compiler import PromptCompiler
 from content.continuity import ContinuityEngine
 from content.dna import merge_creative_dna
 from content.models import (
+    CREATOR_KNOWLEDGE_FIELDS,
     LIFECYCLE_OWNERS,
     AccountContext,
     AccountOperatingState,
@@ -21,9 +22,13 @@ from content.models import (
     AssetReferenceSnapshot,
     CharacterRevision,
     ConfigurationBlocked,
+    ContentDecision,
+    ContentNovelty,
     ContentPackage,
+    ContentPortfolioItem,
     ContentSeries,
     ContinuityMemory,
+    CreatorState,
     CreatorTask,
     Episode,
     IsolationError,
@@ -37,6 +42,7 @@ from content.models import (
     PlatformAccount,
     PlatformLearningProfile,
     ProductionEvidence,
+    ProductionMemory,
     ProductionRun,
     PromptPackage,
     PromptPattern,
@@ -61,7 +67,7 @@ PROFILE_KNOWLEDGE_FIELDS = (
     "forbidden_rules",
     "manual_notes",
 )
-from content.planner import EpisodePlanner
+from content.planner import CreatorBrain, CreatorStrategyService, EpisodePlanner
 from content.platform_policy import differentiate_package, platform_policy
 from content.qa import CharacterContinuityQA, CrossAccountIsolationGuard
 from content.readiness import ProductionReadinessService
@@ -143,7 +149,8 @@ class ContinuityRuntime:
             current_objective="",
             next_action="ACCOUNT_SETUP",
         ))
-        return saved
+        CreatorBrain(self.store).ensure_identity(saved)
+        return self.store.get_account(saved.account_id) or saved
 
     def bind_character(self, account_id: str, character: VirtualCharacter) -> VirtualCharacter:
         self.isolation.assert_owned(account_id=account_id)
@@ -212,6 +219,13 @@ class ContinuityRuntime:
             name=name,
             description=description,
             status="ACTIVE",
+            series_goal=f"推进 {name}",
+            series_theme=description or name,
+            series_arc="日常连续记录",
+            current_phase="DAY_1",
+            phase_goal="建立可延续的账号内容",
+            next_direction_candidates=("真实生活切片", "过程记录", "情绪余温"),
+            completion_condition="",
         )
         saved = self.store.save_series(series)
         if account.series_id is None:
@@ -236,23 +250,12 @@ class ContinuityRuntime:
         if series is None:
             raise ConfigurationBlocked("MISSING_SERIES", "continue yesterday requires an active series")
         previous = self.store.latest_episode(series.series_id)
-        episode = self.continue_series(
-            account_id=account_id,
-            series_id=series.series_id,
-            brief=request,
-            title=(request or "下一条")[:40],
-        )
-        prompt = self.compile_prompt(
-            account_id=account_id,
-            platform=account.platform,
-            request=request,
-            episode=episode,
-            intent="CONTINUE",
-        )
+        planned = self.produce_today(account_id=account_id, request=request, intent="CONTINUE")
         return {
             "previous_episode": previous,
-            "episode": episode,
-            "prompt": prompt,
+            "episode": planned["episode"],
+            "prompt": planned["prompt"],
+            "decision": planned["decision"],
             "character_id": account.character_id,
             "world_id": account.world_id,
             "freshness": "NEW_PRIMARY_REQUIRED",
@@ -262,29 +265,295 @@ class ContinuityRuntime:
         account = self.store.get_account(account_id)
         if account is None:
             raise IsolationError(f"unknown platform account: {account_id}")
-        series = self.store.active_series(account_id)
-        if series is None:
-            raise ConfigurationBlocked("MISSING_SERIES", "change topic requires an active series")
-        episode = self.continue_series(
-            account_id=account_id,
-            series_id=series.series_id,
-            brief=request,
-            title=(request or "换一种")[:40],
-        )
-        prompt = self.compile_prompt(
-            account_id=account_id,
-            platform=account.platform,
-            request=request,
-            episode=episode,
-            intent="GENERATE",
-        )
+        planned = self.produce_today(account_id=account_id, request=request, intent="GENERATE")
         return {
             "account_id": account_id,
             "character_id": account.character_id,
             "world_id": account.world_id,
+            "episode": planned["episode"],
+            "prompt": planned["prompt"],
+            "decision": planned["decision"],
+        }
+
+    def produce_today(
+        self,
+        *,
+        account_id: str,
+        request: str = "",
+        intent: str = "GENERATE",
+        format: str = "image",
+        kind: str | None = None,
+        user_override: bool = False,
+    ) -> dict[str, Any]:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        brain = CreatorBrain(self.store)
+        strategy, state, connection = brain.ensure_identity(account)
+        decision = brain.decide(
+            account_id=account_id,
+            request=request,
+            format=format,
+            persist=True,
+            user_override=user_override,
+        )
+        portfolio = brain.novelty.portfolio(account_id, platform=account.platform)
+        novelty = brain.novelty.evaluate(
+            account_id,
+            topic=decision.selected_topic,
+            scene=decision.selected_scene,
+            angle=decision.selected_angle,
+            emotion=decision.selected_emotion,
+            hook=decision.selected_hook,
+            visual=decision.selected_scene,
+            narrative=decision.selected_topic,
+            format=decision.selected_format or format,
+            previous_topics=tuple(state.recent_topics),
+            previous_scenes=tuple(item.scene for item in portfolio.items[-7:]),
+            previous_angles=tuple(item.angle for item in portfolio.items[-7:]),
+            previous_hooks=tuple(item.hook for item in portfolio.items[-7:]),
+            user_override=user_override,
+        )
+        memory = brain.memory.latest(account_id)
+        payload = {
+            "account": account,
+            "platform": account.platform,
+            "connection": connection,
+            "strategy": strategy,
+            "creator_state": state,
+            "portfolio": portfolio,
+            "novelty": novelty,
+            "saturation": brain.novelty.saturation(
+                account_id,
+                topic=decision.selected_topic,
+                scene=decision.selected_scene,
+                angle=decision.selected_angle,
+                emotion=decision.selected_emotion,
+                hook=decision.selected_hook,
+            ),
+            "decision": decision,
+            "memory": memory,
+            "episode": None,
+            "prompt": None,
+            "status": decision.idea_decision,
+        }
+        if decision.idea_decision == "REJECT":
+            return payload
+        series = self.store.get_series(account.series_id, account_id=account_id) if account.series_id else self.store.active_series(account_id)
+        if series is None:
+            series = self.create_series(account_id=account_id, name=(decision.selected_topic or request or "untitled series")[:40])
+        previous = self.store.latest_episode(series.series_id)
+        title = (decision.selected_topic or request or "今日内容")[:40]
+        brief = decision.selected_scene or decision.selected_topic or request
+        episode = self.engine.create_next_episode(series.series_id, account_id=account_id, title=title, brief=brief)
+        episode = self.store.save_episode(Episode(**{
+            **episode.__dict__,
+            "strategy_id": strategy.strategy_id if strategy else None,
+            "strategy_version": strategy.version if strategy else None,
+            "creator_state_id": state.state_id if state else None,
+            "content_decision_id": decision.decision_id,
+            "creator_state_snapshot": state.snapshot() if state else {},
+            "novelty_snapshot": novelty.snapshot(),
+            "portfolio_snapshot": portfolio.snapshot(),
+            "updated_at": utcnow(),
+        }))
+        prompt_kind = kind or ("VIDEO" if (decision.selected_format or format) == "video" else "IMAGE")
+        prompt = self.compile_prompt(
+            account_id=account_id,
+            platform=account.platform,
+            request=request or decision.selected_topic,
+            kind=prompt_kind,
+            episode=episode,
+            intent=intent,
+            decision=decision,
+            strategy=strategy,
+            creator_state=state,
+            novelty=novelty,
+            production_memory=memory,
+        )
+        episode = self.store.get_episode(episode.episode_id, account_id=account_id) or episode
+        self.store.save_portfolio_item(ContentPortfolioItem(
+            item_id=uuid4().hex,
+            account_id=account_id,
+            pillar=decision.selected_pillar,
+            topic=decision.selected_topic,
+            format=decision.selected_format or format,
+            scene=decision.selected_scene,
+            emotion=decision.selected_emotion,
+            angle=decision.selected_angle,
+            hook=decision.selected_hook,
+            series_id=series.series_id,
+            episode_id=episode.episode_id,
+            status=episode.content_status,
+        ))
+        previous_title = previous.title if previous else ""
+        recorded = brain.memory.record(ProductionMemory(
+            memory_id=uuid4().hex,
+            account_id=account_id,
+            platform=account.platform,
+            status="CURRENT",
+            strategy_id=strategy.strategy_id if strategy else None,
+            creator_state_id=state.state_id if state else None,
+            episode_id=episode.episode_id,
+            decision_id=decision.decision_id,
+            prompt_id=prompt.prompt_id,
+            character_id=account.character_id,
+            world_id=account.world_id,
+            series_id=series.series_id,
+            scene=decision.selected_scene,
+            visual_direction=decision.selected_angle,
+            copy_direction=decision.selected_hook,
+            what_was_produced=decision.selected_topic,
+            what_changed=f"after {previous_title}" if previous_title else "first episode",
+            what_should_continue="keep character/world/series; new primary asset",
+            what_should_not_repeat=", ".join(decision.avoids[:4]),
+            next_direction=f"{decision.selected_pillar} · 新场景",
+            confidence=decision.confidence,
+            importance=0.8,
+            supersedes_id=memory.memory_id if memory else None,
+        ))
+        recent = tuple(dict.fromkeys([*list(state.recent_topics), decision.selected_topic]))[-14:]
+        saturated = tuple(dict.fromkeys([*list(state.saturated_topics), *( [decision.selected_topic] if novelty.verdict in {"SATURATED", "DUPLICATE"} else [])]))[-14:]
+        live_portfolio = brain.novelty.portfolio(account_id, platform=account.platform)
+        underused = tuple(name for name, share in (strategy.content_mix or {}).items() if float(live_portfolio.mix.get(name) or 0) < float(share or 0))
+        phase = f"DAY_{episode.episode_no}"
+        state = self.store.save_creator_state(CreatorState(**{
+            **state.__dict__,
+            "current_phase": phase,
+            "current_objective": strategy.objective if strategy else state.current_objective,
+            "current_focus": decision.selected_pillar,
+            "current_series": series.series_id,
+            "current_episode": episode.episode_id,
+            "current_content_mix": dict(live_portfolio.mix),
+            "recent_topics": recent,
+            "saturated_topics": saturated,
+            "underused_topics": underused,
+            "current_strategy_id": strategy.strategy_id if strategy else state.current_strategy_id,
+            "current_strategy_version": strategy.version if strategy else state.current_strategy_version,
+            "last_production_at": utcnow(),
+            "last_production_episode_id": episode.episode_id,
+            "next_recommended_direction": recorded.next_direction,
+            "updated_at": utcnow(),
+        }))
+        live_series = self.store.get_series(series.series_id, account_id=account_id) or series
+        self.store.save_series(ContentSeries(**{
+            **live_series.__dict__,
+            "current_phase": phase,
+            "phase_goal": strategy.objective if strategy else live_series.phase_goal,
+            "series_goal": live_series.series_goal or f"推进 {live_series.name}",
+            "series_theme": live_series.series_theme or live_series.name,
+            "series_arc": live_series.series_arc or "日常连续记录",
+            "next_direction_candidates": tuple(dict.fromkeys([*list(live_series.next_direction_candidates), recorded.next_direction]))[:6],
+            "updated_at": utcnow(),
+        }))
+        self.store.save_account(PlatformAccount(**{
+            **account.__dict__,
+            "current_strategy_id": strategy.strategy_id if strategy else account.current_strategy_id,
+            "current_strategy_version": strategy.version if strategy else account.current_strategy_version,
+            "current_episode_id": episode.episode_id,
+            "current_phase": phase,
+            "current_objective": strategy.objective if strategy else account.current_objective,
+            "current_next_action": "CREATIVE_EXECUTION",
+            "updated_at": utcnow(),
+        }))
+        payload.update({
             "episode": episode,
             "prompt": prompt,
+            "creator_state": state,
+            "memory": recorded,
+            "portfolio": live_portfolio,
+            "status": decision.idea_decision,
+        })
+        return payload
+
+    def today(self, *, account_id: str, request: str = "今天做什么") -> dict[str, Any]:
+        planned = self.produce_today(account_id=account_id, request=request, intent="GENERATE")
+        account = planned["account"]
+        strategy = planned["strategy"]
+        state = planned["creator_state"]
+        portfolio = planned["portfolio"]
+        novelty = planned["novelty"]
+        decision = planned["decision"]
+        episode = planned["episode"]
+        prompt = planned["prompt"]
+        return {
+            "ACCOUNT": account.label(),
+            "PLATFORM": account.platform,
+            "CONNECTION": planned["connection"].connection_status if planned.get("connection") else "NOT_CONNECTED",
+            "CURRENT_STATE": state.snapshot() if state else {},
+            "CURRENT_STRATEGY": strategy.snapshot() if strategy else {},
+            "RECENT_CONTENT": list(state.recent_topics) if state else [],
+            "CONTENT_MIX": dict(portfolio.mix) if portfolio else {},
+            "SATURATION": planned["saturation"].snapshot() if planned.get("saturation") else {},
+            "UNDERUSED_AREAS": list(state.underused_topics) if state else [],
+            "TODAY_RECOMMENDATION": decision.selected_topic if decision else "",
+            "REASON": decision.reasoning if decision else "",
+            "IDEA_DECISION": decision.idea_decision if decision else "",
+            "EPISODE": None if episode is None else {
+                "episode_id": episode.episode_id,
+                "episode_no": episode.episode_no,
+                "title": episode.title,
+                "content_decision_id": episode.content_decision_id,
+            },
+            "PROMPT": None if prompt is None else {
+                "prompt_id": prompt.prompt_id,
+                "kind": prompt.kind,
+                "copy_ready": bool(prompt.copy_ready),
+            },
+            "NOVELTY": novelty.snapshot() if novelty else {},
+            "CORE_CONTENT_PRODUCTION": "READY" if episode is not None and prompt is not None else "NOT_CONFIGURED",
         }
+
+    def configure_identity(self, account_id: str, *, source: str = "USER_DEFINED", reason: str = "creator identity configured", **fields: Any) -> PlatformAccount:
+        account = self.store.get_account(account_id)
+        if account is None:
+            raise IsolationError(f"unknown platform account: {account_id}")
+        payload = dict(account.__dict__)
+        knowledge: dict[str, Any] = {}
+        for name, value in fields.items():
+            if name in CREATOR_KNOWLEDGE_FIELDS:
+                knowledge[name] = knowledge_field(value, source=source, reason=reason, changed_by="operator")
+            elif hasattr(account, name):
+                payload[name] = value
+        payload.update(knowledge)
+        payload["updated_at"] = utcnow()
+        saved = self.store.save_account(PlatformAccount(**payload))
+        profile_fields = {}
+        if "growth_objective" in knowledge:
+            profile_fields["account_objective"] = knowledge["growth_objective"]
+        if "target_audience" in knowledge:
+            profile_fields["target_audience"] = knowledge["target_audience"]
+        if "positioning" in knowledge:
+            profile_fields["positioning"] = knowledge["positioning"]
+        if "content_pillars" in knowledge:
+            profile_fields["content_pillars"] = knowledge["content_pillars"]
+        if "tone" in knowledge:
+            profile_fields["brand_voice"] = knowledge["tone"]
+        if "visual_identity" in knowledge:
+            profile_fields["visual_style"] = knowledge["visual_identity"]
+        if profile_fields:
+            self._sync_profile(account_id, **profile_fields)
+        else:
+            self._sync_profile(account_id)
+        CreatorBrain(self.store).ensure_identity(saved)
+        current = CreatorStrategyService(self.store).current(account_id)
+        if current is not None and (current.reason.startswith("system default") or not current.positioning):
+            CreatorStrategyService(self.store).revise(
+                account_id,
+                why_changed=reason,
+                changed_by="operator",
+                objective=_text_or(saved.growth_objective, current.objective),
+                positioning=_text_or(saved.positioning, current.positioning),
+                audience=_text_or(saved.target_audience, current.audience),
+                content_pillars=tuple(saved.field_value("content_pillars") or current.content_pillars),
+                content_mix=dict(saved.field_value("content_mix") or current.content_mix),
+                growth_goal=_text_or(saved.growth_objective, current.growth_goal),
+                commercial_goal=_text_or(saved.commercial_direction, current.commercial_goal),
+                visual_policy=_text_or(saved.visual_identity, current.visual_policy),
+                copy_policy=_text_or(saved.tone, current.copy_policy),
+                quality_bar=_text_or(saved.quality_bar, current.quality_bar),
+            )
+        return self.store.get_account(account_id) or saved
 
     def continue_series(self, *, account_id: str, series_id: str, brief: str = "", title: str = "") -> Episode:
         episode = self.engine.create_next_episode(series_id, account_id=account_id, brief=brief, title=title)
@@ -374,6 +643,11 @@ class ContinuityRuntime:
         intent: str = "GENERATE",
         source_asset_id: str | None = None,
         reference_assets: list[Any] | tuple[Any, ...] = (),
+        strategy=None,
+        creator_state: CreatorState | None = None,
+        decision: ContentDecision | None = None,
+        novelty: ContentNovelty | None = None,
+        production_memory: ProductionMemory | None = None,
     ) -> PromptPackage:
         account = self.store.get_account(account_id)
         if account is None:
@@ -421,6 +695,20 @@ class ContinuityRuntime:
                     if item.what_worked or item.next_recommendation
                 ),
             }
+        if decision is None and episode is not None and episode.content_decision_id:
+            decision = self.store.get_content_decision(episode.content_decision_id)
+        if strategy is None:
+            strategy = self.store.current_strategy(account_id)
+        if creator_state is None:
+            creator_state = self.store.get_creator_state(account_id)
+        if production_memory is None:
+            production_memory = self.store.latest_production_memory(account_id)
+        if novelty is None and episode is not None and episode.novelty_snapshot:
+            novelty = ContentNovelty(account_id=account_id, **{
+                key: episode.novelty_snapshot[key]
+                for key in ("verdict", "topic", "angle", "scene", "visual", "emotional", "narrative", "format", "hook", "reason")
+                if key in episode.novelty_snapshot
+            })
         prompt = PromptCompiler(self.store).compile(
             account_id=account_id,
             platform=platform,
@@ -437,6 +725,11 @@ class ContinuityRuntime:
             reference_assets=refs,
             source_asset_id=source_asset_id,
             intent=intent,
+            strategy=strategy,
+            creator_state=creator_state,
+            decision=decision,
+            novelty=novelty,
+            production_memory=production_memory,
         )
         if episode is not None:
             self.transition_episode(episode.episode_id, account_id=account_id, to_status="PROMPT_READY")
@@ -472,6 +765,9 @@ class ContinuityRuntime:
                 **run.__dict__,
                 "prompt_id": prompt.prompt_id,
                 "task_id": bound_task.task_id if bound_task else None,
+                "strategy_id": (strategy.strategy_id if strategy else None) or (episode.strategy_id if episode else None),
+                "creator_state_id": (creator_state.state_id if creator_state else None) or (episode.creator_state_id if episode else None),
+                "content_decision_id": (decision.decision_id if decision else None) or (episode.content_decision_id if episode else None),
                 "status": "PROMPT_READY",
                 "updated_at": utcnow(),
             }))
@@ -582,6 +878,7 @@ class ContinuityRuntime:
             primary_ids.append(asset_id)
         if len(primary_ids) > 1:
             raise ConfigurationBlocked("UNIQUE_PRIMARY_REQUIRED", "package requires exactly one primary asset")
+        episode = self.store.get_episode(context.episode_id, account_id=context.account_id) if context.episode_id else None
         package = ContentPackage(
             package_id=package_id or uuid4().hex,
             title=title or context.creative_request or context.user_request,
@@ -600,6 +897,7 @@ class ContinuityRuntime:
             reference_assets=tuple(reference_ids),
             primary_assets=tuple(primary_ids),
             prompt_id=prompt_id,
+            content_decision_id=episode.content_decision_id if episode else None,
         )
         package = differentiate_package(package, context)
         saved = self.store.save_package(package)
@@ -877,6 +1175,9 @@ class ContinuityRuntime:
         episode = self.store.latest_episode(series.series_id) if series else None
         profile = self.store.get_account_profile(account_id)
         state = self.store.get_operating_state(account_id)
+        creator_state = self.store.get_creator_state(account_id)
+        strategy = self.store.current_strategy(account_id)
+        connection = self.store.get_platform_connection(account_id, account.platform)
         next_action = TaskOS(self.store).get_next_action(account_id=account_id)
         return {
             "account": account,
@@ -886,6 +1187,9 @@ class ContinuityRuntime:
             "episode": episode,
             "profile": profile,
             "operating_state": state,
+            "creator_state": creator_state,
+            "strategy": strategy,
+            "connection": connection,
             "current_task": next_action,
         }
 
@@ -1107,6 +1411,7 @@ class ContinuityRuntime:
         saved = self.store.save_learning(LearningRecord(**{
             **record.__dict__,
             "evidence_status": evidence_status,
+            "learning_status": evidence_status,
             "source_episode_ids": source_episodes,
         }))
         verified = saved.evidence_status == "VERIFIED"
@@ -1398,6 +1703,9 @@ class ContinuityRuntime:
             return {"status": "NOT_CONFIGURED", "reason": "no platform account"}
         view = self.show_account(account.account_id)
         state = view.get("operating_state")
+        creator_state = view.get("creator_state")
+        strategy = view.get("strategy")
+        connection = view.get("connection")
         episode = view.get("episode")
         series = view.get("series")
         task = view.get("current_task") or self.get_next_action(account_id=account.account_id)
@@ -1413,7 +1721,10 @@ class ContinuityRuntime:
             "account": account.label(),
             "account_id": account.account_id,
             "platform": account.platform,
-            "current_objective": (state.current_objective if state else "") or (view["profile"].field_value("account_objective") if view.get("profile") else ""),
+            "connection_status": connection.connection_status if connection else "NOT_CONNECTED",
+            "current_strategy": None if strategy is None else {"strategy_id": strategy.strategy_id, "version": strategy.version, "objective": strategy.objective},
+            "creator_state": None if creator_state is None else creator_state.snapshot(),
+            "current_objective": (creator_state.current_objective if creator_state else "") or (state.current_objective if state else "") or (view["profile"].field_value("account_objective") if view.get("profile") else ""),
             "current_series": series.name if series else (state.current_series if state else None),
             "current_episode": episode.title if episode else None,
             "current_episode_id": episode.episode_id if episode else None,
@@ -1471,6 +1782,14 @@ class ContinuityRuntime:
             self.bind_world(account.account_id, world)
         if self.store.active_series(account.account_id) is None:
             self.create_series(account_id=account.account_id, name=series)
+        self.configure_identity(
+            account.account_id,
+            account_subject="个人创作者",
+            positioning="认真生活记录" if platform == "xiaohongshu" else "训练状态记录",
+            target_audience="都市年轻女性" if platform == "xiaohongshu" else "训练人群",
+            content_pillars=("日常记录", "人物状态", "生活场景", "关系互动", "Experiment"),
+            reason="sandbox creator identity",
+        )
         return self.store.activate_account(account.account_id)
 
     def doctor(self) -> dict[str, Any]:
@@ -1541,6 +1860,14 @@ class ContinuityRuntime:
             "CONTENT_CALENDAR": _arch(ready, owner="content.planner.EpisodePlanner"),
             "CONTENT_PLANNER": _arch(True, owner="content.planner.EpisodePlanner"),
             "EPISODE_PLANNER": _arch(True, owner="content.planner.EpisodePlanner"),
+            "CREATOR_IDENTITY": _arch(ready, owner="content.models.CreatorAccount"),
+            "CREATOR_STATE": _arch(ready, owner="content.models.CreatorState"),
+            "CREATOR_STRATEGY": _arch(ready, owner="content.planner.CreatorStrategyService"),
+            "CONTENT_PORTFOLIO": _arch(ready, owner="content.planner.ContentNoveltyService"),
+            "CONTENT_NOVELTY": _arch(True, owner="content.planner.ContentNoveltyService"),
+            "SERIES_ENGINE": _arch(ready, owner="content.models.ContentSeries"),
+            "DECISION_TRACE": _arch(True, owner="content.planner.CreatorBrain"),
+            "PRODUCTION_MEMORY": _arch(ready, owner="content.planner.ProductionMemoryService"),
             "PACKAGE": _arch(ready, owner="content.models.ContentPackage"),
             "HANDOFF": _arch(True, note="XHS is HANDOFF_ONLY"),
             "MANUAL_LECHUANG": _arch(True, owner="content.assets.PlatformAssetService"),
@@ -1549,6 +1876,11 @@ class ContinuityRuntime:
             "CORE_PRODUCTION": {
                 "status": self.production_readiness(persist=False).get("CORE_PRODUCTION") if ready else "NOT_CONFIGURED",
                 "lane": "ARCHITECTURE",
+            },
+            "CORE_CONTENT_PRODUCTION": {
+                "status": self.production_readiness(persist=False).get("CORE_PRODUCTION") if ready else "NOT_CONFIGURED",
+                "lane": "ARCHITECTURE",
+                "note": "OAuth/PlatformConnection never required",
             },
             "POST_PRODUCTION": _prod("ANALYTICS_IMPORTED"),
             "FULL_LOOP": {"status": "NOT_VERIFIED", "lane": "PRODUCTION_EVIDENCE"},
@@ -1569,6 +1901,13 @@ class ContinuityRuntime:
 
     def packages_for_request(self, text: str) -> list[dict[str, Any]]:
         return [self.prepare_target(target, text=text) for target in self.resolver.resolve_many(text)]
+
+
+def _text_or(field: Any, fallback: str = "") -> str:
+    if isinstance(field, KnowledgeField):
+        value = "" if not field.known() else str(field.value or "")
+        return value or fallback
+    return str(field or fallback) or fallback
 
 
 def _xhs_character(account_id: str) -> VirtualCharacter:

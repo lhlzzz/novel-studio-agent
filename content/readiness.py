@@ -37,7 +37,7 @@ def _system_capability(store: ContinuityStore) -> tuple[str, list[str]]:
         from content.assets import PlatformAssetService
         from content.tasks import TaskOS
         from content.runtime import ContinuityRuntime
-        from content.planner import EpisodePlanner
+        from content.planner import CreatorBrain, EpisodePlanner
 
         owners = all((
             hasattr(PromptCompiler, "compile"),
@@ -46,7 +46,9 @@ def _system_capability(store: ContinuityStore) -> tuple[str, list[str]]:
             hasattr(TaskOS, "create_production_chain"),
             hasattr(ContinuityRuntime, "package_from_generation"),
             hasattr(ContinuityRuntime, "record_handoff"),
+            hasattr(ContinuityRuntime, "produce_today"),
             hasattr(EpisodePlanner, "plan_next"),
+            hasattr(CreatorBrain, "decide"),
         ))
     except Exception:
         owners = False
@@ -164,6 +166,16 @@ class ProductionReadinessService:
             "MULTI_ACCOUNT": system,
             "MULTI_PLATFORM": system,
             "CORE_PRODUCTION": core,
+            "CORE_CONTENT_PRODUCTION": core,
+            "CREATOR_IDENTITY": account_configuration if account else "NOT_CONFIGURED",
+            "CREATOR_STATE": "PASS" if account and self.store.get_creator_state(account.account_id) else ("NOT_CONFIGURED" if not account else "PARTIAL"),
+            "CREATOR_STRATEGY": "PASS" if account and self.store.current_strategy(account.account_id) else ("NOT_CONFIGURED" if not account else "PARTIAL"),
+            "CONTENT_NOVELTY": system,
+            "CONTENT_PORTFOLIO": system,
+            "SERIES_ENGINE": "PASS" if account and series else ("NOT_CONFIGURED" if not account else "PARTIAL"),
+            "DECISION_TRACE": system,
+            "PRODUCTION_MEMORY": system,
+            "EXTERNAL_CONNECTION": "NOT_CONNECTED" if account and not (self.store.get_platform_connection(account.account_id, account.platform) and self.store.get_platform_connection(account.account_id, account.platform).connected) else ("PASS" if account else "NOT_CONFIGURED"),
             "POST_PRODUCTION": post,
             "FULL_LOOP": full,
             "checks": checks,

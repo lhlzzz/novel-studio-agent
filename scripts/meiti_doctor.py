@@ -638,6 +638,21 @@ V48_KEYS = (
     "ACCOUNT_CONFIGURATION",
 )
 
+V50_KEYS = (
+    "CREATOR_IDENTITY",
+    "CREATOR_STATE",
+    "CREATOR_STRATEGY",
+    "CONTENT_PORTFOLIO",
+    "CONTENT_NOVELTY",
+    "SERIES_ENGINE",
+    "DECISION_TRACE",
+    "PRODUCTION_MEMORY",
+    "PROMPT_RUNTIME",
+    "ASSET_PIPELINE",
+    "PACKAGE",
+    "CORE_CONTENT_PRODUCTION",
+)
+
 V481_KEYS = (
     "ACCOUNT_OS",
     "TASK_OS",
@@ -726,6 +741,16 @@ LANE_BY_KEY = {
     "ANALYTICS": "PRODUCTION_EVIDENCE",
     "LEARNING": "PRODUCTION_EVIDENCE",
     "VECTOR": "CONFIGURATION",
+    "CREATOR_IDENTITY": "ARCHITECTURE",
+    "CREATOR_STATE": "ARCHITECTURE",
+    "CREATOR_STRATEGY": "ARCHITECTURE",
+    "CONTENT_PORTFOLIO": "ARCHITECTURE",
+    "CONTENT_NOVELTY": "ARCHITECTURE",
+    "SERIES_ENGINE": "ARCHITECTURE",
+    "DECISION_TRACE": "ARCHITECTURE",
+    "PRODUCTION_MEMORY": "ARCHITECTURE",
+    "ASSET_PIPELINE": "ARCHITECTURE",
+    "CORE_CONTENT_PRODUCTION": "ARCHITECTURE",
 }
 
 
@@ -759,8 +784,18 @@ def _v48_status(default: str, existing: dict | None = None) -> dict:
         "ANALYTICS": "ANALYTICS_RUNTIME",
         "LEARNING": "LEARNING_RUNTIME",
         "VECTOR": "VECTOR_INDEXING",
+        "CREATOR_IDENTITY": "ACCOUNT_RUNTIME",
+        "CREATOR_STATE": "ACCOUNT_RUNTIME",
+        "CREATOR_STRATEGY": "EPISODE_PLANNER",
+        "CONTENT_PORTFOLIO": "EPISODE_PLANNER",
+        "CONTENT_NOVELTY": "PROMPT_NOVELTY",
+        "SERIES_ENGINE": "SERIES_RUNTIME",
+        "DECISION_TRACE": "EPISODE_PLANNER",
+        "PRODUCTION_MEMORY": "OBSIDIAN_EPISODE_MEMORY",
+        "ASSET_PIPELINE": "MANUAL_LECHUANG_IMPORT",
+        "CORE_CONTENT_PRODUCTION": "CORE_PRODUCTION",
     }
-    for key in V48_KEYS:
+    for key in (*V48_KEYS, *V50_KEYS):
         current = existing.get(key)
         if isinstance(current, dict) and current.get("status"):
             rows[key] = current
@@ -913,6 +948,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"CAPABILITY={architecture}")
     print(f"HEALTH={'PASS' if payload['architecture_ready'] else 'FAIL'}")
     print("REAL_EVIDENCE=NOT_VERIFIED")
+    print("MEITI_V50_STATUS")
+    for key in V50_KEYS:
+        item = v48.get(key) or checks.get(key) or {}
+        if isinstance(item, dict):
+            status = item.get("status") or architecture
+        else:
+            status = str(item or architecture)
+        if key == "CORE_CONTENT_PRODUCTION" and status in {"PASS", "READY"}:
+            status = "READY"
+        print(f"{key}={status}")
     print("REAL_EMBEDDING_EVIDENCE=NOT_VERIFIED")
     print("SUPPORTED=PASS" if payload["architecture_ready"] else "SUPPORTED=FAIL")
     print("CONFIGURED=PASS" if payload["architecture_ready"] else "CONFIGURED=FAIL")

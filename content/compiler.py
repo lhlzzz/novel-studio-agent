@@ -9,13 +9,18 @@ from content.dna import character_lock_prompt, default_creative_dna, merge_creat
 from content.models import (
     AccountWorld,
     AssetFreshnessError,
+    ContentDecision,
+    ContentNovelty,
     ContentSeries,
+    CreatorState,
+    CreatorStrategy,
     CrossPlatformAssetReuse,
     Episode,
     IsolationError,
     MemoryWritebackError,
     PRIMARY_ASSET_ROLES,
     PlatformCreativeDNA,
+    ProductionMemory,
     PromptPackage,
     PromptPattern,
     VirtualCharacter,
@@ -55,6 +60,11 @@ class PromptCompiler:
         source_assets: list[Any] | tuple[Any, ...] = (),
         source_asset_id: str | None = None,
         intent: str = "GENERATE",
+        strategy: CreatorStrategy | None = None,
+        creator_state: CreatorState | None = None,
+        decision: ContentDecision | None = None,
+        novelty: ContentNovelty | None = None,
+        production_memory: ProductionMemory | None = None,
     ) -> PromptPackage:
         account = self.store.get_account(account_id)
         if account is None:
@@ -69,7 +79,15 @@ class PromptCompiler:
             raise AssetFreshnessError("MISSING_SOURCE_ASSET", "IMAGE_TO_VIDEO requires source_asset_id")
         character_lock = character_lock_prompt(character)
         world_lock = world_lock_prompt(world)
-        scene = _scene_prompt(request=request, episode=episode, previous=previous, continuity=continuity, kind=kind, dna=dna)
+        scene = _scene_prompt(
+            request=request,
+            episode=episode,
+            previous=previous,
+            continuity=continuity,
+            kind=kind,
+            dna=dna,
+            decision=decision,
+        )
         if previous_prompt is None and previous is not None and previous.prompt_id:
             previous_prompt = self.store.get_prompt(previous.prompt_id)
         if previous_prompt and scene.strip() == (previous_prompt.scene_prompt or "").strip() and intent not in {"REUSE", "REPUBLISH"}:
@@ -77,6 +95,10 @@ class PromptCompiler:
         patterns = self.store.list_prompt_patterns(platform=platform, account_id=account_id)
         pattern_ids = tuple(item.pattern_id for item in patterns[:8])
         learning_basis = _learning_basis(learning or {}, platform=platform)
+        strategy_basis = _strategy_basis(strategy, account=account)
+        decision_basis = _decision_basis(decision)
+        novelty_basis = _novelty_basis(novelty)
+        continuity_basis = _continuity_basis(previous=previous, series=series, state=creator_state, memory=production_memory)
         refs = self._validate_references(
             tuple(_asset_id(item) for item in reference_assets if _asset_id(item)),
             account_id=account_id,
@@ -115,6 +137,10 @@ class PromptCompiler:
             references=refs,
             dna=dna,
             lens=_lens_for(platform, kind),
+            strategy_basis=strategy_basis,
+            decision_basis=decision_basis,
+            novelty_basis=novelty_basis,
+            continuity_basis=continuity_basis,
         )
         package = PromptPackage(
             prompt_id=uuid4().hex,
@@ -155,6 +181,10 @@ class PromptCompiler:
             recommended_ratio=ratio,
             recommended_duration=duration,
             learning_basis=learning_basis,
+            strategy_basis=strategy_basis,
+            decision_basis=decision_basis,
+            novelty_basis=novelty_basis,
+            continuity_basis=continuity_basis,
             prompt_patterns=pattern_ids,
             parent_prompt_id=previous_prompt.prompt_id if previous_prompt else None,
             version=(previous_prompt.version + 1) if previous_prompt else 1,
@@ -237,8 +267,10 @@ def _kind_from_policy(policy: dict[str, Any], request: str, source_asset_id: str
     return "IMAGE"
 
 
-def _scene_prompt(*, request: str, episode: Episode | None, previous: Episode | None, continuity: dict[str, Any] | None, kind: str, dna: PlatformCreativeDNA) -> str:
+def _scene_prompt(*, request: str, episode: Episode | None, previous: Episode | None, continuity: dict[str, Any] | None, kind: str, dna: PlatformCreativeDNA, decision: ContentDecision | None = None) -> str:
     brief = (episode.brief if episode else "") or request
+    if decision and decision.selected_scene:
+        brief = f"{decision.selected_topic or brief}. Scene: {decision.selected_scene}. Angle: {decision.selected_angle}."
     location = ""
     if episode and episode.location_state:
         location = str(episode.location_state.get("name") or episode.location_state.get("place") or "")
@@ -287,6 +319,77 @@ def _learning_basis(learning: dict[str, Any], *, platform: str) -> tuple[str, ..
         if reason:
             rows.append(str(reason))
     return tuple(list(dict.fromkeys(rows))[:12])
+
+
+def _strategy_basis(strategy: CreatorStrategy | None, *, account) -> tuple[str, ...]:
+    rows = []
+    if strategy is not None:
+        rows.extend([
+            f"strategy_id={strategy.strategy_id}",
+            f"version={strategy.version}",
+            f"objective={strategy.objective}" if strategy.objective else "",
+            f"positioning={strategy.positioning}" if strategy.positioning else "",
+            f"mix={strategy.content_mix}" if strategy.content_mix else "",
+            f"quality_bar={strategy.quality_bar}" if strategy.quality_bar else "",
+        ])
+    if account is not None:
+        if account.known("account_subject"):
+            rows.append(f"account_subject={account.field_value('account_subject')}")
+        if account.known("tone"):
+            rows.append(f"tone={account.field_value('tone')}")
+        if not account.known("commercial_direction"):
+            rows.append("commercial_direction=UNKNOWN")
+    return tuple(item for item in rows if item)[:12]
+
+
+def _decision_basis(decision: ContentDecision | None) -> tuple[str, ...]:
+    if decision is None:
+        return ()
+    return tuple(item for item in (
+        f"decision_id={decision.decision_id}",
+        f"idea={decision.idea_decision}",
+        f"pillar={decision.selected_pillar}",
+        f"topic={decision.selected_topic}",
+        f"scene={decision.selected_scene}",
+        f"angle={decision.selected_angle}",
+        f"reason={decision.reasoning}",
+        "avoids=" + ", ".join(decision.avoids[:4]) if decision.avoids else "",
+    ) if item)[:12]
+
+
+def _novelty_basis(novelty: ContentNovelty | None) -> tuple[str, ...]:
+    if novelty is None:
+        return ()
+    return (
+        f"verdict={novelty.verdict}",
+        f"topic={novelty.topic}",
+        f"scene={novelty.scene}",
+        f"angle={novelty.angle}",
+        f"hook={novelty.hook}",
+        novelty.reason,
+    )
+
+
+def _continuity_basis(*, previous: Episode | None, series, state: CreatorState | None, memory: ProductionMemory | None) -> tuple[str, ...]:
+    rows = []
+    if series is not None:
+        rows.append(f"series={series.name}")
+        if series.series_goal:
+            rows.append(f"series_goal={series.series_goal}")
+        if series.current_phase:
+            rows.append(f"series_phase={series.current_phase}")
+    if previous is not None:
+        rows.append(f"previous_episode={previous.episode_id} {previous.title}")
+    if state is not None:
+        rows.append(f"creator_phase={state.current_phase or 'unset'}")
+        if state.next_recommended_direction:
+            rows.append(f"next={state.next_recommended_direction}")
+    if memory is not None:
+        rows.append(f"memory={memory.what_should_continue or memory.next_direction or memory.what_was_produced}")
+        if memory.what_should_not_repeat:
+            rows.append(f"do_not_repeat={memory.what_should_not_repeat}")
+    rows.append("new primary asset required")
+    return tuple(item for item in rows if item)[:12]
 
 
 def _asset_id(item: Any) -> str:
@@ -354,6 +457,10 @@ def _copy_ready(
     references: tuple[str, ...],
     dna: PlatformCreativeDNA,
     lens: str,
+    strategy_basis: tuple[str, ...] = (),
+    decision_basis: tuple[str, ...] = (),
+    novelty_basis: tuple[str, ...] = (),
+    continuity_basis: tuple[str, ...] = (),
 ) -> str:
     header = {
         "IMAGE": "IMAGE PROMPT PACKAGE",
@@ -428,4 +535,12 @@ def _copy_ready(
     lines.extend(["", "NEGATIVE PROMPT", negative, "", "LECHUANG PARAMETERS", f"tool=lechuang mode=manual aspect_ratio={ratio} duration={duration}"])
     if references:
         lines.extend(["", "REFERENCE ASSETS", ", ".join(references)])
+    if strategy_basis:
+        lines.extend(["", "CREATOR STRATEGY BASIS", "\n".join(strategy_basis)])
+    if decision_basis:
+        lines.extend(["", "CONTENT DECISION", "\n".join(decision_basis)])
+    if novelty_basis:
+        lines.extend(["", "NOVELTY BASIS", "\n".join(novelty_basis)])
+    if continuity_basis:
+        lines.extend(["", "CONTINUITY BASIS", "\n".join(continuity_basis)])
     return "\n".join(lines)
