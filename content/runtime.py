@@ -469,7 +469,7 @@ class ContinuityRuntime:
             "portfolio": live_portfolio,
             "status": decision.idea_decision,
         })
-        if prompt is not None and prompt.kind == "IMAGE":
+        if prompt is not None:
             generated = self.submit_generation(
                 account_id=account_id,
                 episode_id=episode.episode_id,
@@ -478,10 +478,6 @@ class ContinuityRuntime:
             )
             payload.update(generated)
             payload["status"] = generated.get("job_status") or payload["status"]
-        else:
-            payload["job_status"] = "COPY_READY"
-            payload["creative_provider"] = "lechuang"
-            payload["blocked_reason"] = "VIDEO_NOT_VERIFIED" if prompt and prompt.kind != "IMAGE" else None
         return payload
 
     def today(self, *, account_id: str, request: str = "今天做什么") -> dict[str, Any]:
@@ -920,96 +916,33 @@ class ContinuityRuntime:
             }
         adapter, _provider_name = resolve_creative_provider("lechuang")
         try:
-            if prompt.kind != "IMAGE":
-                raise UnsupportedCapability(prompt.kind.lower(), provider="lechuang")
-            task = adapter.generate_image(snapshot)
-            status = map_creative_status(task.status)
-            result = dict(task.result or {})
-            live = self.store.get_production_run(run.run_id) or run
-            self.store.save_production_run(ProductionRun(**{
-                **live.__dict__,
-                "creative_result_snapshot": {
-                    "status": status,
-                    "provider": "lechuang",
-                    "provider_task_id": task.provider_task_id,
-                    "model": result.get("model") or prompt.recommended_model,
-                    "cost_status": result.get("cost_status") or "UNKNOWN",
-                    "cost_snapshot": result.get("cost_snapshot") or {"status": "UNKNOWN"},
-                    "path": result.get("path") or getattr(result.get("asset"), "path", None),
-                    "sha256": result.get("sha256") or getattr(result.get("asset"), "sha256", None),
-                    "error": task.error,
-                },
-                "updated_at": utcnow(),
-            }))
-            if status != "SUCCEEDED":
-                self.store.save_production_run(ProductionRun(**{
-                    **(self.store.get_production_run(run.run_id) or live).__dict__,
-                    "status": "BLOCKED",
-                    "updated_at": utcnow(),
-                }))
-                return {
-                    "job_id": job_id,
-                    "job_status": status,
-                    "creative_provider": "lechuang",
-                    "model": prompt.recommended_model,
-                    "error": task.error,
-                }
-            artifact = adapter.download_artifact(task)
-            imported = self.import_asset(
-                artifact.path,
-                account_id=account_id,
-                platform=account.platform,
+            kind = str(prompt.kind or "IMAGE").upper()
+            if kind == "IMAGE_TO_VIDEO":
+                source = self.store.get_media_asset(str(prompt.source_asset_id or ""))
+                if source is None or not getattr(source, "path", None):
+                    raise ProviderBlocked("lechuang", "IMAGE_TO_VIDEO requires a local source asset")
+                snapshot["kind"] = "image_to_video"
+                snapshot["generation_type"] = "image_to_video"
+                snapshot["source_path"] = source.path
+                snapshot["source_asset_id"] = source.asset_id
+                task = adapter.generate_video(snapshot)
+            elif kind == "VIDEO":
+                snapshot["kind"] = "generate_video"
+                snapshot["generation_type"] = "video"
+                task = adapter.generate_video(snapshot)
+            elif kind == "IMAGE":
+                task = adapter.generate_image(snapshot)
+            else:
+                raise UnsupportedCapability(kind.lower(), provider="lechuang")
+            return self._commit_generation_task(
+                run=run,
+                job_id=job_id,
+                prompt=prompt,
+                adapter=adapter,
+                task=task,
+                account=account,
                 episode_id=episode_id,
-                asset_role="GENERATED_PRIMARY",
-                reuse_mode="NONE",
-                intent="GENERATE",
-                prompt_id=prompt.prompt_id,
-                model=str(result.get("model") or prompt.recommended_model or "UNKNOWN"),
-                tool="lechuang",
-                generation_mode="PROVIDER_API",
-                production_run_id=run.run_id,
             )
-            asset = imported["asset"]
-            live = self.store.get_production_run(run.run_id) or live
-            self.store.save_production_run(ProductionRun(**{
-                **live.__dict__,
-                "asset_id": asset.asset_id,
-                "creative_result_snapshot": {
-                    **dict(live.creative_result_snapshot or {}),
-                    "status": "SUCCEEDED",
-                    "asset_id": asset.asset_id,
-                    "sha256": asset.sha256,
-                    "provider_artifact_id": artifact.provider_artifact_id,
-                    "source_url": artifact.source_url,
-                    "mime_type": artifact.mime_type,
-                    "byte_size": artifact.byte_size,
-                },
-                "updated_at": utcnow(),
-            }))
-            return {
-                "job_id": job_id,
-                "job_status": "SUCCEEDED",
-                "creative_provider": "lechuang",
-                "model": str(result.get("model") or prompt.recommended_model),
-                "asset_id": asset.asset_id,
-                "sha256": asset.sha256,
-                "qa": imported.get("qa"),
-            }
-        except UnsupportedCapability as exc:
-            live = self.store.get_production_run(run.run_id) or run
-            self.store.save_production_run(ProductionRun(**{
-                **live.__dict__,
-                "status": "AWAITING_CREATIVE",
-                "creative_result_snapshot": {"status": "FAILED", "error_code": "NOT_VERIFIED", "error_message": str(exc)},
-                "updated_at": utcnow(),
-            }))
-            return {
-                "job_id": job_id,
-                "job_status": "COPY_READY",
-                "creative_provider": "lechuang",
-                "model": prompt.recommended_model,
-                "blocked_reason": "VIDEO_NOT_VERIFIED",
-            }
         except (AuthError, RateLimited, ProviderBlocked) as exc:
             retryable = bool(getattr(exc, "retryable", False) or (getattr(exc, "details", {}) or {}).get("retryable"))
             live = self.store.get_production_run(run.run_id) or run
@@ -1032,9 +965,112 @@ class ContinuityRuntime:
                 "error": str(exc),
                 "retryable": retryable,
             }
+        except UnsupportedCapability as exc:
+            live = self.store.get_production_run(run.run_id) or run
+            self.store.save_production_run(ProductionRun(**{
+                **live.__dict__,
+                "status": "BLOCKED",
+                "creative_result_snapshot": {"status": "FAILED", "error_code": "UNSUPPORTED", "error_message": str(exc)},
+                "updated_at": utcnow(),
+            }))
+            return {
+                "job_id": job_id,
+                "job_status": "FAILED",
+                "creative_provider": "lechuang",
+                "model": prompt.recommended_model,
+                "error": str(exc),
+            }
+
+    def _commit_generation_task(self, *, run, job_id: str, prompt, adapter, task, account, episode_id: str) -> dict[str, Any]:
+        status = map_creative_status(task.status)
+        result = dict(task.result or {})
+        live = self.store.get_production_run(run.run_id) or run
+        self.store.save_production_run(ProductionRun(**{
+            **live.__dict__,
+            "creative_result_snapshot": {
+                "status": status,
+                "provider": "lechuang",
+                "provider_task_id": task.provider_task_id,
+                "model": result.get("model") or prompt.recommended_model,
+                "cost_status": result.get("cost_status") or "UNKNOWN",
+                "cost_snapshot": result.get("cost_snapshot") or {"status": "UNKNOWN"},
+                "path": result.get("path") or getattr(result.get("asset"), "path", None),
+                "sha256": result.get("sha256") or getattr(result.get("asset"), "sha256", None),
+                "source_url": result.get("source_url") or "",
+                "error": task.error,
+            },
+            "updated_at": utcnow(),
+        }))
+        if status in {"SUBMITTED", "QUEUED", "RUNNING"}:
+            return {
+                "job_id": job_id,
+                "job_status": status,
+                "creative_provider": "lechuang",
+                "model": result.get("model") or prompt.recommended_model,
+                "provider_task_id": task.provider_task_id,
+            }
+        if status != "SUCCEEDED":
+            self.store.save_production_run(ProductionRun(**{
+                **(self.store.get_production_run(run.run_id) or live).__dict__,
+                "status": "BLOCKED",
+                "updated_at": utcnow(),
+            }))
+            return {
+                "job_id": job_id,
+                "job_status": status,
+                "creative_provider": "lechuang",
+                "model": prompt.recommended_model,
+                "error": task.error,
+            }
+        artifact = adapter.download_artifact(task)
+        imported = self.import_asset(
+            artifact.path,
+            account_id=account.account_id,
+            platform=account.platform,
+            episode_id=episode_id,
+            asset_role="GENERATED_PRIMARY",
+            reuse_mode="NONE",
+            intent="GENERATE",
+            prompt_id=prompt.prompt_id,
+            model=str(result.get("model") or prompt.recommended_model or "UNKNOWN"),
+            tool="lechuang",
+            generation_mode="PROVIDER_API",
+            production_run_id=run.run_id,
+            source_asset_id=prompt.source_asset_id,
+        )
+        asset = imported["asset"]
+        live = self.store.get_production_run(run.run_id) or live
+        self.store.save_production_run(ProductionRun(**{
+            **live.__dict__,
+            "asset_id": asset.asset_id,
+            "creative_result_snapshot": {
+                **dict(live.creative_result_snapshot or {}),
+                "status": "SUCCEEDED",
+                "asset_id": asset.asset_id,
+                "sha256": asset.sha256,
+                "provider_artifact_id": artifact.provider_artifact_id,
+                "source_url": artifact.source_url,
+                "mime_type": artifact.mime_type,
+                "byte_size": artifact.byte_size,
+            },
+            "updated_at": utcnow(),
+        }))
+        return {
+            "job_id": job_id,
+            "job_status": "SUCCEEDED",
+            "creative_provider": "lechuang",
+            "model": str(result.get("model") or prompt.recommended_model),
+            "asset_id": asset.asset_id,
+            "sha256": asset.sha256,
+            "qa": imported.get("qa"),
+        }
 
     def reconcile_creative_jobs(self, *, account_id: str | None = None) -> list[dict[str, Any]]:
+        from creative.errors import AuthError, ProviderBlocked, RateLimited
+        from integrations.providers.resolver import resolve_creative_provider
+
         rows = []
+        adapter, _name = resolve_creative_provider("lechuang")
         for run in self.store.list_production_runs(account_id=account_id):
             snapshot = dict(run.creative_result_snapshot or {})
             status = str(snapshot.get("status") or "")
@@ -1044,6 +1080,46 @@ class ContinuityRuntime:
                 continue
             prompt = self.store.get_prompt(run.prompt_id)
             if prompt is None:
+                continue
+            provider_task_id = str(snapshot.get("provider_task_id") or "")
+            if provider_task_id:
+                account = self.store.get_account(run.account_id)
+                if account is None:
+                    continue
+                try:
+                    if str(prompt.kind or "").upper() in {"VIDEO", "IMAGE_TO_VIDEO"}:
+                        task = adapter.client.poll_video(provider_task_id, wait=False)
+                    else:
+                        task = adapter.get_task(provider_task_id)
+                    rows.append(self._commit_generation_task(
+                        run=run,
+                        job_id=run.creative_job_id or "",
+                        prompt=prompt,
+                        adapter=adapter,
+                        task=task,
+                        account=account,
+                        episode_id=run.episode_id,
+                    ))
+                except (AuthError, RateLimited, ProviderBlocked) as exc:
+                    retryable = bool(getattr(exc, "retryable", False) or (getattr(exc, "details", {}) or {}).get("retryable"))
+                    self.store.save_production_run(ProductionRun(**{
+                        **run.__dict__,
+                        "status": "BLOCKED",
+                        "creative_result_snapshot": {
+                            **snapshot,
+                            "status": "FAILED",
+                            "error_code": getattr(exc, "code", None) or type(exc).__name__,
+                            "error_message": str(exc),
+                            "retryable": retryable,
+                        },
+                        "updated_at": utcnow(),
+                    }))
+                    rows.append({
+                        "job_id": run.creative_job_id,
+                        "job_status": "FAILED",
+                        "error": str(exc),
+                        "retryable": retryable,
+                    })
                 continue
             rows.append(self.submit_generation(
                 account_id=run.account_id,

@@ -74,8 +74,6 @@ class CreativeWorkflowEngine:
             if self.allow_mock:
                 if getattr(self.resolver.providers.get("lechuang"), "name", "") != "mock":
                     self.resolver.providers["lechuang"] = mock
-                if getattr(self.resolver.providers.get("xai"), "name", "") != "mock":
-                    self.resolver.providers["xai"] = mock
 
     @classmethod
     def production(cls, **kwargs: Any) -> "CreativeWorkflowEngine":
@@ -233,7 +231,7 @@ class CreativeWorkflowEngine:
                 except ValueError:
                     pass
             provider, _ = self.resolver.resolve(task.provider if task.provider != "mock" else "mock")
-            if task.provider in {"lechuang", "xai"} and self.allow_mock:
+            if task.provider == "lechuang" and self.allow_mock:
                 provider, _ = self.resolver.resolve(task.provider)
             if task.poll_count >= 30:
                 task.status = "FAILED"

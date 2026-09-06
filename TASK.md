@@ -2,9 +2,9 @@
 
 **GOAL:** Close Memory, Account, Continuity, Creative, and Video into one
 production loop. MemoryService owns retrieval/writeback. Obsidian is the
-knowledge brain. PostgreSQL is operational state. Video is xAI
-`grok-imagine-video-1.5`. Live video E2E stays NOT_VERIFIED without a real API
-MediaAsset + TechnicalQA. Do not fake REAL_VIDEO_E2E=PASS.
+knowledge brain. PostgreSQL is operational state. Video is Lechuang
+`grok-video` via `POST /videos`. Live video E2E stays NOT_VERIFIED without a
+real API MediaAsset + TechnicalQA. Do not fake REAL_VIDEO_E2E=PASS.
 
 **VERIFY:** pytest, architecture tests, bootstrap-production, social_doctor,
 meiti_doctor --gate architecture. Production gate exits non-zero until live

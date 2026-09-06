@@ -210,21 +210,21 @@ def check_lechuang() -> dict:
     }
 
 
-def check_xai_video() -> dict:
-    from creative.providers.xai.adapter import XAIVideoAdapter
-    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_MODEL, VIDEO_NOT_VERIFIED
-    adapter = XAIVideoAdapter()
+def check_lechuang_video() -> dict:
+    from creative.providers.lechuang.adapter import LechuangAdapter
+    from creative.providers.lechuang.client import DEFAULT_VIDEO_MODEL, VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
+    adapter = LechuangAdapter()
     video = adapter.capability_status("text_to_video")
     i2v = adapter.capability_status("image_to_video")
     return {
         "status": video.get("status") or "NOT_VERIFIED",
-        "VIDEO_PROVIDER": "PASS" if adapter.name == "xai" else "FAIL",
+        "VIDEO_PROVIDER": "PASS" if adapter.name == "lechuang" else "FAIL",
         "VIDEO_CONTRACT": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else "PASS",
         "VIDEO_POLLING": "PASS",
         "VIDEO_MEDIA_ASSET": "NOT_VERIFIED",
         "VIDEO_TECHNICAL_QA": "NOT_VERIFIED",
         "IMAGE_TO_VIDEO_RUNTIME": i2v.get("status") or "NOT_VERIFIED",
-        "model": VIDEO_MODEL,
+        "model": DEFAULT_VIDEO_MODEL,
         "reason": VIDEO_NOT_VERIFIED,
         "credential_present": bool(adapter.client.api_key.strip()),
     }
@@ -289,7 +289,7 @@ def check_generation_resolver() -> dict:
         from social.providers.resolver import resolve_social_provider
         resolver = GenerationProviderResolver(allow_mock=False)
         social = resolve_social_provider("x")
-        ok = "lechuang" in resolver.providers and "xai" in resolver.providers and "mock" not in resolver.providers and social.implementation is not None
+        ok = "lechuang" in resolver.providers and "xai" not in resolver.providers and "mock" not in resolver.providers and social.implementation is not None
         return _status(ok, creative_providers=sorted(resolver.providers), social=social.name)
     except Exception as exc:
         return _status(False, error=str(exc))
@@ -514,7 +514,7 @@ def check_real_creative_e2e() -> dict:
     data = load_e2e()
     image = data.get("image") or {}
     if bool(image.get("real_e2e")) and str(image.get("media_asset") or "") == "PASS" and str(image.get("qa") or "") == "PASS":
-        return _status(True, reason="ok", env=API_KEY_ENV, service="xiaole-lechuang", video="NOT_VERIFIED")
+        return _status(True, reason="ok", env=API_KEY_ENV, service="xiaole-lechuang", video=str((data.get("video") or {}).get("contract") or "NOT_VERIFIED"))
     return {"status": "BLOCKED_EXTERNAL", "reason": "no real image E2E evidence", "env": API_KEY_ENV, "service": "xiaole-lechuang", "next": "Run python scripts/meiti.py creative generate-image with XIAOLEAI_API_KEY and persist MediaAsset + QA."}
 
 
@@ -854,9 +854,8 @@ def run() -> dict:
         "Provider Resolver": check_generation_resolver(),
         "Image Generation": check_lechuang_capability("text_to_image"),
         "Image-to-Image": check_lechuang_capability("image_to_image"),
-        "Image-to-Video": check_xai_video(),
-        "Video Generation": check_xai_video(),
-        "XAI Video": check_xai_video(),
+        "Image-to-Video": check_lechuang_video(),
+        "Video Generation": check_lechuang_video(),
         "Vision Provider": check_vision_provider(),
         "AI Judge": check_ai_judge(),
         "Social Provider Registry": check_social_provider_registry(),
@@ -877,7 +876,7 @@ def _lane_of(name: str, detail: dict | None = None) -> str:
         return LANE_BY_KEY[name]
     if isinstance(detail, dict) and detail.get("lane"):
         return str(detail["lane"])
-    if name in {"Research", "Real Creative E2E", "Real Social E2E", "Real Distribution E2E", "Lechuang", "Creative Credential", "Lechuang Auth", "Vision Provider", "XAI Video", "Video Generation", "Image-to-Video", "Image Generation", "Douyin", "Kuaishou", "Xianyu"}:
+    if name in {"Research", "Real Creative E2E", "Real Social E2E", "Real Distribution E2E", "Lechuang", "Creative Credential", "Lechuang Auth", "Vision Provider", "Video Generation", "Image-to-Video", "Image Generation", "Douyin", "Kuaishou", "Xianyu"}:
         return "EXTERNAL"
     if name in {"Persistence", "Creative Persistence", "Publication Persistence", "Credential"}:
         return "CONFIGURATION"

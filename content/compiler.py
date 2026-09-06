@@ -117,9 +117,13 @@ class PromptCompiler:
         negative = "; ".join(part for part in (NEGATIVE_BASE, prompt_dna.get("negative"), *(world.taboos if world else ())) if part)
         ratio = str(policy.get("aspect_ratio") or ("3:4" if kind == "IMAGE" else "9:16"))
         duration = "0" if kind == "IMAGE" else str((dna.prompt_dna or {}).get("duration") or "6")
-        model = "gpt-image-2" if kind == "IMAGE" else "lechuang-unverified-video"
-        size = "2K" if kind == "IMAGE" else ""
-        execution_mode = "api" if kind == "IMAGE" else "manual"
+        if kind == "IMAGE":
+            model = "gpt-image-2"
+            size = "2K"
+        else:
+            model = "grok-video"
+            size = "720x1280" if ratio == "9:16" else ("1280x720" if ratio == "16:9" else "1024x1024")
+        execution_mode = "api"
         copy_ready = _copy_ready(
             kind=kind,
             character_lock=character_lock,
@@ -250,7 +254,9 @@ class PromptCompiler:
             metadata={
                 "kind": package.kind,
                 "source_asset_id": package.source_asset_id,
-                "mode": params.get("mode") or ("api" if package.kind == "IMAGE" else "manual"),
+                "mode": params.get("mode") or "api",
+                "source_asset_id": package.source_asset_id,
+                "kind": package.kind,
             },
         )
 
@@ -574,8 +580,7 @@ def _copy_ready(
             "END STATE",
             "end on a new frame",
         ])
-    mode = "api" if kind == "IMAGE" else "manual"
-    lines.extend(["", "NEGATIVE PROMPT", negative, "", "LECHUANG PARAMETERS", f"tool=lechuang provider=lechuang mode={mode} aspect_ratio={ratio} duration={duration}"])
+    lines.extend(["", "NEGATIVE PROMPT", negative, "", "LECHUANG PARAMETERS", f"tool=lechuang provider=lechuang mode=api aspect_ratio={ratio} duration={duration}"])
     if references:
         lines.extend(["", "REFERENCE ASSETS", ", ".join(references)])
     if strategy_basis:

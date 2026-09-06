@@ -27,9 +27,11 @@ checked into this repository.
 | API Key | `XIAOLEAI_API_KEY` |
 | API Key Header | `Authorization: Bearer <key>` |
 | Content-Type | `application/json` |
-| Image endpoint | `POST /images/generations` |
-| Alternate image endpoint | `POST /image/created` (explicit opt-in only) |
-| Image request | `model`, `prompt`, `response_format=b64_json`, `image_size`, `aspect_ratio`, `n` |
+| Image endpoint | `POST /images/generations` only. Do not call `/image/created` as fallback. |
+| Video create | `POST /videos` multipart/form-data |
+| Video poll | `GET /videos/{id}` |
+| Video download | `GET /videos/{id}/content` |
+| Image request | `model`, `prompt`, `response_format=b64_json`, `image_size`, `aspect_ratio`, `quality`, `n` |
 | Image response | `data[].b64_json`; optional `id` / `request_id`, `model`, `usage` |
 | Image models | `gpt-image-2`, `gemini-2.5-flash-image`, `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview` |
 | image_size | `512`, `1K`, `2K`, `4K` |
@@ -58,9 +60,11 @@ document a credit formula. If `usage` is absent, cost is `UNKNOWN`.
 | Creator OS submit (image) | supported | `ContinuityRuntime.submit_generation` |
 | Idempotent submit (account+episode+prompt+spec) | supported | `ContinuityRuntime.submit_generation` |
 | Fail-closed auth / 429 / 5xx / timeout | supported | `LechuangClient` |
-| Video generation | NOT_VERIFIED | adapter raises `UnsupportedCapability` |
+| Video `POST /videos` | documented, live NOT_VERIFIED | `LechuangClient.generate_video` |
+| Video poll `GET /videos/{id}` | documented, live NOT_VERIFIED | `LechuangClient.poll_video` |
+| Video download `GET /videos/{id}/content` | documented, live NOT_VERIFIED | `LechuangClient._materialize_video` |
+| Image-to-video via `input_reference[]` | documented, live NOT_VERIFIED | `LechuangClient.generate_video` |
 | Image edit / image-to-image | NOT_VERIFIED | adapter raises `UnsupportedCapability` |
-| Image-to-video | NOT_VERIFIED | adapter raises `UnsupportedCapability` |
 | Remote task poll for images | not applicable | image call is synchronous |
 | Webhook | NOT_VERIFIED | no contract evidence |
 | Social publish via Lechuang | forbidden | Creative never publishes |
@@ -75,16 +79,15 @@ They stay `NOT_VERIFIED`. Do not guess endpoints, task ids, or PASS.
 | Item | Status |
 | --- | --- |
 | Text generation interface | NOT_VERIFIED |
-| Video generation interface | NOT_VERIFIED |
-| Async task create (`task_id` / `job_id`) | NOT_VERIFIED for Lechuang video |
-| Query task status interface | NOT_VERIFIED |
-| Success / failure / cancel remote states | NOT_VERIFIED (image is sync HTTP) |
-| Result URL / file URL | NOT_VERIFIED (image returns `b64_json`) |
+| Video live generation | NOT_VERIFIED until a real MediaAsset + TechnicalQA exists |
+| Image edit / image-to-image | NOT_VERIFIED (`POST /image/edit` is documented, Meiti does not execute it yet) |
+| `/created/video` | documented sync wait; Meiti does not use it. Async `/videos` is the production path |
+| `/image/created` | documented image alias; Meiti does not use it as fallback |
 | Webhook | NOT_VERIFIED |
 | Webhook signature | NOT_VERIFIED |
-| Video model names | NOT_VERIFIED |
-| Video aspect ratio / resolution / duration | NOT_VERIFIED |
-| Reference image / reference video | NOT_VERIFIED |
+| Video live MediaAsset + QA | NOT_VERIFIED |
+| Video models documented | `grok-video`, `video-ds-2.0`, `video-ds-2.0-fast` |
+| Video fields documented | `seconds`, `size`, `resolution_name`, `preset`, `input_reference[]` |
 | Negative prompt (API field) | NOT_VERIFIED (Meiti keeps it on PromptPackage only) |
 | Seed | NOT_VERIFIED |
 | Billing / credits formula | NOT_VERIFIED (`cost_status=UNKNOWN` unless `usage` is returned) |
@@ -94,8 +97,8 @@ They stay `NOT_VERIFIED`. Do not guess endpoints, task ids, or PASS.
 | Remote cancel | NOT_VERIFIED (local cancel only) |
 | `GET /models` or capability discovery API | NOT_VERIFIED |
 
-xAI video (`grok-imagine-video-1.5`) is a separate creative provider and is
-also `NOT_VERIFIED` until its own contract is proven.
+Lechuang is the only Creative Provider. Image, video, and image-to-video all
+execute through `LechuangClient`. There is no parallel xAI creative provider.
 
 ## Runtime states
 
@@ -122,6 +125,6 @@ the request and `SUCCEEDED` / `FAILED` after. There is no honest remote
 | `LECHUANG_API_CONFIGURED` | credential present |
 | `LECHUANG_API_REACHABLE` | live HTTP only with `--live` |
 | `LECHUANG_IMAGE_CAPABILITY_VERIFIED` | image contract verified |
-| `LECHUANG_VIDEO_CAPABILITY_VERIFIED` | stays NOT_VERIFIED |
+| `LECHUANG_VIDEO_CAPABILITY_VERIFIED` | VERIFIED only after live video MediaAsset + QA |
 
 `--live` is the only path allowed to spend image credits.

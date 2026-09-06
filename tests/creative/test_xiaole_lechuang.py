@@ -29,8 +29,8 @@ from creative.providers.resolver import GenerationProviderResolver
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict, status: int = 200):
-        self._raw = json.dumps(payload).encode("utf-8")
+    def __init__(self, payload: dict | bytes, status: int = 200):
+        self._raw = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload).encode("utf-8")
         self.status = status
 
     def read(self):
@@ -107,6 +107,35 @@ def test_generate_image_persists_media_asset(tmp_path, monkeypatch):
     assert result["asset_id"] == asset.asset_id
 
 
+def test_generate_video_uses_official_async_contract(tmp_path, monkeypatch):
+    from creative.providers.lechuang.client import VIDEO_CREATE_ENDPOINT
+
+    client = LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret", asset_root=tmp_path)
+    calls = []
+
+    def fake_urlopen(request, timeout=None):
+        calls.append((request.get_method(), request.full_url, request.data))
+        if request.full_url.endswith(VIDEO_CREATE_ENDPOINT) and request.get_method() == "POST":
+            assert b"model" in request.data
+            assert b"prompt" in request.data
+            assert b"seconds" in request.data
+            assert b"input_reference[]" not in request.data
+            return _FakeResponse({"id": "video_abc", "status": "queued"})
+        if request.full_url.endswith("/videos/video_abc") and request.get_method() == "GET":
+            return _FakeResponse({"id": "video_abc", "status": "in_progress"})
+        raise AssertionError(request.full_url)
+
+    monkeypatch.setattr("creative.providers.lechuang.client.urlopen", fake_urlopen)
+    task = client.generate_video({"prompt": "neon rain street", "model": "grok-video", "seconds": 10})
+    assert task.provider_task_id == "video_abc"
+    assert task.status == "queued"
+    polled = client.poll_video("video_abc", wait=False)
+    assert polled.status == "running"
+    assert "/videos/video_abc/content" in polled.result["source_url"]
+    assert not any("/created/video" in url for _, url, _ in calls)
+    assert not any("/image/created" in url for _, url, _ in calls)
+
+
 def test_http_200_without_b64_is_failure(tmp_path, monkeypatch):
     client = LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret", asset_root=tmp_path)
 
@@ -136,11 +165,13 @@ def test_auth_rate_limit_timeout(monkeypatch):
 
 def test_video_and_image_edit_stay_not_verified():
     adapter = LechuangAdapter(client=LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret"))
-    for method in ("generate_video", "edit_image", "extend_video", "edit_video", "upload_asset"):
+    for method in ("edit_image", "extend_video", "edit_video", "upload_asset"):
         with pytest.raises(UnsupportedCapability):
             getattr(adapter, method)({"prompt": "x"})
-    assert adapter.capability_status("image_to_video")["status"] == "NOT_VERIFIED"
+    status = adapter.capability_status("image_to_video")
+    assert status["status"] in {"NOT_VERIFIED", "CONFIGURED"}
     assert VIDEO_NOT_VERIFIED in adapter.capability_status("text_to_video")["reason"]
+    assert adapter.capability_status("text_to_video")["verified"] is False
 
 
 def test_resolver_aliases_share_one_provider():
@@ -166,9 +197,9 @@ def test_cli_generate_video_is_not_verified(capsys):
         prompt = "x"
     assert cmd_creative_generate_video(Args()) == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "NOT_VERIFIED"
     assert payload["VIDEO_CONTRACT_VERIFIED"] is False
     assert payload["VIDEO_PRODUCTION_READY"] == "NOT_VERIFIED"
+    assert payload["provider"] == "lechuang"
 
 
 def test_skill_path_is_media_owner():

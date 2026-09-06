@@ -1,6 +1,13 @@
-"""Xiaole / Lechuang contract status. Image verified; video stays NOT_VERIFIED."""
+"""Xiaole / Lechuang contract status. Image verified; video documented until live success."""
 
-from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED, LechuangClient
+from creative.providers.lechuang.client import (
+    IMAGE_CONTRACT_VERIFIED,
+    IMAGE_ENDPOINT,
+    VIDEO_CONTRACT_VERIFIED,
+    VIDEO_CREATE_ENDPOINT,
+    VIDEO_NOT_VERIFIED,
+    LechuangClient,
+)
 
 
 def contract_status(client: LechuangClient | None = None) -> dict:
@@ -14,5 +21,7 @@ def contract_status(client: LechuangClient | None = None) -> dict:
         "reason": reason,
         "video_reason": VIDEO_NOT_VERIFIED,
         "protocol": "openai-compatible",
-        "endpoint": "/images/generations",
+        "endpoint": IMAGE_ENDPOINT,
+        "video_endpoint": VIDEO_CREATE_ENDPOINT,
+        "video_documented": True,
     }

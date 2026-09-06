@@ -43,14 +43,36 @@ models:
     async: false
     verified: true
     capabilities: [text_to_image, image_generation]
-  - provider: xai
-    model: grok-imagine-video-1.5
+  - provider: lechuang
+    model: grok-video
     input_types: [text, image]
     output_types: [video]
-    supported_references: [image, character]
-    resolution: [720p]
+    supported_references: [image]
+    resolution: [720p, 480p]
     aspect_ratio: ["9:16", "16:9", "1:1"]
-    duration: ["6", "10"]
+    duration: ["6", "10", "12", "16", "20"]
+    async: true
+    verified: false
+    capabilities: [text_to_video, image_to_video, video_generation]
+  - provider: lechuang
+    model: video-ds-2.0
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image]
+    resolution: []
+    aspect_ratio: ["9:16", "16:9", "1:1"]
+    duration: ["15"]
+    async: true
+    verified: false
+    capabilities: [text_to_video, image_to_video, video_generation]
+  - provider: lechuang
+    model: video-ds-2.0-fast
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image]
+    resolution: []
+    aspect_ratio: ["9:16", "16:9", "1:1"]
+    duration: ["15"]
     async: true
     verified: false
     capabilities: [text_to_video, image_to_video, video_generation]

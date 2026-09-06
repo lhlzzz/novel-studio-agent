@@ -1,7 +1,8 @@
 # Xiaole / Lechuang Provider
 
-Lechuang is a generation provider, not an Agent and not a workspace.
-XiaoleAI and Lechuang share one Creative credential.
+Lechuang is the only Creative Provider. It is not an Agent and not a workspace.
+Image, video, and image-to-video all execute here. XiaoleAI and Lechuang share
+one Creative credential.
 
 ```text
 XIAOLEAI_API_KEY
@@ -19,11 +20,17 @@ OpenAI-compatible contract from `.agents/skills/media/xiaoleai-image-generation/
 - Response: `data[].b64_json`
 - Output: decoded image bytes persisted as `MediaAsset`
 
-## NOT_VERIFIED
+## Documented video contract (live NOT_VERIFIED)
 
-Video generation, image-to-video, video extend, video edit, and image editing
-are not present in repository evidence. They stay `NOT_VERIFIED`. Do not guess
-those endpoints.
+Official docs at `docs.xiaoleai.team` expose:
+
+- `POST /videos` multipart create (`model`, `prompt`, `seconds`, `size`, optional `resolution_name`/`preset`, `input_reference[]`)
+- `GET /videos/{id}` status poll
+- `GET /videos/{id}/content` MP4 download
+
+Meiti uses that async path only. It does not fall back to `/created/video` or
+`/image/created`. Video stays `NOT_VERIFIED` until a live MediaAsset + TechnicalQA
+succeeds.
 
 The full contract ledger is `docs/integrations/lechuang.md`. That file
 separates official evidence, Meiti-supported capabilities, and unverified

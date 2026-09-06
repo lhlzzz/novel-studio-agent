@@ -14,5 +14,5 @@ Lechuang API contract exist.
    with `user_video_publish`.
 5. Xianyu: official ISV access + `MEITI_XIANYU_DEPLOYMENT_MODE=JUSHITA`.
 6. Xiaohongshu: keep handoff until `write_notes` + official publish E2E exists.
-7. Image contract is XiaoleAI `/images/generations`. Video remains NOT_VERIFIED.
+7. Image, video, and image-to-video all go through Lechuang. Image contract is XiaoleAI `/images/generations`. Video remains NOT_VERIFIED.
 8. Real E2E is operator-run: `MEITI_PRODUCTION_E2E=true`.

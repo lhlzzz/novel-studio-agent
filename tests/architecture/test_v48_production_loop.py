@@ -47,8 +47,9 @@ def test_cli_covers_production_loop_without_forging_providers():
 
 
 def test_grok_is_not_a_video_model_and_handoff_is_not_publication():
-    xai = (ROOT / "creative/providers/xai/client.py").read_text(encoding="utf-8")
+    lechuang = (ROOT / "creative/providers/lechuang/client.py").read_text(encoding="utf-8")
     runtime = (ROOT / "content/runtime.py").read_text(encoding="utf-8")
-    assert "grok-4.6" not in xai
+    assert "grok-4.6" not in lechuang
+    assert not (ROOT / "creative/providers/xai").exists()
     assert "XHS_HANDOFF" in runtime
     assert "HANDED_OFF" in runtime

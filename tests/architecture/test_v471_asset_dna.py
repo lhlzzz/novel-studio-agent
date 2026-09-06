@@ -37,9 +37,10 @@ def test_cli_is_prompt_first_and_does_not_bypass_architecture():
 def test_readme_is_prompt_first_and_does_not_treat_grok_as_video_model():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "prompt-first" in readme.lower() or "Prompt-first" in readme or "Meiti is prompt-first" in readme
-    assert "Lechuang is a manual creative execution tool" in readme or "manual creative execution" in readme.lower()
+    assert "only Creative Provider" in readme or "primary creative" in readme.lower()
     assert "never fabricates external generation evidence" in readme.lower() or "never fabricates" in readme
-    assert "grok-4.6" not in (ROOT / "creative/providers/xai/client.py").read_text(encoding="utf-8")
+    assert "grok-4.6" not in (ROOT / "creative/providers/lechuang/client.py").read_text(encoding="utf-8")
+    assert not (ROOT / "creative/providers/xai").exists()
 
 
 def test_migration_0013_exists_and_heads_from_v47():

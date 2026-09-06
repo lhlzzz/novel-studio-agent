@@ -26,8 +26,10 @@ X_REDIRECT_URI=
 SCRAPECREATORS_API_KEY=
 ```
 
-Image generation uses the verified XiaoleAI OpenAI-compatible contract.
-Video stays NOT_VERIFIED until a real video API exists. Do not guess endpoints.
+Lechuang is the only Creative Provider. Image generation uses the verified
+XiaoleAI OpenAI-compatible contract. Video and image-to-video use the official
+async `/videos` contract and stay NOT_VERIFIED until live MediaAsset +
+TechnicalQA evidence exists. Do not guess endpoints.
 
 ## Meiti database
 

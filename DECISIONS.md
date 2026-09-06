@@ -62,3 +62,12 @@
   compile a PromptPackage, submit a CreativeJob, and import through
   `PlatformAssetService`. Manual import remains a fallback, not the default
   image path. Social OAuth is not required for generation.
+- **2026-09-06:** Lechuang video follows the official XiaoleAI contract:
+  `POST /videos`, `GET /videos/{id}`, `GET /videos/{id}/content`. Meiti does
+  not keep `/image/created` or `/created/video` as fallback. Video is
+  documented and executable, but stays NOT_VERIFIED until live MediaAsset +
+  TechnicalQA succeeds. Do not fake PASS.
+- **2026-09-06:** Lechuang is the only Creative Provider. Image, video, and
+  image-to-video all execute through `LechuangAdapter` / `LechuangClient`.
+  The parallel xAI creative provider (`grok-imagine-video-1.5`,
+  `/videos/generations`) is removed. Social providers are unchanged.

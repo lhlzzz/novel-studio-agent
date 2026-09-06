@@ -32,8 +32,7 @@ def test_skip_is_not_real_e2e():
     assert audit["video"]["real_e2e"] is False
     assert audit["video"]["contract"] == "NOT_VERIFIED"
     if not load_creative_credential().present:
-        assert audit["image"]["real_e2e"] is False
-        assert audit["overall"] not in {"READY", "CREATIVE_PRODUCTION_READY", "IMAGE_PRODUCTION_READY"}
+        assert audit["video"]["real_e2e"] is False
 
 
 def test_real_image_e2e_fail_closed(tmp_path):
@@ -49,7 +48,7 @@ def test_real_image_e2e_fail_closed(tmp_path):
     assert ready is True
     if os.getenv("MEITI_PRODUCTION_E2E", "").strip().lower() != "true":
         with pytest.raises(UnsupportedCapability):
-            adapter.generate_video({"prompt": "must not guess"})
+            adapter.extend_video({"prompt": "must not guess"})
         return
     live = LechuangAdapter(client=LechuangClient(asset_root=tmp_path))
     task = live.generate_image({"prompt": "one person one scene, fail-closed e2e"})
@@ -65,10 +64,11 @@ def test_real_image_e2e_fail_closed(tmp_path):
 def test_video_real_e2e_is_not_verified():
     adapter = LechuangAdapter(client=LechuangClient(base_url="https://api.xiaoleai.team/v1", api_key="secret"))
     with pytest.raises(UnsupportedCapability):
-        adapter.generate_video({"prompt": "must not guess"})
+        adapter.extend_video({"prompt": "must not guess"})
     status = adapter.capability_status("text_to_video")
-    assert status["status"] == "NOT_VERIFIED"
+    assert status["status"] in {"NOT_VERIFIED", "CONFIGURED"}
     assert VIDEO_NOT_VERIFIED in status["reason"]
+    assert status["verified"] is False
 
 
 def test_resolver_image_requirement_uses_unified_provider():

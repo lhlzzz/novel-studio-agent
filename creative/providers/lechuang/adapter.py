@@ -1,4 +1,4 @@
-"""Unified Xiaole / Lechuang creative provider. Image is verified; video is not."""
+"""Unified Xiaole / Lechuang creative provider. Official image and video HTTP contract."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 from creative.errors import ProviderBlocked, UnsupportedCapability
 from creative.providers.base import CapabilityMixin
 from creative.providers.lechuang.capabilities import claimed_capabilities, load_models
-from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, IMAGE_KINDS, VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED, LechuangClient
+from creative.providers.lechuang.client import IMAGE_CONTRACT_VERIFIED, IMAGE_KINDS, VIDEO_CONTRACT_VERIFIED, VIDEO_KINDS, VIDEO_NOT_VERIFIED, LechuangClient
 from creative.providers.lechuang.credentials import API_KEY_ENV
 from creative.schemas import ProviderQuote, ProviderTask
 from integrations.contracts.creative import CreativeArtifact
@@ -24,11 +24,9 @@ METHOD_TO_CAPABILITY = {
 }
 
 VERIFIED_CAPABILITIES = frozenset({"text_to_image", "image_generation", "generate_image"})
+VIDEO_CAPABILITIES = frozenset({"text_to_video", "image_to_video", "video_generation", "generate_video"})
 CLAIMED_UNVERIFIED = frozenset({
     "image_to_image",
-    "text_to_video",
-    "image_to_video",
-    "video_generation",
     "video_extend",
     "video_edit",
     "upload_asset",
@@ -75,6 +73,8 @@ class LechuangAdapter(CapabilityMixin):
         capability = METHOD_TO_CAPABILITY.get(method, method)
         if method in IMAGE_KINDS or capability in VERIFIED_CAPABILITIES:
             return
+        if method in VIDEO_KINDS or capability in VIDEO_CAPABILITIES:
+            return
         if capability in CLAIMED_UNVERIFIED or method in CLAIMED_UNVERIFIED:
             raise UnsupportedCapability(capability, provider="lechuang")
         raise UnsupportedCapability(capability, provider="lechuang")
@@ -111,7 +111,10 @@ class LechuangAdapter(CapabilityMixin):
         raise UnsupportedCapability("image_to_image", provider="lechuang")
 
     def generate_video(self, payload: dict[str, Any]) -> ProviderTask:
-        raise UnsupportedCapability("text_to_video", provider="lechuang")
+        kind = str((payload or {}).get("kind") or (payload or {}).get("generation_type") or "generate_video")
+        if kind in {"image_to_video", "IMAGE_TO_VIDEO"}:
+            return self.create_task("image_to_video", payload)
+        return self.create_task("generate_video", payload)
 
     def extend_video(self, payload: dict[str, Any]) -> ProviderTask:
         raise UnsupportedCapability("video_extend", provider="lechuang")
@@ -186,13 +189,33 @@ class LechuangAdapter(CapabilityMixin):
     def capability_status(self, name: str) -> dict[str, Any]:
         ready, reason = self.live_ready()
         verified = self.has_verified(name)
-        if name in {"text_to_video", "image_to_video", "video_generation", "video_extend", "video_edit"}:
+        if name in {"video_extend", "video_edit"}:
+            return {
+                "status": "NOT_VERIFIED",
+                "capability": name,
+                "verified": False,
+                "reason": "XiaoleAI video extend/edit is not present in official docs",
+                "env": API_KEY_ENV,
+            }
+        if name in VIDEO_CAPABILITIES:
+            if VIDEO_CONTRACT_VERIFIED and ready:
+                return {"status": "PASS", "capability": name, "verified": True, "reason": reason, "env": API_KEY_ENV}
+            if ready:
+                return {
+                    "status": "CONFIGURED",
+                    "capability": name,
+                    "verified": False,
+                    "reason": VIDEO_NOT_VERIFIED,
+                    "env": API_KEY_ENV,
+                    "contract": "DOCUMENTED",
+                }
             return {
                 "status": "NOT_VERIFIED",
                 "capability": name,
                 "verified": False,
                 "reason": VIDEO_NOT_VERIFIED,
                 "env": API_KEY_ENV,
+                "contract": "DOCUMENTED",
             }
         if name in {"image_to_image", "edit_image"}:
             return {

@@ -86,8 +86,10 @@ User -> MediaAgent -> CreativeWorkflowResolver -> CreativeRun -> DB
 ```
 
 Meiti = Creator Brain + Prompt Compiler + Asset/Continuity/Learning System
-Lechuang = primary creative provider. Image API is verified. Video stays
-NOT_VERIFIED. Manual import remains a fallback, not the default image path.
+Lechuang = the only Creative Provider. Image, video, and image-to-video all
+go through Lechuang. Image API is verified. Video uses the official async
+`/videos` contract and stays NOT_VERIFIED until live success.
+Manual import remains a fallback, not the default image path.
 Native social adapters = X / Instagram / YouTube / TikTok / LinkedIn
 grok-4.6 = engineering agent for this repository, never a video generation model
 

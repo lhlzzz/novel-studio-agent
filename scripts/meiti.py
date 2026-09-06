@@ -411,32 +411,56 @@ def cmd_creative_generate_image(args: argparse.Namespace) -> int:
 
 
 def cmd_creative_generate_video(args: argparse.Namespace) -> int:
-    from creative.providers.xai.client import VIDEO_CONTRACT_VERIFIED, VIDEO_MODEL, VIDEO_NOT_VERIFIED
+    from creative.providers.lechuang.client import VIDEO_CONTRACT_VERIFIED, VIDEO_NOT_VERIFIED
     from creative.runtime.container import CreativeRuntime
 
     runtime = CreativeRuntime.create(allow_mock=False)
-    adapter = runtime.provider_resolver.providers.get("xai")
+    adapter = runtime.provider_resolver.providers.get("lechuang")
     capability = adapter.capability_status("text_to_video") if adapter is not None else {
         "status": "NOT_VERIFIED",
         "reason": VIDEO_NOT_VERIFIED,
     }
-    print(json.dumps({
-        "status": "NOT_VERIFIED",
-        "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
-        "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
-        "reason": capability.get("reason") or VIDEO_NOT_VERIFIED,
-        "provider": "xai",
-        "model": VIDEO_MODEL,
-        "prompt_required_context": ["CreativeContext", "PlatformStrategy", "ContinuityContext"],
+    if adapter is None or not getattr(args, "prompt", None):
+        print(json.dumps({
+            "status": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else "BLOCKED",
+            "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
+            "VIDEO_PRODUCTION_READY": "NOT_VERIFIED" if not VIDEO_CONTRACT_VERIFIED else capability.get("status"),
+            "reason": capability.get("reason") or VIDEO_NOT_VERIFIED,
+            "provider": "lechuang",
+            "model": "grok-video",
+            "endpoint": "POST /videos",
+            "source_asset_id": getattr(args, "source_asset_id", None),
+        }))
+        return 1 if not VIDEO_CONTRACT_VERIFIED else 0
+    payload = {
+        "prompt": args.prompt,
+        "model": getattr(args, "model", None) or "grok-video",
+        "aspect_ratio": getattr(args, "aspect_ratio", None) or "9:16",
+        "seconds": getattr(args, "duration", None) or 6,
+        "kind": "image_to_video" if getattr(args, "source_asset_id", None) else "generate_video",
         "source_asset_id": getattr(args, "source_asset_id", None),
-        "evidence_checked": [
-            "creative/providers/xai/models.yaml",
-            "creative/providers/xai/client.py",
-            "creative/providers/xai/adapter.py",
-            "creative/providers/capabilities/registry.yaml",
-        ],
-    }))
-    return 1
+    }
+    try:
+        task = adapter.generate_video(payload)
+    except Exception as exc:
+        print(json.dumps({
+            "status": "FAILED",
+            "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
+            "VIDEO_PRODUCTION_READY": "NOT_VERIFIED",
+            "reason": str(exc),
+            "provider": "lechuang",
+            "model": payload["model"],
+        }))
+        return 1
+    print(json.dumps({
+        "status": task.status,
+        "VIDEO_CONTRACT_VERIFIED": bool(VIDEO_CONTRACT_VERIFIED),
+        "provider": "lechuang",
+        "provider_task_id": task.provider_task_id,
+        "model": payload["model"],
+        "kind": task.kind,
+    }, default=str))
+    return 0 if task.status in {"succeeded", "queued", "running", "submitted"} else 1
 
 
 def cmd_creative_image_to_video(args: argparse.Namespace) -> int:

@@ -1,4 +1,4 @@
-"""Lechuang is the primary creative provider. Video stays NOT_VERIFIED."""
+"""Lechuang is the only Creative Provider. Video stays NOT_VERIFIED."""
 
 from __future__ import annotations
 

@@ -52,12 +52,13 @@ def test_cli_covers_creator_os_without_forging_providers():
 
 def test_single_prompt_compiler_and_no_postiz_or_grok_video():
     compiler = (ROOT / "content/compiler.py").read_text(encoding="utf-8")
-    xai = (ROOT / "creative/providers/xai/client.py").read_text(encoding="utf-8")
+    lechuang = (ROOT / "creative/providers/lechuang/client.py").read_text(encoding="utf-8")
     runtime = (ROOT / "content/runtime.py").read_text(encoding="utf-8")
     persist = (ROOT / "analytics/persistence.py").read_text(encoding="utf-8")
     assert compiler.count("class PromptCompiler") == 1
     assert "Postiz" not in runtime
-    assert "grok-4.6" not in xai
+    assert "grok-4.6" not in lechuang
+    assert not (ROOT / "creative/providers/xai").exists()
     assert "CANONICAL_ANALYTICS_STORE" in persist
     assert "content.models.AnalyticsRecord" in persist
     assert "XHS_HANDOFF" in runtime

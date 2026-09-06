@@ -32,8 +32,12 @@ CREATIVE_TASK_STATES = (
 
 CREATIVE_TASK_ALIASES = {
     "queued": "QUEUED",
+    "pending": "QUEUED",
+    "not_start": "QUEUED",
     "running": "RUNNING",
     "processing": "RUNNING",
+    "in_progress": "RUNNING",
+    "finalizing": "RUNNING",
     "submitted": "SUBMITTED",
     "succeeded": "SUCCEEDED",
     "success": "SUCCEEDED",

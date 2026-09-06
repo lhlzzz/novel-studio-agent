@@ -55,9 +55,13 @@ class CreateImageToImageRequest:
 @dataclass(frozen=True)
 class CreateVideoRequest:
     prompt: str
-    duration_seconds: float | None = None
-    aspect_ratio: str | None = None
-    model: str | None = None
+    duration_seconds: float | None = 6
+    aspect_ratio: str | None = "9:16"
+    model: str | None = "grok-video"
+    seconds: int | None = 6
+    size: str | None = "720x1280"
+    resolution_name: str | None = "720p"
+    preset: str | None = "normal"
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,8 +71,10 @@ class CreateImageToVideoRequest:
     source_asset_id: str | None = None
     source_url: str | None = None
     source_path: str | None = None
-    duration_seconds: float | None = None
-    model: str | None = None
+    duration_seconds: float | None = 6
+    model: str | None = "grok-video"
+    seconds: int | None = 6
+    size: str | None = "720x1280"
     extra: dict[str, Any] = field(default_factory=dict)
 
 

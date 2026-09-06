@@ -36,7 +36,7 @@ def test_single_engines_and_no_forged_providers():
     assets = (ROOT / "content/assets.py").read_text(encoding="utf-8")
     tasks = (ROOT / "content/tasks.py").read_text(encoding="utf-8")
     persist = (ROOT / "analytics/persistence.py").read_text(encoding="utf-8")
-    xai = (ROOT / "creative/providers/xai/client.py").read_text(encoding="utf-8")
+    lechuang = (ROOT / "creative/providers/lechuang/client.py").read_text(encoding="utf-8")
     runtime = (ROOT / "content/runtime.py").read_text(encoding="utf-8")
     cli = (ROOT / "scripts/meiti.py").read_text(encoding="utf-8")
     assert compiler.count("class PromptCompiler") == 1
@@ -44,7 +44,8 @@ def test_single_engines_and_no_forged_providers():
     assert tasks.count("class TaskOS") == 1
     assert persist.count("CANONICAL_ANALYTICS_STORE") >= 1
     assert "Postiz" not in runtime
-    assert "grok-4.6" not in xai
+    assert "grok-4.6" not in lechuang
+    assert not (ROOT / "creative/providers/xai").exists()
     assert "LechuangAdapter(" not in cli
     assert "XAIVideoAdapter(" not in cli
 

@@ -1,7 +1,7 @@
 # Meiti V4.8.1 State
 
 Scope: Xiaohongshu / Douyin / Kuaishou / Xianyu
-Image / video execution: Lechuang is the primary creative provider. Image API is verified. Video stays NOT_VERIFIED. Manual import is fallback only.
+Image / video / image-to-video execution: Lechuang is the only Creative Provider. Image API is verified. Video stays NOT_VERIFIED. Manual import is fallback only.
 Video API: unverified contracts stay NOT_VERIFIED; grok-4.6 is not a video model
 Postiz: REMOVED
 

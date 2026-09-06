@@ -1,6 +1,6 @@
 contract:
   verified: true
-  reason: "XiaoleAI OpenAI-compatible image API: POST /images/generations, response_format=b64_json."
+  reason: "Official XiaoleAI image API: POST /images/generations, response_format=b64_json."
   protocol: openai-compatible
   provider: xiaole
   service: lechuang
@@ -9,10 +9,13 @@ contract:
   default_base_url: https://api.xiaoleai.team/v1
   endpoints:
     images_generations: /images/generations
-    image_created: /image/created
+    videos_create: /videos
+    videos_status: /videos/{video_id}
+    videos_content: /videos/{video_id}/content
   video:
     verified: false
-    reason: "No XiaoleAI/Lechuang video API is present in repository evidence."
+    documented: true
+    reason: "Official async contract POST /videos + GET /videos/{id} + GET /videos/{id}/content. Live verification has not succeeded."
 models:
   gpt-image-2:
     provider: xiaole
@@ -78,3 +81,54 @@ models:
       - text_to_image
       - image_generation
     cost_credits: 1
+  grok-video:
+    provider: xiaole
+    service: lechuang
+    type: video
+    async: true
+    verified: false
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image]
+    image_size: []
+    aspect_ratio: ["1:1", "16:9", "9:16"]
+    duration: ["6", "10", "12", "16", "20"]
+    capabilities:
+      - text_to_video
+      - image_to_video
+      - video_generation
+    cost_credits: 8
+  video-ds-2.0:
+    provider: xiaole
+    service: lechuang
+    type: video
+    async: true
+    verified: false
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image]
+    image_size: []
+    aspect_ratio: ["16:9", "9:16", "1:1"]
+    duration: ["15"]
+    capabilities:
+      - text_to_video
+      - image_to_video
+      - video_generation
+    cost_credits: 8
+  video-ds-2.0-fast:
+    provider: xiaole
+    service: lechuang
+    type: video
+    async: true
+    verified: false
+    input_types: [text, image]
+    output_types: [video]
+    supported_references: [image]
+    image_size: []
+    aspect_ratio: ["16:9", "9:16", "1:1"]
+    duration: ["15"]
+    capabilities:
+      - text_to_video
+      - image_to_video
+      - video_generation
+    cost_credits: 8

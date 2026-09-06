@@ -3,16 +3,17 @@
 Meiti is prompt-first.
 
 Meiti is an AI Creator Operating System: Creator Brain + Prompt Compiler +
-Asset / Continuity / Learning System. External generation can be manual.
-Lechuang is a manual creative execution tool unless a verified API adapter
-exists. Image generation uses the verified Xiaole/Lechuang API adapter.
-Video stays NOT_VERIFIED. The system never fabricates external generation
-evidence. grok-4.6 is the engineering agent for this repository, not a
-video generation model.
+Asset / Continuity / Learning System.
+Lechuang is the only Creative Provider. Image, video, and image-to-video all
+execute through the Xiaole/Lechuang adapter. Image generation uses the
+verified API. Video uses the official async `/videos` contract and stays
+NOT_VERIFIED until live MediaAsset + TechnicalQA evidence exists. The system
+never fabricates external generation evidence. grok-4.6 is the engineering
+agent for this repository, not a video generation model.
 
 ```text
 Meiti = Creator Brain + Prompt Compiler + Asset/Continuity/Learning System
-Lechuang = primary creative provider (verified image API; video NOT_VERIFIED)
+Lechuang = only Creative Provider (verified image API; documented video API, live NOT_VERIFIED)
 Xiaohongshu = Handoff
 Douyin = Native API
 Kuaishou = Native API

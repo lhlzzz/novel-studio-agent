@@ -283,10 +283,9 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
     variants = int(data.get("variant_count") or workflow.quality_policy.get("variants") or 1)
     variants = max(1, min(variants, int(workflow.quality_policy.get("max_variants") or variants)))
     provider_name = str(run.inputs.get("provider_override") or node.provider or "")
-    if capability in {"image_to_video", "text_to_video", "video_generation"}:
-        if provider_name in {"", "lechuang", "xiaole", "xiaoleai"}:
-            provider_name = "xai"
-    elif not provider_name:
+    if provider_name in {"xiaole", "xiaoleai", "xai"}:
+        provider_name = "lechuang"
+    if not provider_name:
         provider_name = "lechuang"
     if run.inputs.get("regen_action") == "change_model":
         provider_name = str(run.inputs.get("model_override") or provider_name)
@@ -366,7 +365,7 @@ def _generate(node, *, workflow, run, data, store, resolver) -> dict[str, Any]:
             "camera": camera,
             "motion": data.get("motion"),
             "seed": run.inputs.get("seed") or (index + 1 if run.inputs.get("regen_action") == "change_variation" else index),
-            "model": node.model or run.inputs.get("model") or ("grok-imagine-video-1.5" if capability in {"image_to_video", "text_to_video"} else None),
+            "model": node.model or run.inputs.get("model") or ("grok-video" if capability in {"image_to_video", "text_to_video", "video_generation"} else None),
             "angle": data.get("angle") or ("three-quarter" if node.type == "multi_angle" else None),
         }
         quote = quote_task(provider, kind, payload)

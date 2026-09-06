@@ -13,7 +13,7 @@ def test_brief_to_package_mock_loop(tmp_path):
     mock = MockGenerationProvider(store=assets)
     engine = CreativeWorkflowEngine(
         store=store,
-        resolver=GenerationProviderResolver(providers={"mock": mock, "lechuang": mock, "xai": mock}, allow_mock=True),
+        resolver=GenerationProviderResolver(providers={"mock": mock, "lechuang": mock}, allow_mock=True),
         allow_mock=True,
     )
     strategy = StrategyAgent().run({

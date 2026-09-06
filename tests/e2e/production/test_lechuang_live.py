@@ -11,7 +11,7 @@ def test_lechuang_live_is_blocked_without_key():
     if ready:
         assert adapter.has_verified("text_to_image")
         with pytest.raises(UnsupportedCapability):
-            adapter.generate_video({"prompt": "nope"})
+            adapter.extend_video({"prompt": "nope"})
         return
     assert "XIAOLEAI_API_KEY" in reason or reason
 
@@ -19,5 +19,6 @@ def test_lechuang_live_is_blocked_without_key():
 def test_video_stays_not_verified():
     adapter = LechuangAdapter()
     status = adapter.capability_status("text_to_video")
-    assert status["status"] == "NOT_VERIFIED"
+    assert status["status"] in {"NOT_VERIFIED", "CONFIGURED"}
     assert VIDEO_NOT_VERIFIED in status["reason"]
+    assert status["verified"] is False

@@ -123,13 +123,16 @@ def test_v43_doctor_keeps_unverified_live_paths_blocked():
     creative_e2e = check_real_creative_e2e()["status"]
     assert creative_e2e in {"PASS", "BLOCKED", "BLOCKED_EXTERNAL"}
     assert check_real_distribution_e2e()["status"] in {"BLOCKED", "BLOCKED_EXTERNAL"}
-    from creative.providers.xai.adapter import XAIVideoAdapter
-    from creative.providers.xai.client import VIDEO_MODEL
-    video = XAIVideoAdapter().capability_status("text_to_video")
-    assert video["status"] == "NOT_VERIFIED"
-    assert VIDEO_MODEL == "grok-imagine-video-1.5"
-    lechuang_video = LechuangAdapter().capability_status("text_to_video")
-    assert lechuang_video["status"] == "NOT_VERIFIED"
+    from creative.providers.lechuang.client import DEFAULT_VIDEO_MODEL
+    from creative.providers.resolver import GenerationProviderResolver
+    resolver = GenerationProviderResolver(allow_mock=False)
+    assert set(resolver.providers) == {"lechuang"}
+    video = LechuangAdapter().capability_status("text_to_video")
+    i2v = LechuangAdapter().capability_status("image_to_video")
+    assert video["status"] in {"NOT_VERIFIED", "CONFIGURED"}
+    assert video["verified"] is False
+    assert i2v["verified"] is False
+    assert DEFAULT_VIDEO_MODEL == "grok-video"
 
 
 def test_retry_policy():

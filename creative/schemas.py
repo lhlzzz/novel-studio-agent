@@ -248,7 +248,13 @@ def map_task_status(status: str) -> str:
     raw = str(status or "queued").strip()
     lookup = {
         "queued": "QUEUED",
+        "pending": "QUEUED",
+        "not_start": "QUEUED",
         "running": "RUNNING",
+        "processing": "RUNNING",
+        "in_progress": "RUNNING",
+        "finalizing": "RUNNING",
+        "completed": "SUCCEEDED",
         "submitted": "SUBMITTED",
         "succeeded": "SUCCEEDED",
         "success": "SUCCEEDED",
